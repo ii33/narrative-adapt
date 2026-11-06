@@ -18,8 +18,8 @@ def acceptance(monkeypatch):
 
 
 def slices(module):
-    return [{'id': 'SRC1-SL1', 'start': 0, 'end': module.BOUNDARY},
-        {'id': 'SRC1-SL2', 'start': module.BOUNDARY, 'end': len(module.TEXT)}]
+    return [{'id': 'SRC1-SL1', 'source_id': 'SRC1', 'title': '来客', 'start': 0, 'end': module.BOUNDARY, 'length': module.BOUNDARY},
+        {'id': 'SRC1-SL2', 'source_id': 'SRC1', 'title': '归途', 'start': module.BOUNDARY, 'end': len(module.TEXT), 'length': len(module.TEXT) - module.BOUNDARY}]
 
 
 def sdk_pair(name, call_id, result, *, args=None, is_error=False):
@@ -30,23 +30,25 @@ def sdk_pair(name, call_id, result, *, args=None, is_error=False):
             'content': [{'type': 'text', 'text': json.dumps(result)}]}}}]
 
 
-def successful_rows(module, source_id='SRC1', parts=None):
+def successful_rows(module, source_id='SRC1', parts=None, *, source_text=None, initial_slices=None, requested=None):
     parts = parts if parts is not None else slices(module)
+    text = module.TEXT if source_text is None else source_text
+    initial_slices = [] if initial_slices is None else initial_slices
     rows = sdk_pair('list_sources', 'sources', {'sources': [
-        {'id': source_id, 'title': '两章原文工具验收', 'chars': len(module.TEXT)}]}, args={})
+        {'id': source_id, 'title': '两章原文工具验收', 'chars': len(text)}]}, args={})
     rows += sdk_pair('read_source', 'source', {'id': source_id, 'title': '两章原文工具验收',
-        'chars': len(module.TEXT), 'start': 0, 'text': module.TEXT},
-        args={'source_id': source_id, 'start': 0, 'length': len(module.TEXT)})
-    rows += sdk_pair('list_source_slices', 'existing', {'source_id': source_id, 'slices': []},
+        'chars': len(text), 'start': 0, 'text': text},
+        args={'source_id': source_id, 'start': 0, 'length': len(text)})
+    rows += sdk_pair('list_source_slices', 'existing', {'source_id': source_id, 'slices': initial_slices},
         args={'source_id': source_id})
-    requested = [{'title': '来客' if i == 0 else '归途', 'start': part['start'], 'end': part['end']}
-        for i, part in enumerate(parts)]
+    requested = requested if requested is not None else [
+        {key: part[key] for key in ('title', 'start', 'end')} for part in parts]
     rows += sdk_pair('create_source_slices', 'create', {'source_id': source_id, 'slices': parts,
-        'status': 'accepted', 'submission_status': 'committed'},
+        'status': 'accepted', 'submission_status': 'committed', 'validation_status': 'valid', 'problems': []},
         args={'source_id': source_id, 'slices': requested})
     # Both calls may be issued together; completion order need not equal call order.
     pairs = [sdk_pair('read_source_slice', f'read-{i}', part | {
-        'source_id': source_id, 'text': module.TEXT[part['start']:part['end']]},
+        'source_id': source_id, 'text': text[part['start']:part['end']]},
         args={'source_id': source_id, 'slice_id': part['id']}) for i, part in enumerate(parts)]
     return rows + [pair[0] for pair in pairs] + [pair[1] for pair in reversed(pairs)]
 
@@ -253,3 +255,65 @@ def test_valid_unique_source_defaults_and_segmented_reads(acceptance, source_rea
             if row['data']['message'] is message(rows, 'create'))
         rows[create_index:create_index] = continuation
     assert all(acceptance.assess_sdk(rows, 'SRC1', slices(acceptance))[0].values())
+
+
+def test_generic_three_slices_nonempty_initial_and_unordered_duplicate_requests(acceptance):
+    text, sid = '甲章。乙章😀。丙章结束。', 'source-independent'
+    stops = [0, 3, 7, len(text)]
+    parts = [{'id': f'part-{i}', 'source_id': sid, 'title': f'部分{i}',
+        'start': stops[i], 'end': stops[i + 1], 'length': stops[i + 1] - stops[i]} for i in range(3)]
+    initial = [parts[0]]
+    request = [{key: part[key] for key in ('title', 'start', 'end')} for part in reversed(parts)]
+    request.append(request[0] | {'title': '  ' + request[0]['title'] + '  '})
+    rows = successful_rows(acceptance, sid, parts, source_text=text, initial_slices=initial, requested=request)
+    checks, _ = acceptance.assess_sdk(rows, sid, parts, source_text=text, initial_slices=initial)
+    assert all(checks.values()), checks
+
+
+@pytest.mark.parametrize('case', ['unknown_argument', 'bool_read_start', 'bool_create_start',
+    'wrong_title', 'unknown_slice_field', 'receipt_error', 'receipt_problems', 'missing_validation',
+    'missing_read_source_id', 'conflicting_json', 'wrong_source_binding'])
+def test_strict_arguments_and_unambiguous_receipt(acceptance, case):
+    rows = successful_rows(acceptance)
+    if case in {'unknown_argument', 'bool_read_start'}:
+        args = arguments(rows, 'source')
+        args['unexpected' if case == 'unknown_argument' else 'start'] = False
+        set_arguments(rows, 'source', args)
+    elif case in {'bool_create_start', 'wrong_title', 'unknown_slice_field'}:
+        args = arguments(rows, 'create')
+        args['slices'][0].update({'bool_create_start': {'start': False}, 'wrong_title': {'title': 'different'},
+            'unknown_slice_field': {'surprise': 1}}[case])
+        set_arguments(rows, 'create', args)
+    elif case in {'receipt_error', 'receipt_problems', 'missing_validation'}:
+        value = response_value(rows, 'create')
+        if case == 'missing_validation':
+            value.pop('validation_status')
+        else:
+            value['error' if case == 'receipt_error' else 'problems'] = 'contradiction'
+        set_response(rows, 'create', value)
+    elif case == 'missing_read_source_id':
+        value = response_value(rows, 'read-1')
+        value.pop('source_id')
+        set_response(rows, 'read-1', value)
+    elif case == 'conflicting_json':
+        message(rows, 'create', response=True)['content'].append({'type': 'text', 'text': '{"status":"staged"}'})
+    else:
+        message(rows, 'create', response=True)['source'] = {'kind': 'tool', 'callId': 'different-call'}
+    assert not all(acceptance.assess_sdk(rows, 'SRC1', slices(acceptance))[0].values())
+
+
+@pytest.mark.parametrize('case', ['duplicate_id', 'empty_id', 'bool_range', 'bad_range', 'wrong_source'])
+def test_invalid_database_expected_records_fail_closed(acceptance, case):
+    rows = successful_rows(acceptance)
+    parts = slices(acceptance)
+    if case == 'duplicate_id':
+        parts[1]['id'] = parts[0]['id']
+    elif case == 'empty_id':
+        parts[0]['id'] = ''
+    elif case == 'bool_range':
+        parts[0]['start'] = False
+    elif case == 'bad_range':
+        parts[0]['end'] = len(acceptance.TEXT) + 1
+    else:
+        parts[0]['source_id'] = 'wrong'
+    assert not all(acceptance.assess_sdk(rows, 'SRC1', parts)[0].values())
