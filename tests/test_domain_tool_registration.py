@@ -4,7 +4,6 @@ import pytest
 from narrative import adaptation_tools, asset_tools, tool_api
 from narrative.graph_operations import GraphOperations
 
-
 EXPECTED_ADAPTATION_TOOLS = {
     "adaptation_snapshot", "check_adaptation", "load_project_style", "save_project_style",
     "load_prompt_settings", "save_prompt_override", "import_adaptation_candidates",
