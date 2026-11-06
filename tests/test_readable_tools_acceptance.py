@@ -155,3 +155,33 @@ def test_staged_only_with_empty_body_fails_without_crashing(project, tmp_path, m
     assert not checks["one_real_action"] and not checks["readable_scene_and_block"]
     assert not checks["exact_target_submit"]
     assert not report["readable_id_evidence"]["successful_submit_arguments"]
+
+
+@pytest.mark.parametrize("result", [
+    {"status": "accepted", "validation_status": "valid"},
+    {"status": "accepted", "submission_status": "invalid", "validation_status": "valid"},
+    {"status": "staged", "submission_status": [], "validation_status": "invalid"},
+    {"status": "staged", "submission_status": {}, "validation_status": "invalid"},
+    None,
+])
+def test_failed_step_with_inconsistent_evidence_fails_closed(project, tmp_path, monkeypatch, result):
+    validator, ops, fixture, calls, steps, audit, _before, _after = evidence(project, tmp_path, monkeypatch)
+    unexpected = {"tool": "submit_script_unit", "args": steps[1]["args"], "ok": False, "result": result}
+    (audit / "task.json").write_text(json.dumps({"steps": [*steps, unexpected]}), encoding="utf-8")
+    report = {"audit_directory": str(audit)}
+    checks = validator.validate(ops, fixture, ops.read_screenplay(fixture["screenplay_id"]), calls, report)
+    assert not checks["all_submit_steps_classified"]
+    assert not all(checks.values())
+    assert report["readable_id_evidence"]["unclassified_submit_attempts"] == [unexpected]
+
+
+def test_actual_tool_error_is_classified_as_rejected(project, tmp_path, monkeypatch):
+    validator, ops, fixture, calls, steps, audit, _before, _after = evidence(project, tmp_path, monkeypatch)
+    entry = layout(ops.project_info().path).entry
+    failed = assistant._call(entry, "submit_script_unit", steps[1]["args"])
+    assert failed["ok"] is False and failed.get("error") and "result" not in failed
+    (audit / "task.json").write_text(json.dumps({"steps": [*steps, failed]}), encoding="utf-8")
+    report = {"audit_directory": str(audit)}
+    checks = validator.validate(ops, fixture, ops.read_screenplay(fixture["screenplay_id"]), calls, report)
+    assert checks["all_submit_steps_classified"]
+    assert report["readable_id_evidence"]["rejected_submit_attempts"] == [failed]

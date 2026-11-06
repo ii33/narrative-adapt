@@ -52,7 +52,8 @@ def validate(ops, fixture, screenplay, calls, report):
                      "span_fingerprint", "context_fingerprint", "plan_fingerprint", "reason"}
     for step in submit_steps:
         result = step.get("result")
-        if step.get("ok") is False and not (isinstance(result, dict) and result.get("submission_status") in {"staged", "committed"}):
+        if (step.get("ok") is False and "result" not in step
+                and isinstance(step.get("error"), str) and step["error"].strip()):
             buckets["rejected"].append(step)
             continue
         args = step.get("args")
