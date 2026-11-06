@@ -244,10 +244,13 @@ def test_resident_writing_guard_receives_decoded_copy_while_audit_keeps_model_re
         assert seen_by_guard[0]["span_fingerprint"] == ops.read_script_unit_context(unit_id)["span_fingerprint"]
         metadata = audit["writing_task_metadata"]
         assert audit["writing_prompt_version"] == native_bridge.SCREENPLAY_WRITING_PROMPT_VERSION
-        assert audit["prompt_config"]["texts"]["writing"] in instructions[0]
-        assert native_bridge.SCREENPLAY_SCENE_TABLE_RULES not in instructions[0]
-        assert metadata["task_id"] not in instructions[0]
-        assert metadata["manifest_ref"] not in instructions[0]
+        assert isinstance(instructions[0], list)
+        assert all(block.get("type") == "text" and isinstance(block.get("text"), str) for block in instructions[0])
+        instruction_text = "\n".join(block["text"] for block in instructions[0])
+        assert audit["prompt_config"]["texts"]["writing"] in instruction_text
+        assert native_bridge.SCREENPLAY_SCENE_TABLE_RULES not in instruction_text
+        assert metadata["task_id"] not in instruction_text
+        assert metadata["manifest_ref"] not in instruction_text
         assert "task_id" not in step["args"] and "manifest_ref" not in step["args"]
         from narrative.screenplay_store import read_context
         from narrative.tool_execution_context import current_tool_execution_metadata
@@ -263,7 +266,11 @@ def test_resident_writing_guard_receives_decoded_copy_while_audit_keeps_model_re
         ui.wait(lambda: sum(kind == "assistant" for kind, _ in ui.results) > previous_results)
         state, _ = read_context(ops)
         basis = next(row for row in state["script_writing_bases"].values() if row["target_id"] == unit_id)
-        assert basis["task_id"] is None and basis["manifest_ref"] is None
+        second_result = [payload for kind, payload in ui.results if kind == "assistant"][-1]
+        second_audit = json.loads((Path(second_result["audit_directory"]) / "task.json").read_text(encoding="utf-8"))
+        assert second_audit["task_id"] != audit["task_id"]
+        assert basis["task_id"] == second_audit["task_id"]
+        assert basis["manifest_ref"] == str(Path(second_result["audit_directory"]) / "task.json")
         assert current_tool_execution_metadata() == {}
         assert not ui.errors
 

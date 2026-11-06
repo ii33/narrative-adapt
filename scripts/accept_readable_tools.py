@@ -46,8 +46,17 @@ def validate(ops, fixture, screenplay, calls, report):
         parsed.append((name, args))
     attempts = [args for name, args in parsed if name == "submit_script_unit"]
     audit = json.loads((Path(report["audit_directory"]) / "task.json").read_text(encoding="utf-8"))
-    submitted = [step["args"] for step in audit.get("steps", [])
-                 if step.get("tool") == "submit_script_unit" and step.get("ok") is True]
+    submit_steps = [step for step in audit.get("steps", []) if step.get("tool") == "submit_script_unit"]
+    committed = [step for step in submit_steps if step.get("ok") is True
+                 and isinstance(step.get("result"), dict)
+                 and step["result"].get("status") == "accepted"
+                 and step["result"].get("submission_status") == "committed"
+                 and step["result"].get("validation_status") == "valid"]
+    staged = [step for step in submit_steps if step.get("ok") is True
+              and isinstance(step.get("result"), dict)
+              and step["result"].get("status") == "staged"
+              and step["result"].get("submission_status") == "staged"]
+    submitted = [step["args"] for step in committed]
     allowed = {"submit_script_unit"}
     writes = [(name, args) for name, args in parsed if name not in TOOLS or TOOLS[name].writes]
     raw = json.dumps(attempts, ensure_ascii=False)
@@ -63,8 +72,8 @@ def validate(ops, fixture, screenplay, calls, report):
     basis = read_context(ops)[0]["script_writing_bases"].get(unit.get("body_basis_id"), {})
     report["readable_id_evidence"] = {"cards": cards, "assets": assets, "unit": unit,
         "raw_submit_attempts": attempts, "successful_submit_arguments": submitted, "write_calls": writes,
-        "rejected_submit_attempts": [step for step in audit.get("steps", [])
-            if step.get("tool") == "submit_script_unit" and step.get("ok") is False]}
+        "staged_submit_attempts": staged,
+        "rejected_submit_attempts": [step for step in submit_steps if step.get("ok") is False]}
     return {"one_real_action": len(unit["blocks"]) == 1 and unit["blocks"][0]["type"] == "action",
         "readable_scene_and_block": unit["id"].startswith("unit-") and unit["blocks"][0]["id"].startswith("block-"),
         "material_card_readable": len(cards) == 1 and "-card-" in cards[0]["id"],

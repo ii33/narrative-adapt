@@ -9,7 +9,7 @@ import pytest
 from test_screenplay_writing import project as project
 from test_screenplay_writing import table
 
-from narrative import tool_api
+from narrative import assistant, tool_api
 from narrative.project_package import layout
 from narrative.tool_execution_context import bind_tool_execution_metadata
 
@@ -26,20 +26,29 @@ def evidence(project, tmp_path, monkeypatch):
     args = {key: context[key] for key in ("expected_plan_revision", "expected_body_revision", "span_fingerprint", "context_fingerprint", "plan_fingerprint")}
     args.update(unit_id=unit["id"], blocks=[{"type": "action", "payload": {"text": "甲等待。"}}], reason="合成工具证据")
     malformed = args | {"blocks": [{"type": "action", "text": "甲等待。"}]}
-    with pytest.raises(tool_api.ToolError):
-        tool_api.call("submit_script_unit", malformed, project=entry)
+    before = ops.read_script_unit_context(unit["id"])
+    staged_step = assistant._call(entry, "submit_script_unit", malformed)
+    staged = staged_step["result"]
+    assert staged_step["ok"] is True
+    assert staged["status"] == staged["submission_status"] == "staged"
+    assert staged["validation_status"] == "invalid"
+    assert {tuple(item["path"]) for item in staged["problems"]} >= {("blocks", 0, "payload"), ("blocks", 0, "text")}
+    assert ops.read_script_unit_context(unit["id"])["expected_body_revision"] == before["expected_body_revision"]
     audit = tmp_path / "synthetic-task"
     audit.mkdir()
     with bind_tool_execution_metadata({"task_id": audit.name, "manifest_ref": str(audit / "writing-task.json")}):
-        result = tool_api.call("submit_script_unit", args, project=entry)
+        committed_step = assistant._call(entry, "submit_script_unit", args)
+    result = committed_step["result"]
+    assert committed_step["ok"] is True
+    assert result["status"] == "accepted" and result["submission_status"] == "committed"
+    assert result["validation_status"] == "valid"
     calls = [{"name": "submit_script_unit", "arguments": json.dumps(value)} for value in (malformed, args)]
-    steps = [{"tool": "submit_script_unit", "args": malformed, "ok": False, "error": "payload required"},
-             {"tool": "submit_script_unit", "args": args, "ok": True, "result": result}]
+    steps = [staged_step, committed_step]
     fixture = {"person_id": "P1", "unit_id": unit["id"], "screenplay_id": screenplay_id}
     return validator, ops, fixture, calls, steps, audit
 
 
-def test_same_task_rejected_format_attempt_does_not_count_as_second_commit(project, tmp_path, monkeypatch):
+def test_same_task_staged_content_does_not_count_as_second_commit(project, tmp_path, monkeypatch):
     validator, ops, fixture, calls, steps, audit = evidence(project, tmp_path, monkeypatch)
     (audit / "task.json").write_text(json.dumps({"steps": steps}), encoding="utf-8")
     report = {"audit_directory": str(audit)}
@@ -47,7 +56,8 @@ def test_same_task_rejected_format_attempt_does_not_count_as_second_commit(proje
     assert all(checks.values()), checks
     assert len(report["readable_id_evidence"]["raw_submit_attempts"]) == 2
     assert len(report["readable_id_evidence"]["successful_submit_arguments"]) == 1
-    assert len(report["readable_id_evidence"]["rejected_submit_attempts"]) == 1
+    assert len(report["readable_id_evidence"]["staged_submit_attempts"]) == 1
+    assert not report["readable_id_evidence"]["rejected_submit_attempts"]
 
 
 def test_final_body_alone_cannot_replace_successful_tool_evidence(project, tmp_path, monkeypatch):
