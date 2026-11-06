@@ -46,8 +46,31 @@ def validate(ops, fixture, screenplay, calls, report):
         parsed.append((name, args))
     attempts = [args for name, args in parsed if name == "submit_script_unit"]
     audit = json.loads((Path(report["audit_directory"]) / "task.json").read_text(encoding="utf-8"))
-    submitted = [step["args"] for step in audit.get("steps", [])
-                 if step.get("tool") == "submit_script_unit" and step.get("ok") is True]
+    submit_steps = [step for step in audit.get("steps", []) if step.get("tool") == "submit_script_unit"]
+    buckets = {"committed": [], "staged": [], "rejected": [], "unclassified": []}
+    required_args = {"unit_id", "blocks", "expected_plan_revision", "expected_body_revision",
+                     "span_fingerprint", "context_fingerprint", "plan_fingerprint", "reason"}
+    for step in submit_steps:
+        result = step.get("result")
+        if (step.get("ok") is False and "result" not in step
+                and isinstance(step.get("error"), str) and step["error"].strip()):
+            buckets["rejected"].append(step)
+            continue
+        args = step.get("args")
+        if (step.get("ok") is True and "error" not in step and isinstance(result, dict) and isinstance(args, dict)
+                and required_args <= args.keys()):
+            if (result.get("status") == "accepted" and result.get("submission_status") == "committed"
+                    and result.get("validation_status") == "valid"):
+                buckets["committed"].append(step)
+                continue
+            if (result.get("status") == "staged" and result.get("submission_status") == "staged"
+                    and result.get("validation_status") == "invalid"):
+                buckets["staged"].append(step)
+                continue
+        buckets["unclassified"].append(step)
+    committed, staged = buckets["committed"], buckets["staged"]
+    rejected, unclassified = buckets["rejected"], buckets["unclassified"]
+    submitted = [step["args"] for step in committed]
     allowed = {"submit_script_unit"}
     writes = [(name, args) for name, args in parsed if name not in TOOLS or TOOLS[name].writes]
     raw = json.dumps(attempts, ensure_ascii=False)
@@ -63,10 +86,11 @@ def validate(ops, fixture, screenplay, calls, report):
     basis = read_context(ops)[0]["script_writing_bases"].get(unit.get("body_basis_id"), {})
     report["readable_id_evidence"] = {"cards": cards, "assets": assets, "unit": unit,
         "raw_submit_attempts": attempts, "successful_submit_arguments": submitted, "write_calls": writes,
-        "rejected_submit_attempts": [step for step in audit.get("steps", [])
-            if step.get("tool") == "submit_script_unit" and step.get("ok") is False]}
+        "staged_submit_attempts": staged,
+        "rejected_submit_attempts": rejected,
+        "unclassified_submit_attempts": unclassified}
     return {"one_real_action": len(unit["blocks"]) == 1 and unit["blocks"][0]["type"] == "action",
-        "readable_scene_and_block": unit["id"].startswith("unit-") and unit["blocks"][0]["id"].startswith("block-"),
+        "readable_scene_and_block": bool(unit["blocks"]) and unit["id"].startswith("unit-") and unit["blocks"][0]["id"].startswith("block-"),
         "material_card_readable": len(cards) == 1 and "-card-" in cards[0]["id"],
         "asset_readable": len(assets) == 1 and assets[0]["id"].startswith("material-"),
         "only_authorized_writes": all(name in allowed for name, _args in writes),
@@ -74,6 +98,7 @@ def validate(ops, fixture, screenplay, calls, report):
             for name, args in writes),
         "only_target_scene": len(screenplay["segments"]) == 1 and len(screenplay["segments"][0]["units"]) == 1 and unit["id"] == fixture["unit_id"],
         "exact_target_submit": len(submitted) == 1 and submitted[0].get("unit_id") == fixture["unit_id"],
+        "all_submit_steps_classified": not unclassified,
         "successful_submit_is_original_model_call": bool(submitted) and all(args in attempts for args in submitted),
         "submitted_body_matches_saved": len(submitted) == 1 and blocks == [{"type": b["type"], "payload": b["payload"]} for b in unit["blocks"]],
         "submitted_short_basis_refs": bool(submitted) and handles_ok,
