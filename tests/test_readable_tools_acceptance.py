@@ -185,3 +185,15 @@ def test_actual_tool_error_is_classified_as_rejected(project, tmp_path, monkeypa
     checks = validator.validate(ops, fixture, ops.read_screenplay(fixture["screenplay_id"]), calls, report)
     assert checks["all_submit_steps_classified"]
     assert report["readable_id_evidence"]["rejected_submit_attempts"] == [failed]
+
+
+def test_success_result_with_error_is_unclassified(project, tmp_path, monkeypatch):
+    validator, ops, fixture, calls, steps, audit, _before, _after = evidence(project, tmp_path, monkeypatch)
+    inconsistent = dict(steps[1], error="synthetic failure")
+    (audit / "task.json").write_text(json.dumps({"steps": [steps[0], inconsistent]}), encoding="utf-8")
+    report = {"audit_directory": str(audit)}
+    checks = validator.validate(ops, fixture, ops.read_screenplay(fixture["screenplay_id"]), calls, report)
+    assert not checks["all_submit_steps_classified"]
+    assert not all(checks.values())
+    assert report["readable_id_evidence"]["unclassified_submit_attempts"] == [inconsistent]
+    assert not report["readable_id_evidence"]["successful_submit_arguments"]

@@ -57,7 +57,7 @@ def validate(ops, fixture, screenplay, calls, report):
             buckets["rejected"].append(step)
             continue
         args = step.get("args")
-        if (step.get("ok") is True and isinstance(result, dict) and isinstance(args, dict)
+        if (step.get("ok") is True and "error" not in step and isinstance(result, dict) and isinstance(args, dict)
                 and required_args <= args.keys()):
             if (result.get("status") == "accepted" and result.get("submission_status") == "committed"
                     and result.get("validation_status") == "valid"):
