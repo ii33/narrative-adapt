@@ -29,7 +29,8 @@ def event_location_issues(objects, records, *, snapshot=None):
         identifier = event['id']
         context = event.get('context_id', 'canon')
         rows = [r for r in records if r.get('kind') == 'property_change'
-                and r.get('node_id') == identifier and r.get('property_id') in location_ids
+                and r.get('node_id') == identifier and isinstance(r.get('property_id'), str)
+                and r['property_id'] in location_ids
                 and r.get('scope', 'world') == 'world' and not r.get('holder_id')
                 and r.get('context_id', 'canon') == context]
         def report(code, message, related, property_id=None, *, identifier=identifier, event=event):

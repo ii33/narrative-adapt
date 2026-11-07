@@ -383,21 +383,88 @@ def _launch_command(ops, bound, command, cwd, encoding, background, operation, a
         raise ValueError(_redact(str(error), bound.secrets)) from None
 
 
-def _command_secret_bytes(entry):
-    patterns = set(_secret_bytes(entry.bound.secrets))
-    encodings = {'gbk', 'gb18030', 'big5'} | ({entry.encoding} if entry.encoding != 'auto' else set())
-    for secret in entry.bound.secrets:
+class _CommandByteRedactor:
+    """Keep retained output decodable without writing secret bytes to disk."""
+
+    def __init__(self, secrets, encoding):
+        self.secrets = secrets
+        self.encoding = encoding
+        self.buffer = b''
+        self.pattern = None
+        self.replacements = {}
+        self.keep = 0
+        self.started = False
+        self.width = 1
+        self.offset = 0
+
+    def _start(self):
+        # UTF-32LE shares UTF-16LE's prefix, so inspect four bytes first.
+        boms = ((codecs.BOM_UTF32_LE, 'utf-32-le'),
+                (codecs.BOM_UTF32_BE, 'utf-32-be'),
+                (codecs.BOM_UTF8, 'utf-8'),
+                (codecs.BOM_UTF16_LE, 'utf-16-le'),
+                (codecs.BOM_UTF16_BE, 'utf-16-be'))
+        bom, codec = next(((bom, codec) for bom, codec in boms if self.buffer.startswith(bom)), (b'', None))
+        self.buffer = self.buffer[len(bom):]
+        if codec is not None:
+            encodings = [codec]
+            self.width = 4 if codec.startswith('utf-32') else 2 if codec.startswith('utf-16') else 1
+        else:
+            encodings = ['utf-8', 'utf-16-le', 'utf-16-be', 'utf-32-le', 'utf-32-be', 'gbk', 'gb18030', 'big5']
+            if self.encoding != 'auto':
+                codec = codecs.lookup(self.encoding).name
+                # These codecs write a BOM, which is not part of an in-stream match.
+                codec = {'utf-8-sig': 'utf-8', 'utf-16': 'utf-16-' + ('le' if sys.byteorder == 'little' else 'be'),
+                         'utf-32': 'utf-32-' + ('le' if sys.byteorder == 'little' else 'be')}.get(codec, codec)
+                encodings.insert(0, codec)
         for encoding in encodings:
-            try:
-                patterns.add(secret.encode(encoding, errors='strict'))
-            except (UnicodeError, LookupError):
-                pass
-    return patterns
+            for secret in self.secrets:
+                try:
+                    value = secret.encode(encoding, errors='strict')
+                    marker = '[REDACTED]'.encode(encoding, errors='strict')
+                except (UnicodeError, LookupError):
+                    continue
+                if value:
+                    self.replacements.setdefault(value, marker)
+        if self.replacements:
+            # Longest first, and replace only original bytes, never inserted markers.
+            values = sorted(self.replacements, key=lambda value: (-len(value), value))
+            self.pattern = re.compile(b'|'.join(re.escape(value) for value in values))
+            self.keep = len(values[0]) - 1
+        self.started = True
+        return bom
+
+    def feed(self, chunk, final=False):
+        self.buffer += chunk
+        prefix = b''
+        if not self.started:
+            if len(self.buffer) < 4 and not final:
+                return b''
+            prefix = self._start()
+        if self.pattern is None:
+            result, self.buffer = self.buffer, b''
+            return prefix + result
+        boundary = len(self.buffer) if final else max(0, len(self.buffer) - self.keep)
+        parts, position, cursor = [prefix], 0, 0
+        while (match := self.pattern.search(self.buffer, cursor)) is not None:
+            if match.start() >= boundary:
+                break
+            if (self.offset + match.start()) % self.width:
+                # An unaligned byte hit is not a character in BOM-known UTF-16/32.
+                cursor = match.start() + 1
+                continue
+            parts.extend((self.buffer[position:match.start()], self.replacements[match.group()]))
+            position = cursor = match.end()
+        boundary = max(boundary, position)
+        parts.append(self.buffer[position:boundary])
+        self.buffer = self.buffer[boundary:]
+        self.offset += boundary
+        return b''.join(parts)
 
 
 def _collect(entry):
     decoder = codecs.getincrementaldecoder('utf-8' if entry.encoding == 'auto' else entry.encoding)(errors='strict')
-    byte_redactor = _StreamRedactor(tuple(value.decode('latin1') for value in _command_secret_bytes(entry)))
+    byte_redactor = _CommandByteRedactor(entry.bound.secrets, entry.encoding)
     decoding_failed = False
     redactor = _StreamRedactor(entry.bound.secrets)
     try:
@@ -405,7 +472,7 @@ def _collect(entry):
         assert entry.raw_path is not None
         with entry.path.open('w', encoding='utf-8', newline='') as output, entry.raw_path.open('wb') as raw:
             while chunk := os.read(entry.process.stdout.fileno(), 8192):
-                raw.write(byte_redactor.feed(chunk.decode('latin1')).encode('latin1'))
+                raw.write(byte_redactor.feed(chunk))
                 raw.flush()
                 if not decoding_failed:
                     try:
@@ -413,7 +480,7 @@ def _collect(entry):
                         output.flush()
                     except UnicodeError:
                         decoding_failed = True
-            raw.write(byte_redactor.feed('', final=True).encode('latin1'))
+            raw.write(byte_redactor.feed(b'', final=True))
             if not decoding_failed:
                 try:
                     output.write(redactor.feed(decoder.decode(b'', final=True), final=True))

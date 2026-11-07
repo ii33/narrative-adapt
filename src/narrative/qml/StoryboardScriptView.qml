@@ -4,13 +4,15 @@ import QtQuick.Layouts
 
 SplitView {
     id: script
-    SubmissionState{id:contentSubmission;allowedActions:["update_shot"];authoredFields:["description", "shot_language", "sound_notes", "visual_elements"];identityKey:script.loadedId;owner:script;operation:"apply_storyboard_changes";target:({unit_id:script.desk.unitId||null});onRestoreRequested:function(a){var c=a.changes[0];script.loadedId=c.shot_id;script.loadedRevision=a.revision;description.text=c.description||"";language.text=c.shot_language||"";soundNotes.text=c.sound_notes||"";script.elements=c.visual_elements||[]}}
+    SubmissionState{id:contentSubmission;allowedActions:["update_shot"];authoredFields:["description", "shot_language", "sound_notes", "visual_elements"];identityKey:script.loadedId;owner:script;operation:"apply_storyboard_changes";target:({unit_id:script.desk.unitId||null});onRestoreRequested:function(a){var c=a.changes[0];script.loadedId=c.shot_id;script.loadedRevision=a.revision;description.text=c.description||"";language.text=c.shot_language||"";soundNotes.text=c.sound_notes||"";script.elements=script.editElements(c.visual_elements||[]);script.loadedElements=script.authoredElements((script.desk.shots.find(s=>s.id===c.shot_id)||{}).visual_elements||[]);script.elementsConflict=a.revision!==script.desk.board.revision}}
 
     objectName: "storyboardScriptView"
     required property var desk
     property string loadedId: ""
     property int loadedRevision: -1
     property var elements: []
+    property var loadedElements: []
+    property bool elementsConflict: false
     property var drafts: ({})
     property string savingId: ""
     property var elementAction: ({})
@@ -39,18 +41,52 @@ SplitView {
         elementAction=scope;createdElementAsset=({});assetCreate.category=({person:"appearance",prop:"item",set:"location"}[scope.row.kind]);assetCreate.revision=-1
         assetCreateTitle.text=scope.row.name||"";assetCreateDetail.text="";assetCreate.errorText="";assetCreate.open();bridge.loadAssets(assetCreate.category,"","","adaptation")
     }
-    function captureDraft(){if(loadedId)drafts[loadedId]={description:description.text,language:language.text,sound_notes:soundNotes.text,elements:JSON.parse(JSON.stringify(elements))}}
+    function authoredElements(rows){return rows.map(e=>({kind:e.kind,name:e.name,usage:e.usage||"",asset_id:e.asset_id||null}))}
+    function editElements(rows){return rows.map((e,i)=>{
+        const view=(desk.shot.asset_elements||[]).find(v=>v.asset_id&&v.asset_id===e.asset_id)
+        return Object.assign({},e,{asset_id:e.asset_id||null,_draftIndex:i},view?{asset_title:view.asset_title}:{})
+    })}
+    function captureDraft(){if(loadedId)drafts[loadedId]={description:description.text,language:language.text,sound_notes:soundNotes.text,elements:JSON.parse(JSON.stringify(elements)),baseElements:loadedElements,revision:loadedRevision,elementsConflict:elementsConflict}}
+    function reconcileElements(draft,currentRows) {
+        const current=authoredElements(currentRows)
+        if(draft.elementsConflict)return null
+        const base=draft.baseElements,edited=authoredElements(draft.elements)
+        if(JSON.stringify(current)===JSON.stringify(base))return draft.elements
+        if(JSON.stringify(edited)===JSON.stringify(base)||JSON.stringify(edited)===JSON.stringify(current))return editElements(currentRows)
+        // Rows have no persistent IDs. Only a binding-only board change can be
+        // merged into edited elements without guessing their server identity.
+        if(current.length!==base.length||current.some((e,i)=>e.kind!==base[i].kind||e.name!==base[i].name||e.usage!==base[i].usage))return null
+        const merged=JSON.parse(JSON.stringify(draft.elements))
+        for(let i=0;i<current.length;i++){
+            if(current[i].asset_id===base[i].asset_id)continue
+            const matches=merged.filter(e=>e._draftIndex===i)
+            if(matches.length!==1)return null
+            const row=matches[0]
+            if(row.kind!==base[i].kind||((row.asset_id||null)!==base[i].asset_id&&(row.asset_id||null)!==current[i].asset_id))return null
+            row.asset_id=current[i].asset_id;row.asset_title=currentRows[i].asset_title||""
+        }
+        return merged
+    }
+    function reloadElements() {
+        if(loadedId!==desk.shot.id)return
+        loadedElements=authoredElements(desk.shot.visual_elements||[]);elements=editElements(desk.shot.visual_elements||[])
+        loadedRevision=desk.board.revision;elementsConflict=false;captureDraft()
+    }
     function loadDraft() {
         if(savingId&&desk.board.revision!==loadedRevision){delete drafts[savingId];if(loadedId===savingId)loadedId="";savingId=""}
         captureDraft()
-        loadedId=desk.shot.id||"";loadedRevision=desk.board.revision||0
-        const draft=drafts[loadedId]
+        loadedId=desk.shot.id||""
+        const draft=drafts[loadedId],current=editElements(desk.shot.visual_elements||[])
+        const merged=draft?reconcileElements(draft,current):current
+        elementsConflict=merged===null
+        loadedRevision=elementsConflict?draft.revision:desk.board.revision||0
+        loadedElements=elementsConflict?draft.baseElements:authoredElements(current)
         description.text=draft?draft.description:desk.shot.description||"";language.text=draft?draft.language:desk.shot.shot_language||""
         soundNotes.text=draft?draft.sound_notes:desk.shot.sound_notes||""
-        elements=JSON.parse(JSON.stringify(draft?draft.elements:desk.shot.visual_elements||[]))
+        elements=JSON.parse(JSON.stringify(elementsConflict?draft.elements:merged))
     }
     function saveDraft() {
-        if(loadedId!==desk.shot.id||loadedRevision!==desk.board.revision)return
+        if(elementsConflict||loadedId!==desk.shot.id||loadedRevision!==desk.board.revision)return
         savingId=loadedId
         desk.save({op:"update_shot",shot_id:loadedId,description:description.text,shot_language:language.text,sound_notes:soundNotes.text,visual_elements:elements.map(e=>({kind:e.kind,name:e.name,usage:e.usage||"",asset_id:e.asset_id||null}))})
     }
@@ -250,7 +286,9 @@ SplitView {
                 }
             }
             Button { objectName:"storyboardScriptAddElement";text:"添加视觉元素";enabled:description.enabled;onClicked:script.elements=script.elements.concat([{kind:"person",name:"",usage:"",asset_id:null}]) }
-            Button { objectName:"storyboardScriptSave";text:"保存本镜文字与绑定";enabled:description.enabled&&script.loadedRevision===desk.board.revision;onClicked:script.saveDraft() }
+            Label {text:"镜头元素已变化，无法安全合并。元素与文字草稿已保留，请核对后重新载入元素。";visible:script.elementsConflict;wrapMode:Text.Wrap;Layout.fillWidth:true;color:desk.t.warn}
+            Button {objectName:"storyboardReloadDraftElements";text:"放弃元素草稿，载入最新绑定（保留文字）";visible:script.elementsConflict;enabled:description.enabled;onClicked:script.reloadElements()}
+            Button { objectName:"storyboardScriptSave";text:"保存本镜文字与绑定";enabled:description.enabled&&!script.elementsConflict&&script.loadedRevision===desk.board.revision;onClicked:script.saveDraft() }
             Label {text:"本镜声音使用说明"}
             TextArea {id:soundNotes;objectName:"storyboardScriptSoundNotes";enabled:description.enabled;Layout.fillWidth:true;wrapMode:TextEdit.Wrap;placeholderText:"可听性、画外、续音、入点与停顿"}
             Label { text:"声音意图在多镜之间共享；编排中的声音片段负责具体时间。";wrapMode:Text.Wrap;Layout.fillWidth:true;color:desk.t.muted }

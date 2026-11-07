@@ -614,7 +614,9 @@ class WritingOperationsMixin:
                     paths=[path for _key, path in changed_plans], active_scene_count=count)
                 for (key, _path), updated in zip(changed_plans, prepared, strict=True):
                     state['script_units'][key]['plan'] = updated['plan']
-                    state['script_units'][key]['source_reference_origin'] = updated['_source_reference_origin']
+                    # Disabled drafts keep the origin already saved by create/update.
+                    if '_source_reference_origin' in updated:
+                        state['script_units'][key]['source_reference_origin'] = updated['_source_reference_origin']
             if edits:
                 _touch_outline(segment)
             return writing_segment_view(state, adaptation, segment_id) | {"status": "accepted"}

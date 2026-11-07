@@ -120,9 +120,10 @@ def seed(ops):
         {"type": "event", "name": "周川把铜钥匙交给林岚", "scene": "@6", "participants": ["@1", "@2"], "quotes": [second]},
         {"type": "event", "name": "林岚到东仓听见脚步", "scene": "@6", "participants": ["@1"], "quotes": [third]},
     ], "properties": [
-        {"node": "@7", "property": "地点", "value": "@3", "value_type": "node", "scope": "world", "at_event": "@7", "quotes": ["旧车站门口"]},
-        {"node": "@9", "property": "地点", "value": "@4", "value_type": "node", "scope": "world", "at_event": "@9", "quotes": ["东仓"]},
-        {"node": "@5", "property": "持有者", "value": "@1", "value_type": "either", "scope": "world", "at_event": "@8", "quotes": [second]},
+        {"node": "@7", "property": "地点", "op": "set", "value": "@3", "value_type": "node", "scope": "world", "at_event": "@7", "quotes": ["旧车站门口"]},
+        {"node": "@8", "property": "地点", "op": "unknown", "value_type": "node", "scope": "world", "at_event": "@8", "quotes": [second]},
+        {"node": "@9", "property": "地点", "op": "set", "value": "@4", "value_type": "node", "scope": "world", "at_event": "@9", "quotes": ["东仓"]},
+        {"node": "@5", "property": "持有者", "op": "set", "value": "@1", "value_type": "either", "scope": "world", "at_event": "@8", "quotes": [second]},
     ]}
     result = ops.submit_extraction(sid, draft)
     if result["status"] != "accepted":

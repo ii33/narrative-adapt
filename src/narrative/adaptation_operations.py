@@ -301,7 +301,7 @@ def _set_initial_location(state, db, node, value):
            "op": "unknown" if value == "未知" else "set",
            "sequence": max((r["sequence"] for r in state["properties"] if r.get("kind") == "property_change" and r.get("event_id") == node["id"]), default=-1) + 1}
     if value != "未知":
-        row["value"] = value
+        row["value"] = [value] if definition.get("cardinality") == "many" else value
     state["properties"].append(row)
 
 

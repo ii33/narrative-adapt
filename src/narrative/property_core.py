@@ -181,6 +181,12 @@ def _evidence_error(record, sources, lookups=None):
     quote = evidence.get('quote')
     if source is None or not isinstance(quote, str) or not quote:
         return '证据来源或引文无效'
+    # A validated Unicode offset disambiguates identical quotes in separate slices.
+    disclosure = record.get('disclosure')
+    if (isinstance(disclosure, dict) and disclosure.get('source_id') == evidence['source_id']
+            and type(disclosure.get('start')) is int and 0 <= disclosure['start']
+            and source['text'][disclosure['start']:disclosure['start'] + len(quote)] == quote):
+        return None
     if lookups is None:
         lookup = ExactQuoteLookup(source['text'])
     else:
@@ -247,7 +253,7 @@ def validate_records(records, snapshot, existing_records=None, *, sources=None):
             source = sources.get(disclosure.get('source_id')) if isinstance(disclosure, dict) and isinstance(disclosure.get('source_id'), str) else None
             if not source or type(disclosure.get('start')) is not int or not 0 <= disclosure['start'] <= len(source['text']):
                 issues.append(_issue('DISCLOSURE', '披露位置须为合法原文Unicode坐标', rid))
-            elif row.get('evidence') and (row['evidence']['source_id'] != disclosure['source_id'] or source['text'].find(row['evidence']['quote']) != disclosure['start']):
+            elif row.get('evidence') and (row['evidence']['source_id'] != disclosure['source_id'] or source['text'][disclosure['start']:disclosure['start'] + len(row['evidence']['quote'])] != row['evidence']['quote']):
                 issues.append(_issue('DISCLOSURE', '披露位置须匹配逐字证据起点', rid))
         spans = row.get('evidence_spans', [])
         if not isinstance(spans, list):
