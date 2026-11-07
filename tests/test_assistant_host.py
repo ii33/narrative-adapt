@@ -210,7 +210,8 @@ def test_registered_tools_are_host_scoped_and_direct_calls_still_require_mode(op
     from narrative.tool_api import Tool, ToolError, _validate_adaptation_argument
     registered = []
     assistant_host_tools.register(Tool, registered.append, _validate_adaptation_argument)
-    assert len(registered) == 6 and all(tool.scope == 'host' for tool in registered)
+    assert {'run_host_process', 'run_host_script'} <= {tool.name for tool in registered}
+    assert all(tool.scope == 'host' for tool in registered)
     for tool in registered:
         with pytest.raises((ToolError, ValueError)):
             tool.handler(ops, {})

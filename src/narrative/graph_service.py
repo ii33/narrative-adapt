@@ -263,6 +263,8 @@ class GraphService:
                                PropertyStore(self.store).accepted_records())
         merged_graph = snapshot | {"objects": list(merged.values()), "nodes": [row for row in merged.values() if row.get("kind") == "node"]}
         issues.extend(item_possession_issues(list(merged.values()), accepted_properties + (property_records or []), snapshot=merged_graph))
+        from .event_location import event_location_issues
+        issues.extend(event_location_issues(list(merged.values()), accepted_properties + (property_records or []), snapshot=merged_graph))
         groups: dict[str, dict[str, dict]] = defaultdict(dict)
         for item in merged.values():
             groups[item["kind"]][item["id"]] = item

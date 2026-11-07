@@ -122,7 +122,7 @@ Item {
                 var priorId = page.selectedPrompt.id || ""
                 page.promptSettings = payload; page.promptsLoaded = true; page.promptSaving = false
                 for (var index=0;index<(payload.prompts || []).length;++index) if(payload.prompts[index].id===priorId)promptType.currentIndex=index
-                if(payload.saved){page.promptMessage=payload.restored?"已恢复所选提示词默认内容。":"提示词已保存，下次任务生效。";promptEditor.close()}
+                if(payload.saved){page.promptMessage=payload.restored?"已恢复所选提示词默认内容。":priorId==="sketch_style"?"素描风格已保存，后续生成使用新约定；进行中的生成将核对依据。":"提示词已保存，下次任务生效。";promptEditor.close()}
             } else if (kind === "project_key_check") {
                 if(payload.project_path!==(app.project.path||"")||payload.request_token!==page.keyCheckToken)return;
                 page.keyChecking=false;page.keyCheckResult=payload;
@@ -188,7 +188,7 @@ Item {
                 title:"内置提示词"
                 Layout.fillWidth:true
                 contentItem:ColumnLayout {
-                    Label {Layout.fillWidth:true;wrapMode:Text.Wrap;color:page.t.muted;text:"按用途编辑当前工程的提示词。修改从下次任务生效；恢复默认只影响所选项。"}
+                    Label {Layout.fillWidth:true;wrapMode:Text.Wrap;color:page.t.muted;text:page.selectedPrompt.id==="sketch_style"?"分镜格和素描关键帧共用此风格。保存后用于后续生成，进行中的生成会核对风格是否变化。":"按用途编辑当前工程的提示词。修改从下次任务生效；恢复默认只影响所选项。"}
                     ComboBox {id:promptType;objectName:"projectPromptType";Layout.fillWidth:true;model:page.promptSettings.prompts || [];textRole:"label";enabled:page.promptsLoaded&&!page.promptSaving}
                     Label {objectName:"projectPromptDescription";Layout.fillWidth:true;wrapMode:Text.Wrap;color:page.t.body;text:page.selectedPrompt.description || ""}
                     Label {objectName:"projectPromptState";text:page.selectedPrompt.overridden?"当前工程已自定义":"使用默认内容";color:page.t.muted}

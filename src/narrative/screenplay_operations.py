@@ -53,13 +53,17 @@ def _segment_view(state, adaptation, identifier):
     return view | {"span": span, "diagnostics": span["diagnostics"]}
 
 
-def _screenplay_view(state, adaptation, identifier):
+def _screenplay_view(state, adaptation, identifier, *, ops):
     screenplay = require(state, "screenplay", identifier)
     local_timeline = screenplay_timeline(state, adaptation, identifier)
     order = ordered_segment_ids(state, identifier)
     segments = [_segment_view(state, adaptation, key) for key in order]
+    from .screenplay_generation_status import attach_generation_status
+    from .screenplay_scene_policy import screenplay_event_usage
+    usage = attach_generation_status(ops, state, identifier, screenplay_event_usage(local_timeline, segments))
     return {"screenplay": copy.deepcopy(screenplay), "timeline_id": local_timeline["timeline_id"],
             "timeline_revision": local_timeline["revision"], "timeline": local_timeline,
+            "event_usage": usage,
             "episodes": [copy.deepcopy(e) for e in state["script_episodes"].values() if e["screenplay_id"] == identifier],
             "acts": [copy.deepcopy(a) for a in state["script_acts"].values() if a["screenplay_id"] == identifier],
             "structure_entries": [copy.deepcopy(e) for e in state["script_structure_entries"].values() if e["screenplay_id"] == identifier],
@@ -200,14 +204,14 @@ class ScreenplayOperationsMixin:
             state["script_timelines"][local["id"]] = local
             if format == "series":
                 create_episode(state, screenplay["id"], "第1集")
-            return _screenplay_view(state, adaptation, screenplay["id"])
+            return _screenplay_view(state, adaptation, screenplay["id"], ops=self)
         return write_transaction(self, reason, mutate, initialize=True)
 
     def read_screenplay(self, screenplay_id=None):
         state, adaptation = read_context(self)
         if screenplay_id is None:
             return list(copy.deepcopy(state["screenplays"]).values())
-        return _screenplay_view(state, adaptation, screenplay_id)
+        return _screenplay_view(state, adaptation, screenplay_id, ops=self)
 
     @content_write
     def create_script_segment(self, screenplay_id, span_id, title, expected_structure_revision, reason,
@@ -330,7 +334,7 @@ class ScreenplayOperationsMixin:
             screenplay["updated_at"] = now()
             # Validate before constructing a recursively traversed read projection.
             validate_state(state, adaptation)
-            return _screenplay_view(state, adaptation, screenplay_id)
+            return _screenplay_view(state, adaptation, screenplay_id, ops=self)
         return write_transaction(self, reason, mutate)
 
     def check_screenplay(self, screenplay_id) -> dict:
@@ -349,7 +353,7 @@ class ScreenplayOperationsMixin:
         if format not in {"text", "html", "fountain", "json", "pdf", "docx"}:
             raise ValueError("不支持的剧本编译格式")
         state, adaptation = read_context(self)
-        document = _screenplay_view(state, adaptation, screenplay_id)
+        document = _screenplay_view(state, adaptation, screenplay_id, ops=self)
         timeline = screenplay_timeline(state, adaptation, screenplay_id)
         from .compile_settings import read_compile_settings
         with self._store.connect() as db:
@@ -384,7 +388,7 @@ class ScreenplayOperationsMixin:
         if format not in {"text", "json"}:
             raise ValueError("导出格式仅支持text或json")
         state, adaptation = read_context(self)
-        document = _screenplay_view(state, adaptation, screenplay_id)
+        document = _screenplay_view(state, adaptation, screenplay_id, ops=self)
         local_timeline = screenplay_timeline(state, adaptation, screenplay_id)
         diagnostics = _check_snapshot(state, adaptation, screenplay_id)["issues"]
         document["diagnostics"] = diagnostics
@@ -410,6 +414,8 @@ class ScreenplayOperationsMixin:
                         heading = " ".join(str(x) for x in (unit.get("scene_number"), plan.get("interior_exterior"),
                                           plan.get("location_text"), plan.get("time_label")) if x and x != "UNSPECIFIED")
                         lines.extend(["", heading or plan.get("title") or "画面段"])
+                        if unit.get("source_reference_text"):
+                            lines.append("【" + unit["source_reference_text"] + "】")
                         for block in unit.get("blocks", []):
                             payload = block["payload"]
                             text = payload.get("text", "")

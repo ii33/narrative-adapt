@@ -4,6 +4,20 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 
 ## 统一对话
 
+所有活动事件必须记录自身事件锚定的 `world` 地点属性。使用 `property="地点"`、`value_type="either"`，`value` 为地点节点引用或“无”“未知”；`op="unknown"` 时省略 `value`。`node` 和 `at_event` 均引用该事件。缺少地点的内容提交进入待修暂存，由原问题路径局部修补；程序不推测地点，也不自动补“未知”。改编和剧本新建事件可在同一次内容提交的 `changes.initial_location` 指定地点引用或这两个显式值。
+
+草稿合同17增加 `event.location` 快捷输入：地点节点ID/`@n`引用、“无”或“未知”。程序复用该事件引文，生成world地点记录的主体、自事件锚点、ID与序号；原始模型草稿仍完整保存。此字段和同事件的显式地点 `properties` 不可双写，冲突暂存反馈，不自动选择；省略也不自动补值。
+
+草稿合同18的默认指导是每个事件只提交一条代表性准确引文，支持事件身份与核心发生即可，不要求起因、经过、结果逐项引用，也不要求跨章事件在两侧各取引文。事件边界仍按完整情节判断，属性和关系仍各自提供必要证据。数组保留以支持明确的补证需求；不因多引文静态拒绝，不删除已有历史证据。
+
+草稿合同19规定：场景、大事件和主要故事不由模型填写 `quotes` 或 `closing_quote`，只提交名称与直属层级关系（`children` 或下级父级引用）。程序从已验证下级逐层派生证据与阅读起点，沿用已有下级的真实来源和坐标；不要求把旧证据重新抄进本批范围。空容器、循环、错层和无有效下级证据按原始关系字段反馈，不能给上层补引文绕过。事件仍默认一条代表引文；动作、人物等实体以及属性关系继续提供自身必要证据。
+
+模型可见工具合同不再暴露写作提交的 `task_id`、`manifest_ref`，由宿主按捕获任务注入；CLI/MCP与Operations合同保持完整，查询其他任务编号不会被覆盖。修订号和上下文依据仍按原读取结果校验，不自动取最新值。
+
+完全访问模式提供 `run_host_process(program,args,stdin_text?)` 和 `run_host_script(language,script,stdin_text?)`。普通程序走argv直传，脚本文本由程序生成临时文件；默认工作目录为工程入口所在目录。命令仍使用原有command-N、取消、后台移交和审计，不增加命令总时限。输出编码歧义保留脱敏字节，可在 `read_host_command(encoding=...)` 重读，不重新执行。旧 `run_host_command` 仅用于确需shell语法的文本，Windows实际为cmd。
+
+宿主 `read_host_file` 自动识别编码并报告BOM/换行，`write_host_file` 默认保留既有编码与换行；`edit_host_file` 精确匹配时统一换行，但不解释字面反斜杠。匹配缺失、不唯一、编码歧义或不能无损写回会明确失败。文本整读/编辑上限8MiB，不能截断后写回；二进制仍用base64。编码写出复用锁定版本的MIT agent-toolkit组件，来源见 `src/narrative/vendor/dsh_agentkit/PROVENANCE.md`，不依赖用户目录、不启用其代理/自动安装/远程配置。
+
 ### 常驻与按需工具
 
 模型请求只携带常驻核心和当前聊天已加载的工具定义。完整工具仍在运行时注册，业务能力不按页面或创作阶段封闭；加载不改变 Operations 的校验、并发检查和审计。`list_available_tools` 默认返回业务分组简表，可按 `family`、`names` 或 `query` 查找简明工具说明；`load_tools(names=[...])` 或 `load_tools(families=[...])` 加载所需合同，下一次模型请求即可使用，无须重启进程或另开会话。不应预先加载所有组。
@@ -28,11 +42,12 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 | `submit_extraction` | 持久暂存已解析草稿并检查，合法立即原子入库；问题批返回暂存编号和具体问题行 |
 | `list_extraction_submissions` | 找回本工程未解决暂存摘要，可按source_id筛选，分页不返回整稿 |
 | `read_extraction_submission` | 默认只读取暂存状态、修订、问题；指定section和indices才读取相应条目 |
+| `delete_extraction_submission` | 按暂存修订物理删除指定未入库草稿；即时原子命令，不修改正式事实或原任务历史 |
 | `patch_extraction_submission` | 局部修补字段或追加缺失项，自动重检，通过即原子入库 |
 
 `preview_extraction` 与 `submit_extraction` 使用相同参数：`source_id`、`result`，以及可选的 `start`、`end`。省略范围时使用完整原文。`result` 包含 `nodes`、事件变更 `properties` 及可选 `uncertainties`、`exclusions`；具体结构以工具 schema 为准。
 
-原文位置使用 Python Unicode 字符坐标，范围为 `[start, end)`。引文必须逐字出自本次目标范围；读取其他原文帮助理解，不会扩大本次提交的证据范围。
+原文位置使用 Python Unicode 字符坐标，范围为 `[start, end)`。模型直接提交的新引文必须逐字出自本次目标范围；读取其他原文帮助理解，不会扩大这类引文的范围。上层容器引用已入库下级时，程序沿用下级已经验证的精确证据，不要求重新落在本批范围。
 
 暂存是程序校验修补工作区，不是待人工确认队列。合法结果通过 `Operations` 自动采用，模型存疑与程序诊断保留在结果和内部审计中。`status=staged` 表示尚未写入正式事实，不能冒充入库成功；若已经提交成功，而后续模型回答失败，已发生的入库动作仍须如实记录。
 
@@ -44,6 +59,7 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 
 - `{"op":"set","section":"nodes","index":2,"field":"quotes","value":["修正后的准确引文"]}`：替换该问题字段。
 - `{"op":"remove","section":"nodes","index":2,"field":"错误字段"}`：删除该字段。
+- `{"op":"remove","path":["result_note"]}`：仅删除 `result` 内未知的顶层字段；不能删除 `nodes/properties/uncertainties/exclusions`，不能替换整稿或改变外层目标。
 - `{"op":"append","section":"nodes","value":{"type":"person","name":"原文人物","quotes":["准确引文"]}}`：在末尾追加缺失项。
 
 `section` 为 `nodes/properties/uncertainties/exclusions`，补丁 `index` 从0起，节点引用 `@n` 仍从1起。禁止删除整行、splice或重排，保证原批引用不漂移；不能借补丁修改原 `source_id/start/end`。每次局部修补自动完整重检，仍有问题继续 `staged` 并返回新修订和问题，通过即 `accepted/unchanged`、`submission_status=committed`，无需人工接受，也不要重新发送整批。已提交的暂存稿不可再patch；新的独立事实批次照常使用submit。工具参数JSON不合法时，入口拒绝该非法调用，继续按原工具纠错规则处理。
@@ -54,6 +70,8 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 
 `Operations.check_project()` 与 `check_project` 工具在一个只读事务内采样固定修订，统一检查结构、证据、引用、活动属性定义、事件归属及物品持有者等约束。已失效的历史记录仅作为引用背景，不误当成当前违规；运行不创建候选、不提升修订号。
 返回 `checked_revision`、`current_revision`、严重级别计数和问题列表。问题携带可用的节点、属性记录及原文范围定位；无法唯一定位的引文不伪造高亮。左侧静态检查页可手动运行、筛选、查看详情和跳转，工程发生新修订时标明结果过期。
+
+检查错误统一保留 `message/reason`（具体原因）、`path`（原始字段路径数组）、`location`（可读路径）、`location_scope` 和可用的 `target`。提取路径相对原始 `result`，例如 `["nodes",2,"quotes"]`；通用内容路径相对操作参数，不混入模型类型标签。引用问题用 `related_paths` 指向被引用条目的根因，不能用后续引用错误盖住原始缺失引文等问题。路径索引沿用原始输入，不按解析或排序后的结果重编号。全局约束明确标为整体提交并说明范围，不伪造具体修补字段；工程静态检查用对象或属性记录ID定位，保留原文来源和坐标。
 
 ## 通用工程读写
 
@@ -207,7 +225,7 @@ result = tool_api.call("event_state", {"event_id": "E1"}, project="C:/projects/e
 
 事件的 `participants` 引用原文明示出场或实际起作用的人物；有原文支持的事件地点用属性 `地点` 引用 `location` 节点（`value_type=node`、`scope=world`、`at_event` 指向该事件，quotes 提供原文证据）。地点不可证时不猜，上层容器通过成员派生，无需重复抄写。精细档额外细查非关键、无名但原文可区分的人物和具体地点，不臆造姓名/身份，也不拆分无法区分的泛称。
 
-事件应是同一语境里有独立叙事意义的完整发生或过程；同一目标的准备、实施、即时结果与收尾优先合为一个事件，新信息、决定或直接结果不自动切界，须引发后续独立展开的新目标、矛盾或情境进展才另列；连续动作链、姿态、操作细节不能逐条改标为E。fine增加有独立意义的转折、信息节点和人物地点证据，不按句子、动词或每个属性变化切事件；引出后续独立展开的具体动作仍可成为事件，仅有直接结果不自动单列，由模型结合原文语义判断，不设词表或额外语义静态拒绝。
+事件介于场景与动作之间：场景组织连续时空与语境，事件记录其中可独立概括的叙事进展，动作是事件的实施细节。同一场景、同一总体目标可有多个各有起因、推进与落点的事件，不要求另起目标或后续独立展开才拆分；也不按每个发现、决定、动词或属性变化自动切界。fine保留有独立意义的过程、转折与信息节点，兼查过细的动作碎片和过粗的整场概括。边界由模型结合原文语义判断，不设事件数量、场景比例、题材词表或语义静态拒绝。
 
 标准、精细都默认不创建动作。明确请求动作提取时，草稿可使用 `type: action`，以 `event` 优先引用直属事件的正式 ID 或本批 `@序号`（唯一名称可作便利输入），并给出逐字原文引文。动作必须有且只有一个同语境父事件，不能直接归属场景或含子项。已有动作经查证后用 `existing_id` 复用。节点编辑器的“动作提取”按钮将明确父事件 ID 发送到当前统一对话，不另起专用进程。
 
@@ -221,7 +239,7 @@ result = tool_api.call("event_state", {"event_id": "E1"}, project="C:/projects/e
 
 常规提取直接`submit_extraction`，程序自动定位与静态检查；合法立即原子入库，问题批持久暂存，只按反馈的submission_id和问题索引局部patch。成功仅返回必要状态、修订和计数；暂存不是人工审批候选，也不算正式入库。完整诊断、原始模型消息及存疑理由保留宿主审计，preview仅用于独立试查。
 
-层级为主要故事（storyline/T）→大事件（big_event/B）→场景（scene/S）→事件（event/E）→动作（action/A）。主要故事仅在完整篇章结束后总结：草稿给出逐字且唯一的 `closing_quote`，程序以其末端生成 `completion`，并可用 `children:[B1,B2]` 归并已有大事件，无需重列。未结束的大事件可暂不归主要故事。主要故事进展 `storyline_progress` 记录在大事件上，大事件进展 `big_event_progress` 记录在场景上。
+层级为主要故事（storyline/T）→大事件（big_event/B）→场景（scene/S）→事件（event/E）→动作（action/A）。主要故事仅在模型判断完整篇章真正结束后总结：可用 `children:[B1,B2]` 归并已有大事件，无需重列或手填引文。程序按正式来源顺序及 Unicode 坐标，从下级已验证证据的最后末端派生 `completion`，不要求 `closing_quote`，不以本批或章末自动闭合。未结束的大事件可暂不归主要故事。主要故事进展 `storyline_progress` 记录在大事件上，大事件进展 `big_event_progress` 记录在场景上。
 
 大事件在同语境内依原文顺序形成 `[start,next.start)` 的连续阅读区间。末个大事件已归入完成的主要故事时，以该主要故事的 `completion` 为末端；否则保持 `end=null`。这不是故事发生时间区间。`attach_children(parent_id,child_ids)` 可直接归入已有直属子项，主要故事归大事件、大事件归场景、场景归事件（或嵌套场景）、事件归动作；不保留旧场景直属主要故事的接口。
 
@@ -243,6 +261,10 @@ result = tool_api.call("event_state", {"event_id": "E1"}, project="C:/projects/e
 CLI 对应 `record-property-change`、`correct-property`、`delete-property-records`，完整类型和必填参数以 `--help` / 当前工具schema为准。CLI、MCP、Qt共用Operations原子引用、证据及并发校验；不提供旧有效期接口或兼容映射。
 
 
+## 剧本来源标注
+
+剧本场表可选填写 `plan.source_event_ids`，不作为生成前置，不自动把空引用填为当前全部候选。已填写的编号仍须是本剧本有效范围内的真实事件；名称、时间线和来源映射由程序派生，空记录不显示“尚未标注”注记，也不新建说明正文块。生成成功结束后，时间线对明确未使用的活动事件低亮显示，事件仍可选择和编辑。`event_usage` 区分 `used_event_ids`、`unused_event_ids`、`unknown_event_ids`；只有启用且有正文场的显式实际来源计为已使用，未绑定部分和自动继承的候选不能冒充实际使用，未确认节点不低亮。完成状态只读本工程真实任务审计，运行、停止、失败和未生成时不启用低亮；重启后仍按持久任务结果恢复，不依赖界面内存。此提示不是语义一致性校验，也不要求模型补写使用或未使用清单。
+
 ## 统一业务内容暂存
 
 业务内容操作在 Operations 层共用暂存与局部修补；Qt 直接调用、CLI、MCP 和助手行为相同。`staged` 只表示草稿保留，不能记作正式写入。反馈包含 `submission_id`、`submission_revision` 和具体问题路径；已知修正内容时直接一次 patch 修多点，不先读取整稿。
@@ -256,3 +278,18 @@ CLI 对应 `record-property-change`、`correct-property`、`delete-property-reco
 CLI 别名为 `content-submissions`、`content-submission`、`content-patch`，也可使用通用 `tool call`。提交错误时 UI 保留输入并显示待修位置，同表单再次保存修补同一暂存；仅成功才关闭或继续后续动作。不增加审批工作台或人工 accept。
 
 删除、移动、复制、采用/批准、文件导入导出、生成/外部服务、密钥配置等即时命令继续原有原子执行，不进入待执行队列。混有即时命令的批次不被通用修补延后执行。非法工具 JSON、权限、并发、IO/网络及未知异常仍按原规则反馈，不假装内容校验已成功。
+
+
+## 分镜资产元素
+
+每镜复用 `visual_elements` 保存出场元素。人物的 `name` 为角色名，人工确定的 `asset_id` 指向资产管理中的具体形象；物品与场景分别关联对应类别的资产卡。资产卡可以独立创建，`node_id` 可空；明确关联提取或改编事实时仍验证所选数据域与节点类别。
+
+多选或全选镜头后，以固定 `shot_ids` 发起 `storyboard_assets` 统一任务。`read_storyboard_assets_context` 返回所选镜头、正文、已确定元素及资产目录，模型只分析尚待确定的元素需求，提交 `kind/name/usage`；未确定行的空资产引用由程序生成。分析任务不能建立或修改资产，也不能自动选择资产。原已确定行原样保留，新分析替换原未确定行，不按同名猜测或改写已有身份。
+
+`submit_storyboard_assets` 原子保存指定镜头的分析结果。内容问题保留暂存并反馈元素字段路径，局部修补通过后自动入库。原目标镜头、修订和正文依据不可通过修补替换。UI、CLI、MCP 和助手共用 Operations 合同。
+
+用户可在元素表明确选择已有资产，或点击“建立缺失资产”。该按钮调用 `create_missing_storyboard_assets` 即时原子命令，程序为所选待确定元素逐行建立独立空资产卡并绑定；不调用模型或生成图片，不按同名猜测合并。省略 `element_refs` 处理所选镜头全部未确定行，指定 `{shot_id,index}` 则仅处理明确行；整板 `revision` 固定行定位，重复或过期操作不会重复创建。已绑定行保持原样，损坏引用仍需手动处理。空卡不填写设定、提示词或图片，后续可编辑。
+
+列表也保留“详细建立”，通过原 `save_asset` 和分镜写入两步执行；若资产已建成而绑定并发失败，明确反馈关联未完成。普通助手对话仍可按用户指令建立或选择资产；批量分析不会自动调用这些写入能力。人物显示为角色名与具体形象名。
+
+元素表区分待确定、资产缺失、类别不符与待出图。未分析的空表显示待分析，无图片仅提示待出图，不等同于缺少资产对象。语义漏项由模型判断，静态检查不靠词表猜测。

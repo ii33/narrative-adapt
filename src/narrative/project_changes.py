@@ -30,16 +30,18 @@ def schema(ops) -> dict:
 
     return ops.graph_schema() | {"graph_json_schema": GRAPH_OBJECTS.json_schema(),
         "general_changes": {"preview": "preview_changes", "apply": "apply_changes",
-            "rules": "提供expected_revision及reason；仅静态校验，合法批次原子入库。所有活动event须属于同语境scene，可同批修复旧孤立事件。"}}
+            "rules": "提供expected_revision及reason；仅静态校验，合法批次原子入库。所有活动event须属于同语境scene，并在自身事件记录world地点：location引用、显式无或未知；缺失不等于未知。可同批修复旧遗漏，不自动补值。"}}
 
 
 def state(ops) -> dict:
     from .containment_refs import event_scene_issues, storyline_issues
+    from .event_location import event_location_issues
     from .item_possession import item_possession_issues
 
     graph = ops.graph_snapshot()
     records = ops.property_records()
     diagnostics = (event_scene_issues(graph["objects"]) + storyline_issues(graph["objects"], graph)
-                   + item_possession_issues(graph["objects"], records, snapshot=graph))
+                   + item_possession_issues(graph["objects"], records, snapshot=graph)
+                   + event_location_issues(graph["objects"], records, snapshot=graph))
     return {"diagnostics": diagnostics, "revision": graph["revision"], "graph": graph,
             "property_records": records}

@@ -29,14 +29,19 @@ QtObject {
         if(active){bridge.activateContentForm(formId,true,priority);if(operation)bridge.listContentSubmissions(operation,JSON.stringify(target),formId)}
     }
     function end(){if(formId)bridge.activateContentForm(formId,false,priority);formId="";submission=({});candidates=[]}
-    function problemText(){return (submission.problems||[]).map(function(p){return ((p.path&&p.path.length?p.path:p.model_location||[]).length?(p.path&&p.path.length?p.path:p.model_location).join(".")+"：":"")+(p.message||p.code||"校验问题")}).join("\n")}
+    function problemText(){return (submission.problems||[]).map(function(p){
+        var path=p.path||[],position=path.length?(p.location||path.join(" / ")):"整个提交";
+        var related=(p.related_paths||[]).map(function(value){return value.join(" / ")});
+        return position+"："+(p.message||p.reason||p.code||"校验问题")
+            +(related.length?"\n关联位置："+related.join("；"):"");
+    }).join("\n")}
     function releasePending(){
         [owner,controller].forEach(function(item){if(!item)return;["pending","saving","generating","busy","pendingStart","phase2Pending","pendingConversation","timelineBusy","structureBusy","promptSaving"].forEach(function(key){if(typeof item[key]==="boolean"){try{item[key]=false}catch(e){}}})});
         if(typeof owner.restoreEdit==="function")owner.restoreEdit();
         if(typeof owner.errorText==="string")owner.errorText=problemText();
     }
     function focusProblem(problem){
-        var path=problem.path&&problem.path.length?problem.path:problem.model_location||[],key=String(path[path.length-1]||"").replace(/_/g,"").toLowerCase();if(!key)return;
+        var path=problem.path||[],key=String(path[path.length-1]||"").replace(/_/g,"").toLowerCase();if(!key)return;
         function find(item){if(!item)return null;var name=String(item.objectName||"").replace(/_/g,"").toLowerCase();if(name.indexOf(key)>=0&&typeof item.readOnly==="boolean"&&item.visible)return item;var children=item.children||[];for(var i=0;i<children.length;i++){var value=find(children[i]);if(value)return value}return null}
         var field=find(owner.contentItem||owner);if(field)field.forceActiveFocus();
     }

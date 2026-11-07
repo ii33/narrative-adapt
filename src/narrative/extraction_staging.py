@@ -80,8 +80,19 @@ def _problems(raw, diagnostics, built=None):
         message = str(diagnostic.get('message') or diagnostic.get('reason') or diagnostic)
         identity = str(diagnostic.get('object_id') or '')
         targets = []
+        path = diagnostic.get('path')
         explicit = re.search(r'(nodes|properties|uncertainties|exclusions)\[(\d+)\]', message)
-        if explicit:
+        if isinstance(path, (list, tuple)):
+            path = list(path)
+            if path and path[0] in SECTIONS:
+                target = {'section': path[0]}
+                if len(path) > 1 and type(path[1]) is int:
+                    target['index'] = path[1]
+                if len(path) > 2 and isinstance(path[2], str):
+                    target['field'] = path[2]
+                    target['fields'] = [path[2]]
+                targets.append(target)
+        elif explicit:
             section, number = explicit.group(1), int(explicit.group(2))
             targets.append({'section': section, 'index': number})
         else:
@@ -107,20 +118,32 @@ def _problems(raw, diagnostics, built=None):
         elif 'value' in message:
             fields = ['value']
         for target in targets:
-            if fields:
+            if fields and 'field' not in target:
                 target['fields'] = fields
                 if len(fields) == 1:
                     target['field'] = fields[0]
-            if target['section'] == 'nodes':
+            if target['section'] == 'nodes' and 'index' in target:
                 target['reference'] = f"@{target['index']+1}"
-        problem = {'severity': diagnostic.get('severity', 'error'), 'code': diagnostic.get('code', 'DRAFT_SCHEMA'),
+        problem = {**deepcopy(diagnostic), 'severity': diagnostic.get('severity', 'error'), 'code': diagnostic.get('code', 'DRAFT_SCHEMA'),
                    'message': message, 'targets': targets}
+        if not isinstance(path, list):
+            if len(targets) == 1:
+                target = targets[0]
+                path = [target['section']]
+                if 'index' in target:
+                    path.append(target['index'])
+                if target.get('field'):
+                    path.append(target['field'])
+            else:
+                path = []
+        problem['path'] = path
         if identity:
             problem['object_id'] = identity
         if len(targets) == 1:
             problem.update(targets[0])
         problems.append(problem)
-    return problems
+    from .diagnostic_locations import normalize_problems
+    return normalize_problems(problems, operation='submit_extraction')
 
 
 def _cas(db, identifier, expected):
@@ -133,6 +156,32 @@ def _cas(db, identifier, expected):
         raise ContentConflictError('暂存revision已变化，请重读问题部分')
 
 
+def _audit_deleted(db, row, revision, reason):
+    summary = {'submission_id': row['submission_id'],
+               'submission_revision': row['submission_revision'], 'source_id': row['source_id']}
+    db.execute('INSERT INTO actions(id,revision,action,reason,summary) VALUES (?,?,?,?,?)',
+               ('delete-' + row['submission_id'], revision, 'delete_extraction_submission', reason,
+                json.dumps(summary, ensure_ascii=False)))
+
+
+def delete(ops, submission_id, expected_revision, reason):
+    """Delete one current invalid draft, without deleting facts or task history."""
+    if not isinstance(submission_id, str) or not submission_id.strip():
+        raise ValueError('请提供要删除的提取暂存编号')
+    if type(expected_revision) is not int or expected_revision < 1:
+        raise ValueError('expected_revision须为提取暂存的正整数修订')
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError('请说明删除提取暂存的reason')
+    with ops.project.store.connect(write=True) as db:
+        _cas(db, submission_id, expected_revision)
+        row = _load(db, submission_id)
+        revision = int(db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0])
+        db.execute('DELETE FROM meta WHERE key=?', (PREFIX + submission_id,))
+        _audit_deleted(db, row, revision, reason)
+    return {'status': 'accepted', 'deleted_submission_id': submission_id,
+            'submission_revision': expected_revision, 'formal_revision': revision}
+
+
 def _evaluate(ops, row, expected, reason):
     from .conversation_session import record_business_action, use_chat
     from .extraction_draft import _compact, _prepare
@@ -142,7 +191,8 @@ def _evaluate(ops, row, expected, reason):
     except ValueError as exc:
         prepared = None
         outcome = {'valid': False, 'revision': ops.graph_project_info()['revision'],
-                   'diagnostics': [{'severity': 'error', 'code': 'DRAFT_SCHEMA', 'message': str(exc)}]}
+                   'diagnostics': deepcopy(getattr(exc, 'problems', None) or getattr(exc, 'diagnostics', None))
+                       or [{'severity': 'error', 'code': 'DRAFT_SCHEMA', 'message': str(exc)}]}
     row['validation_status'] = 'valid' if outcome['valid'] else 'invalid'
     row['formal_revision'] = outcome['revision']
     row['problems'] = _problems(row['result'], outcome.get('diagnostics', []), built)
@@ -227,6 +277,19 @@ def patch(ops, submission_id, expected_revision, patches, reason):
         _cas(db, submission_id, expected_revision)
         row = _load(db, submission_id)
     for index, change in enumerate(patches):
+        if isinstance(change, dict) and 'path' in change:
+            from .extraction_draft import RESULT_SCHEMA
+            path = change['path']
+            if (set(change) != {'op', 'path'} or change.get('op') != 'remove'
+                    or not isinstance(path, list) or len(path) != 1 or not isinstance(path[0], str)):
+                raise ValueError(f'patches[{index}]的path仅支持remove单个未知草稿顶层字段')
+            field = path[0]
+            if field in RESULT_SCHEMA['properties']:
+                raise ValueError(f'patches[{index}]不能删除正式草稿字段：{field}')
+            if field not in row['result']:
+                raise ValueError(f'patches[{index}]要移除的未知草稿顶层字段不存在：{field}')
+            del row['result'][field]
+            continue
         if not isinstance(change, dict) or change.get('op') not in {'set', 'remove', 'append'} or change.get('section') not in SECTIONS:
             raise ValueError(f'patches[{index}]操作或section无效')
         section = change['section']
@@ -251,6 +314,6 @@ def patch(ops, submission_id, expected_revision, patches, reason):
                 raise ValueError('要移除的字段不存在')
             del entries[change['index']][field]
     json.dumps(row['result'], ensure_ascii=False, allow_nan=False)
-    row['changed_fields'] = [{key: change[key] for key in ('op', 'section', 'index', 'field') if key in change} for change in patches]
+    row['changed_fields'] = [{key: deepcopy(change[key]) for key in ('op', 'section', 'index', 'field', 'path') if key in change} for change in patches]
     row['submission_revision'] = expected_revision + 1
     return _evaluate(ops, row, expected_revision, reason)

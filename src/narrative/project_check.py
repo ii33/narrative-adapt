@@ -38,7 +38,21 @@ def _locate(issue: dict, objects: dict, records: dict, sources: dict) -> dict:
     result["target"] = {"kind": "node" if node_id else "source" if source_id else "project",
                         "node_id": node_id, "record_id": result["record_id"],
                         "source_id": source_id, "start": start, "end": end}
-    return result
+    if 'path' not in result:
+        if result['record_id']:
+            result['path'] = ['property_records', result['record_id']]
+        elif identifier in objects:
+            result['path'] = ['objects', identifier]
+        elif node_id:
+            result['path'] = ['objects', node_id]
+        elif source_id:
+            result['path'] = ['sources', source_id]
+        else:
+            result['path'] = []
+        if result.get('field') and isinstance(result['field'], str) and result['path']:
+            result['path'].append(result['field'])
+    from .diagnostic_locations import normalize_problem
+    return normalize_problem(result, operation='check_project')
 
 
 def check(ops) -> dict:

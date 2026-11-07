@@ -11,6 +11,14 @@ Frame {
     property string startId: ""
     property string endId: ""
     property var t
+    property var eventUsage: ({})
+    readonly property bool showEventUsage: eventUsage.status === "completed"
+        && eventUsage.timeline_id === timelineId
+    function unusedEvent(node) {
+        return showEventUsage && node.node_type === "event" && !node.suppressed && !node.retracted
+            && (eventUsage.unused_event_ids || []).indexOf(node.id) >= 0
+            && (eventUsage.unknown_event_ids || []).indexOf(node.id) < 0;
+    }
     signal selectionChanged()
     function reveal(identifier) {
         var parents = {}, next = Object.assign({}, collapsed)
@@ -53,7 +61,7 @@ Frame {
                 required property var modelData
                 width: ListView.view.width
                 Button { objectName:"scriptRangeToggle"; property string nodeId:modelData.node.id; Layout.preferredWidth:24; implicitWidth:24; text: picker.collapsed[modelData.node.id] ? "+" : "-"; flat: true; visible: (modelData.node.events || []).length > 0; Layout.leftMargin: modelData.depth*12; onClicked: { var map=Object.assign({},picker.collapsed); map[modelData.node.id]=!map[modelData.node.id]; picker.collapsed=map } }
-                ItemDelegate { objectName:"scriptRangeNode"; property string nodeId:modelData.node.id; text: modelData.node.name + (modelData.node.suppressed ? "（屏蔽）" : ""); highlighted:picker.selectedId===modelData.node.id; Layout.fillWidth:true; Layout.minimumWidth:0; Layout.leftMargin:(modelData.node.events || []).length ? 0 : modelData.depth*12; onClicked:picker.selectedId=modelData.node.id; contentItem:Label{text:parent.text;elide:Text.ElideRight;color:parent.highlighted?parent.palette.highlightedText:(modelData.node.suppressed?picker.t.muted:picker.t.body);verticalAlignment:Text.AlignVCenter} }
+                ItemDelegate { objectName:"scriptRangeNode"; property string nodeId:modelData.node.id; readonly property bool unusedEvent:picker.unusedEvent(modelData.node); text: modelData.node.name + (modelData.node.suppressed ? "（屏蔽）" : ""); highlighted:picker.selectedId===modelData.node.id; Layout.fillWidth:true; Layout.minimumWidth:0; Layout.leftMargin:(modelData.node.events || []).length ? 0 : modelData.depth*12; onClicked:picker.selectedId=modelData.node.id; ToolTip.visible:hovered&&unusedEvent;ToolTip.text:"生成结果未使用此事件";contentItem:Label{objectName:"scriptRangeNodeText";text:parent.text;elide:Text.ElideRight;opacity:parent.unusedEvent&&!parent.highlighted?0.42:1;color:parent.highlighted?parent.palette.highlightedText:(modelData.node.suppressed?picker.t.muted:picker.t.body);verticalAlignment:Text.AlignVCenter} }
                 ToolButton { objectName:"scriptRangeStart"; property string nodeId:modelData.node.id; text: picker.startId === modelData.node.id ? "起 ✓" : "起"; onClicked: { picker.startId=modelData.node.id; picker.selectionChanged() } }
                 ToolButton { objectName:"scriptRangeEnd"; property string nodeId:modelData.node.id; text: picker.endId === modelData.node.id ? "止 ✓" : "止"; onClicked: { picker.endId=modelData.node.id; picker.selectionChanged() } }
             }

@@ -14,6 +14,7 @@ Dialog {
     property string nodeId: ""
     property bool creating: false
     property var adaptationNodes: []
+    readonly property var initialLocationOptions: [{id:null,name:"请选择事件地点"},{id:"无",name:"无"},{id:"未知",name:"未知"}].concat(adaptationNodes.filter(function(n){return n.node_type==="location"&&!n.suppressed&&!n.retracted&&(n.context_id||"canon")==="canon"}))
     property var node: ({})
     property var properties: []
     property var events: []
@@ -74,7 +75,7 @@ Dialog {
     function openNew() {
         creating = true; nodeId = ""; node = ({}); properties = []; resetForms()
         nameField.text = ""; aliasField.text = ""; noteField.text = ""; typeBox.currentIndex = 0
-        adaptationNodes = host.allAdaptationNodes.filter(function(n) { return !n.suppressed }); parentChoice.currentIndex = 0; holderChoice.currentIndex = 0; open()
+        adaptationNodes = host.allAdaptationNodes.filter(function(n) { return !n.suppressed }); parentChoice.currentIndex = 0; holderChoice.currentIndex = 0; initialLocation.currentIndex=0; open()
     }
 
     function resetForms() {
@@ -167,6 +168,7 @@ Dialog {
         }
         var value=a.changes||(a.graph_objects||[])[0]||{};
         nameField.text=value.name||"";typeBox.currentIndex=Math.max(0,typeKeys.indexOf(value.node_type));aliasField.text=(value.aliases||[]).join("、");noteField.text=value.identity_note||""
+        if(creating){parentChoice.currentIndex=Math.max(0,parentChoice.model.findIndex(function(n){return n.id===a.parent_id}));initialLocation.currentIndex=Math.max(0,initialLocationOptions.findIndex(function(n){return n.id===value.initial_location}))}
     }
 
     function startEdit(item, record) {
@@ -296,6 +298,11 @@ Dialog {
                 aliases: aliasField.text.split(/[、,，]/).filter(function(x) { return x.trim().length > 0 }), identity_note: noteField.text}
             var args = {node_id: creating ? null : nodeId, changes: fields, expected_revision: host.revision}
             if (creating) {
+                if(fields.node_type==="event"){
+                    var location=(initialLocationOptions[initialLocation.currentIndex]||{}).id;
+                    if(location===null||location===undefined){host.app.toast("请选择事件地点，未交代时请明确选择未知",true);return}
+                    fields.initial_location=location;
+                }
                 args.parent_id = parentChoice.model[parentChoice.currentIndex].id || null
                 fields.point_id = host.cutEventId || null
                 if (fields.node_type === "item") fields.initial_holder = holderChoice.model[holderChoice.currentIndex].id
@@ -421,6 +428,13 @@ Dialog {
             ComboBox { id: holderChoice; Layout.fillWidth: true; model: [{id:"未知",name:"未知"},{id:"无",name:"无"}].concat(editor.adaptationNodes); textRole: "name" }
         }
 
+        ColumnLayout {
+            visible:editor.host.adaptationMode&&editor.creating&&editor.typeKeys[typeBox.currentIndex]==="event"
+            Layout.fillWidth:true
+            Label{text:"事件地点（必选）";color:t.muted}
+            ComboBox{id:initialLocation;objectName:"editorInitialLocation";Layout.fillWidth:true;model:editor.initialLocationOptions;textRole:"name";currentIndex:0}
+        }
+
         RowLayout {
             Layout.fillWidth: true
             Label {
@@ -451,6 +465,7 @@ Dialog {
             Button {
                 objectName: "editorSubmitNode"
                 text: "提交节点修订"
+                enabled:!(editor.host.adaptationMode&&editor.creating&&editor.typeKeys[typeBox.currentIndex]==="event")||initialLocation.currentIndex>0
                 onClicked: editor.submitNode()
             }
         }

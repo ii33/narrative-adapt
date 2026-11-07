@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 Rectangle {
     id: root
+    objectName:"storyboardPanelBoard"
     SubmissionState{id:contentSubmission;allowedActions:["create_panel", "update_panel"];authoredFields:[];identityKey:root.panel.id||"";owner:root;operation:"apply_storyboard_changes";target:({unit_id:root.desk.unitId||null});onRestoreRequested:function(a){var c=a.changes[0];root.restoredChange=c;root.selectedId=c.panel_id||"";root.restoredPanel=Object.assign({},root.panels.find(function(p){return p.id===c.panel_id})||{},c);root.restoreRevision=a.revision}}
 
     property var desk
@@ -35,9 +36,14 @@ Rectangle {
         anchors.fill: parent; anchors.margins: 12
         RowLayout {
             Label { text: "画格计划 · " + (desk.shot.title || "请选择镜头"); font.bold:true; Layout.fillWidth:true }
-            Button {objectName:"storyboardGenerateMissingPanels";text:"补齐本镜缺图";enabled:root.panels.length>0&&!desk.busy&&!desk.approved;onClicked:desk.request("generate_storyboard_panels",{unit_id:desk.unitId,shot_id:desk.shot.id,expected_revision:desk.board.revision,missing_only:true})}
-            Button {objectName:"storyboardRegeneratePanels";text:"整镜试画";enabled:root.panels.length>0&&!desk.busy&&!desk.approved;onClicked:desk.request("generate_storyboard_panels",{unit_id:desk.unitId,shot_id:desk.shot.id,expected_revision:desk.board.revision,missing_only:false})}
+            Button {objectName:"storyboardGenerateMissingPanels";text:"补齐本镜缺图";enabled:root.panels.length>0&&!desk.busy&&!desk.approved;onClicked:desk.request("generate_storyboard_panels",{unit_id:desk.unitId,shot_id:desk.shot.id,expected_revision:desk.board.revision,missing_only:true,simple_color:desk.sketchSimpleColor})}
+            Button {objectName:"storyboardRegeneratePanels";text:"整镜试画";enabled:root.panels.length>0&&!desk.busy&&!desk.approved;onClicked:desk.request("generate_storyboard_panels",{unit_id:desk.unitId,shot_id:desk.shot.id,expected_revision:desk.board.revision,missing_only:false,simple_color:desk.sketchSimpleColor})}
             Button { text:"新增画格"; enabled:!!desk.shot.id&&!desk.busy&&!desk.approved; onClicked:root.save({op:"create_panel",offset_ms:Math.floor(desk.localTime),intent:""}) }
+        }
+        RowLayout {
+            Layout.fillWidth:true
+            Label {objectName:"storyboardPanelSketchStyleHint";text:"采用工程“描述型素描”风格，与素描关键帧共用。";wrapMode:Text.Wrap;Layout.fillWidth:true;color:desk.t.muted}
+            CheckBox {objectName:"storyboardPanelSimpleColor";text:"简彩（保留素描线条）";checked:desk.sketchSimpleColor;onToggled:desk.sketchSimpleColor=checked;enabled:!desk.busy&&!desk.approved}
         }
         SplitView {
             Layout.fillWidth:true;Layout.fillHeight:true
@@ -93,7 +99,7 @@ Rectangle {
                     Button {objectName:"storyboardPanelBindAdopted";text:"采用为编排关键帧（替换同位置）";enabled:!!root.panel.adopted_candidate_id&&!desk.approved&&!desk.busy;onClicked:root.bindAdopted()}
                     CheckBox {id:annotated;text:"含标注";checked:true}
                     Button {text:"导出画格";enabled:!!root.panel.id&&!desk.busy;onClicked:exportPicker.open()}
-                    Button { text:"独立试画";enabled:!!root.panel.id&&!desk.busy&&!desk.approved;onClicked:desk.request("generate_storyboard_panel",{unit_id:desk.unitId,shot_id:desk.shot.id,panel_id:root.panel.id,expected_revision:desk.board.revision}) }
+                    Button {objectName:"storyboardGenerateSinglePanel";text:"独立试画";enabled:!!root.panel.id&&!desk.busy&&!desk.approved;onClicked:desk.request("generate_storyboard_panel",{unit_id:desk.unitId,shot_id:desk.shot.id,panel_id:root.panel.id,expected_revision:desk.board.revision,simple_color:desk.sketchSimpleColor}) }
                     Button { text:"删除画格";enabled:!!root.panel.id&&!desk.approved;onClicked:root.save({op:"delete_panel",panel_id:root.panel.id}) }
                 }
                 ListView {

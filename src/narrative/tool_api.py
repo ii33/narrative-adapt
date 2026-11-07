@@ -979,6 +979,11 @@ _register(Tool('list_extraction_submissions', '仅需找回未完成暂存时列
 }, _list_extraction_submissions))
 _PATCH_BASE = {'section': {'type': 'string', 'enum': _SUBMISSION_SECTIONS}}
 _EXTRACTION_PATCH_ITEM = {'oneOf': [
+    {'type': 'object', 'additionalProperties': False, 'required': ['op', 'path'],
+     'properties': {'op': {'type': 'string', 'const': 'remove'},
+                    'path': {'type': 'array', 'minItems': 1, 'maxItems': 1,
+                             'items': {'type': 'string', 'not': {'enum': _SUBMISSION_SECTIONS}},
+                             'description': '仅删除result内未知顶层字段，例如["result_note"]；不能删除正式草稿字段或修改外层目标。'}}},
     {'type': 'object', 'additionalProperties': False, 'required': ['op', 'section', 'index', 'field', 'value'],
      'properties': _PATCH_BASE | {'op': {'type': 'string', 'const': 'set'}, 'index': {'type': 'integer', 'minimum': 0},
                                  'field': {'type': 'string'}, 'value': {}}},
@@ -997,9 +1002,16 @@ _register(Tool('patch_extraction_submission', '反馈足够时直接一次patch�
     'submission_id': {'type': 'string', 'required': True},
     'expected_revision': {'type': 'integer', 'required': True, 'minimum': 1, 'description': '刚读取的submission_revision，不是正式工程revision'},
     'patches': {'type': 'array', 'required': True, 'minItems': 1, 'items': _EXTRACTION_PATCH_ITEM,
-                'description': 'set/remove改index行的field；append追加对象。禁止删整行、重排或splice；index0基，不修改source_id/start/end。'},
+                'description': 'set/remove改index行的field；append追加对象；remove配单元素path仅删除result未知顶层字段。禁止删整行、重排或splice；index0基，不修改外层source_id/start/end。'},
     'reason': {'type': 'string', 'required': True, 'description': '局部修补依据'},
 }, _patch_extraction_submission, writes=True))
+
+_register(Tool('delete_extraction_submission', '物理删除指定未入库提取暂存，保留正式事实及原任务历史；即时原子命令，必须明确暂存修订和原因。已入库暂存不可删除。', {
+    'submission_id': {'type': 'string', 'required': True},
+    'expected_revision': {'type': 'integer', 'required': True, 'minimum': 1,
+                          'description': '待删除暂存的submission_revision，不是工程revision'},
+    'reason': {'type': 'string', 'required': True},
+}, lambda ops, params: ops.delete_extraction_submission(**params), writes=True))
 
 _CONTENT_PATH = {'type': 'array', 'minItems': 1, 'items': {'type': ['string', 'integer']},
                  'description': '从原Operations绑定arguments根开始的字段路径；数组索引从0起，不重排既有条目'}
@@ -1226,8 +1238,10 @@ def call(name: str, params: dict | None = None, *, project: str | Path | None = 
         from .tool_fingerprint_refs import decode_tool_parameters, encode_tool_result
         try:
             resolved = decode_tool_parameters(ops, args)
+            from .model_tool_schema import PROVENANCE_TOOLS
             from .tool_execution_context import current_tool_execution_metadata
-            for key, value in current_tool_execution_metadata().items():
+            metadata = current_tool_execution_metadata() if name in PROVENANCE_TOOLS else {}
+            for key, value in metadata.items():
                 if key in tool.params:
                     resolved[key] = value
             result = tool.handler(ops, resolved)

@@ -207,6 +207,10 @@ class GraphOperations(ChatAttachmentOperationsMixin, AssistantAccessOperationsMi
         from .extraction_staging import patch
         return patch(self, submission_id, expected_revision, patches, reason)
 
+    def delete_extraction_submission(self, submission_id, expected_revision, reason):
+        from .extraction_staging import delete
+        return delete(self, submission_id, expected_revision, reason)
+
     def preview_extraction(self, source_id: str, result: dict, start: int = 0,
                            end: int | None = None) -> dict:
         from .extraction_draft import preview

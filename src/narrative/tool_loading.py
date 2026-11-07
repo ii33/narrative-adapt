@@ -7,6 +7,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
+from .model_tool_schema import model_tool_schema
+
 TOOL_LOADING_GUIDE = (
     '工具按需加载：常驻目录不是全部能力或阶段权限白名单。需要其他业务工具时，先用list_available_tools按名称、业务family或关键词发现，'
     '再用load_tools的names或families加载本次确需的工具；成功后精确参数schema会出现在下一次模型请求的tools中，继续同一任务调用。'
@@ -68,7 +70,8 @@ def tool_family(name: str) -> str:
         return 'activity'
     if name.startswith(('list_chat_attachment', 'read_chat_attachment')):
         return 'attachments'
-    if name in {'read_host_file', 'write_host_file', 'list_host_directory', 'run_host_command', 'read_host_command', 'stop_host_command'}:
+    registered = _registry().get(name)
+    if registered is not None and registered.scope == 'host':
         return 'host'
     if 'storyboard' in name:
         return 'storyboard'
@@ -82,7 +85,7 @@ def tool_family(name: str) -> str:
         return 'settings'
     if name.endswith('content_submissions') or name.endswith('content_submission'):
         return 'submissions'
-    if name in {'preview_extraction', 'submit_extraction', 'list_extraction_submissions', 'read_extraction_submission', 'patch_extraction_submission'}:
+    if name in {'preview_extraction', 'submit_extraction', 'list_extraction_submissions', 'read_extraction_submission', 'patch_extraction_submission', 'delete_extraction_submission'}:
         return 'extraction'
     if name in {'read_source', 'list_sources', 'locate_source', 'import_source', 'list_source_slices',
                 'read_source_slice', 'create_source_slices', 'preview_pattern_slices', 'create_pattern_slices'}:
@@ -198,17 +201,25 @@ _GUIDE_TOOLS = {
 }
 
 
+_STORYBOARD_IMAGE_TOOLS = frozenset({
+    "generate_storyboard_sketch", "generate_storyboard_panel", "generate_storyboard_panels", "render_storyboard_style",
+})
+
+
 def tool_guidance(ops, names) -> dict[str, Any]:
     """Return effective project guides selected only by exact capability names."""
     if isinstance(names, str):
         raise ValueError('names须为工具名集合')
     requested = set(names)
+    usage_tips = ({"operation": "read_storyboard_usage_tips",
+                   "message": "需要空间布局生图输入建议时，按需加载并读取read_storyboard_usage_tips；技巧只说明已测用法，不自动改变工作流、模型或生成参数。工程创作约定和素描风格仍按当前任务使用。"}
+                  if requested & _STORYBOARD_IMAGE_TOOLS else None)
     keys = []
     for name, guides in _GUIDE_TOOLS.items():
         if name in requested:
             keys.extend(key for key in guides if key not in keys)
     if not keys:
-        return {}
+        return {"usage_tips": usage_tips} if usage_tips else {}
     if ops is None:
         raise ValueError('工作流指南需要当前工程Operations，不能用全局默认冒充工程自定义')
     from .prompt_settings import prompt_snapshot
@@ -221,6 +232,8 @@ def tool_guidance(ops, names) -> dict[str, Any]:
         keys.insert(keys.index('extraction')+1, 'granularity_'+granularity)
         result['extraction_granularity'] = granularity
     result['guides'] = [{'id': key, 'version': snapshot['versions'][key], 'text': snapshot['texts'][key]} for key in keys]
+    if usage_tips:
+        result['usage_tips'] = usage_tips
     return result
 
 
@@ -233,7 +246,7 @@ def load_tools(names=None, families=None, *, ops=None) -> dict[str, Any]:
         guidance = tool_guidance(ops, selected)
         return {**({'workflow_guidance': guidance} if guidance else {}), 'runtime_loaded': False, 'resolved_tools': selected, 'loaded_tools': [],
                 'message': '当前未绑定助手运行时；返回精确合同。CLI/MCP服务器保留完整工具注册，无需激活，未改变任何业务数据。',
-                'tools': [{'name': name, 'description': registry[name].summary, 'inputSchema': registry[name].schema()} for name in selected]}
+                'tools': [{'name': name, 'description': registry[name].summary, 'inputSchema': model_tool_schema(registry[name])} for name in selected]}
     before = set(binding.visible_names()) if binding.visible_names else set()
     guidance = tool_guidance(ops, [name for name in selected if name not in before])
     loaded = before if set(selected) <= before else set(binding.loader(selected))

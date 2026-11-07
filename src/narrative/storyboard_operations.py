@@ -22,6 +22,7 @@ from .graph_store import GraphStore, active_connection, on_rollback
 from .project_package import layout
 from .readable_ids import allocate_id
 from .storyboard_art import StoryboardArtMixin
+from .storyboard_assets import StoryboardAssetsMixin, element_views, validate_elements
 from .storyboard_audio import (
     AUDIO_FIELDS,
     apply_audio,
@@ -178,7 +179,10 @@ def _apply(db, board, change, block_ids):
         if candidate is None or panel is None or shot is None:
             raise ValueError('请先采用此格候选图再用于编排')
         _set_frame(db, shot, {'offset_ms': panel['offset_ms'], 'sketch_path': candidate['path']}, board['approved'])
-        panel['frame_id'] = next(row['id'] for row in shot['keyframes'] if row['offset_ms'] == panel['offset_ms'])
+        selected_frame = next(row for row in shot['keyframes'] if row['offset_ms'] == panel['offset_ms'])
+        panel['frame_id'] = selected_frame['id']
+        if type(candidate.get('simple_color')) is bool:
+            selected_frame['sketch_source'] = {'source': 'panel', 'panel_id': panel['id'], 'candidate_id': candidate['id'], 'simple_color': candidate['simple_color']}
         return
     if op in {"create_panel", "update_panel", "delete_panel", "add_panel_candidate", "adopt_panel_candidate"}:
         apply_panel(board, change, lambda prefix: allocate_id(db, "storyboard", prefix), _image_path)
@@ -216,8 +220,12 @@ def _apply(db, board, change, block_ids):
             shot["keyframes"].remove(frame)
 
 
-class StoryboardOperationsMixin(StoryboardPanelsMixin, StoryboardArtMixin, StoryboardVideoMixin):
+class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, StoryboardArtMixin, StoryboardVideoMixin):
     _store: GraphStore
+
+    def read_storyboard_usage_tips(self):
+        from .storyboard_usage_tips import read_usage_tips
+        return read_usage_tips()
 
     def export_storyboard_script(self, unit_id, format, path, illustrated=True, annotated=True):
         from .storyboard_manuscript import export_scene
@@ -227,7 +235,7 @@ class StoryboardOperationsMixin(StoryboardPanelsMixin, StoryboardArtMixin, Story
         with self._store.connect() as db:
             if not db.in_transaction:
                 db.execute("BEGIN")
-            return _load(db, unit_id, layout(self._store.path).material / "storyboard")
+            return element_views(_load(db, unit_id, layout(self._store.path).material / "storyboard"), self.get_asset)
 
     def check_storyboard(self, unit_id):
         from .storyboard_review import check_storyboard
@@ -378,7 +386,7 @@ class StoryboardOperationsMixin(StoryboardPanelsMixin, StoryboardArtMixin, Story
     def apply_storyboard_changes(self, unit_id, revision, changes):
         return self._write_storyboard(unit_id, revision, changes)
 
-    def _write_storyboard(self, unit_id, revision, changes, *, render_receipt=None, expected_style=None, expected_body_revision=None, sketch_receipt=None, sketch_basis=None, media_patch=None, media_audit=None):
+    def _write_storyboard(self, unit_id, revision, changes, *, render_receipt=None, expected_style=None, expected_body_revision=None, sketch_receipt=None, sketch_basis=None, media_patch=None, media_audit=None, asset_analysis=False):
         if sketch_receipt is not None and sketch_basis is None:
             raise ValueError('生成草图须提供完整生成依据')
         if media_patch is not None and (not isinstance(media_patch, dict) or set(media_patch) != {'shot_id', 'values'}
@@ -396,6 +404,10 @@ class StoryboardOperationsMixin(StoryboardPanelsMixin, StoryboardArtMixin, Story
                 raise ContentConflictError("分镜已修改，请刷新后重试")
             if not isinstance(changes, list) or (not changes and media_patch is None):
                 raise ValueError('请提供分镜变更')
+            if asset_analysis:
+                unit_row = db.execute('SELECT data FROM script_units WHERE id=?', (unit_id,)).fetchone()
+                if unit_row is None or json.loads(unit_row[0])['body_revision'] != expected_body_revision:
+                    raise ContentConflictError('正文依据已变化，请重新分析')
             if render_receipt is not None:
                 from .project_style import effective_fields, read_defaults, render_agreement
                 source = db.execute(
@@ -413,7 +425,7 @@ class StoryboardOperationsMixin(StoryboardPanelsMixin, StoryboardArtMixin, Story
                 def locked_asset(identifier):
                     row = asset_db.execute("SELECT data FROM assets WHERE id=?", (identifier,)).fetchone()
                     if row is None:
-                        raise ValueError("资产不存在")
+                        raise ContentGuardError("资产不存在")
                     return json.loads(row[0])
                 asset_lookup = locked_asset
             if sketch_basis is not None:
@@ -431,7 +443,11 @@ class StoryboardOperationsMixin(StoryboardPanelsMixin, StoryboardArtMixin, Story
             block_ids = {r[0] for r in db.execute("SELECT id FROM script_blocks WHERE unit_id=?", (unit_id,))}
             for index, change in enumerate(changes):
                 with content_item(['changes', index], change):
+                    if 'visual_elements' in change:
+                        validate_elements(change['visual_elements'], asset_lookup, path=['elements' if asset_analysis else 'changes', index, 'visual_elements'], required=False)
                     _apply(db, board, change, block_ids)
+                    if asset_analysis and change.get('op') == 'update_shot':
+                        next(shot for shot in board['shots'] if shot['id'] == change['shot_id'])['assets_analyzed'] = True
             if sketch_receipt is not None:
                 from .storyboard_review import sketch_signature
                 assert sketch_basis is not None
@@ -448,6 +464,7 @@ class StoryboardOperationsMixin(StoryboardPanelsMixin, StoryboardArtMixin, Story
                 generated_panel = next(panel for shot in board['shots'] for panel in shot.get('panels', []) if panel['id'] == generation['panel_id'])
                 generated_panel['candidates'][-1]['generation_basis'] = deepcopy(generation['basis'])
                 generated_panel['candidates'][-1]['generation_prompt'] = generation['prompt']
+                generated_panel['candidates'][-1]['simple_color'] = generation['simple_color']
             resolve_markers(board)
             validate_camera(board)
             validate_audio(board)
@@ -506,4 +523,4 @@ class StoryboardOperationsMixin(StoryboardPanelsMixin, StoryboardArtMixin, Story
             if active_connection(self._store.path) is None:
                 db.commit()
             rollback.pop_all()
-            return board
+            return element_views(board, asset_lookup)

@@ -1,0 +1,161 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>空间布局重复测试与推荐用法</title><style>body{font-family:"Microsoft YaHei",system-ui,sans-serif;margin:24px;background:#f3f5f8;color:#202b3b;line-height:1.75}main{max-width:1700px;margin:auto}.pair{display:grid;grid-template-columns:1fr 1fr;gap:16px}section{margin:30px 0}figure{margin:0;background:white;border:1px solid #dce2ea;border-radius:8px;overflow:hidden}img{display:block;width:100%;height:auto}figcaption{padding:12px;font-size:14px}a{color:#215fa6}table{border-collapse:collapse;width:100%;font-size:14px;background:white}td,th{border:1px solid #dce2ea;padding:10px;text-align:left}pre{white-space:pre-wrap;background:#eef2f6;padding:15px}code{overflow-wrap:anywhere}.note{padding:18px;background:white;border-left:4px solid #297759}@media(max-width:800px){.pair{grid-template-columns:1fr}}main{max-width:1100px;background:white;padding:32px 40px}h2{margin-top:35px;border-bottom:1px solid #dce2ea}p,li{font-size:15px}@media print{body{background:white}main{padding:0}tr{break-inside:avoid}}</style><main><h1>空间布局重复测试与推荐用法</h1>
+<p>日期：2026年11月7日。本轮新增18次真实生成，无失败、无重试、无择优或修图；此前三轮16张保留为历史证据，不混入本轮计数。累计34张，但下表仅统计新一轮固定配置样本。</p>
+<p>在本轮已测用法中，<strong>需要精确控制人物二维占位时优先使用FLUX.3原生区域表；需要保留现有门墙结构时，FLUX布局图配合明确文字更贴近输入场景，但人物比例波动较大。</strong> Qwen的圈选没有消除色块方式已有的比例偏差，ChatGPT复验仍将后景成人缩得过小。没有在这两者上找到可承担精确空间控制的已测用法。</p>
+<p>这里的“推荐”针对当前简单场景及实际本机配置，不是对所有作品、机位或模型版本的全局最优结论。</p>
+<h2>重复测试设计</h2>
+<table>
+<thead>
+<tr>
+<th>对象</th>
+<th>比较方式</th>
+<th>新种子</th>
+<th>布局</th>
+<th style="text-align:right">请求数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FLUX.3 Klein</td>
+<td>原生区域表、布局图＋明确文字</td>
+<td>1701、2903</td>
+<td>原布局、水平镜像</td>
+<td style="text-align:right">8</td>
+</tr>
+<tr>
+<td>Qwen Image2.1</td>
+<td>淡色矩形布局、彩色圈选编辑</td>
+<td>1701、2903</td>
+<td>原布局、水平镜像</td>
+<td style="text-align:right">8</td>
+</tr>
+<tr>
+<td>ChatGPT</td>
+<td>复验此前的布局图＋明确文字</td>
+<td>工具不公开</td>
+<td>原布局、水平镜像</td>
+<td style="text-align:right">2</td>
+</tr>
+</tbody>
+</table>
+<p>FLUX两种方式都固定16步，Qwen两种方式都固定40步；本地采样均为CFG1、Euler/simple、1280×736，沿用同一普通INT8 convrot权重。相同模型内按种子和镜像配对，不把不同采样步数混在一起解释。</p>
+<p>Qwen两种提示仅将“椭圆”替换为“矩形”，其他中文要求一致，用于比较标注形状与填充形式。FLUX比较的是完整输入配方：原生文字区域表的纯文生图，对比布局参考图加显式位置/比例文字；编码路径、文字长度等也不同，因此不是只改变一个协议字段的消融实验。ChatGPT在同一聊天内顺序复验，底层型号、随机种子与上下文隔离不可控，不能与本地种子实验视作完全同等。</p>
+<p>任务总计16个本地生成，服务侧观察约238秒，另有2次ChatGPT调用。用量和费用未由服务提供，记录未知。实际参数、运行版本、输入、逐次工作流、回执、历史及未经修改原图均保留，没有操作叙事工程业务数据。</p>
+<h2>场景与评价</h2>
+<p>延续前轮的两位成人、一位儿童、门和空桌场景。红衣A与黄衣C在前景，蓝衣B在后景；镜像后横向顺序相反。B与A实际同高，要求B的画面高度约为A的0.50，C约为A的0.67。空间参考与脚底目标不变。</p>
+<p>主代理独立查看全部18张原图，近似标注头顶与脚底，检查身份、左右、辅助标记、额外物件、脚底位置和比例。统计为人工近似值，不是自动检测或精确三维测量。预先约定的探索范围是脚底归一化误差每轴≤0.06，B/A在0.4—0.6、C/A在0.55—0.8。表中“范围内”仅指这些二维抽查项，并非整张图、三维结构或摄影机合格。</p>
+<h2>本轮结果</h2>
+<table>
+<thead>
+<tr>
+<th>用法</th>
+<th style="text-align:right">新图数</th>
+<th>B/A画面高度范围 目标0.50</th>
+<th>C/A画面高度范围 目标0.67</th>
+<th style="text-align:right">二维抽查在探索范围内</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FLUX 原生区域表</td>
+<td style="text-align:right">4</td>
+<td>0.50—0.50</td>
+<td>0.65—0.67</td>
+<td style="text-align:right">4/4</td>
+</tr>
+<tr>
+<td>FLUX 布局图＋文字</td>
+<td style="text-align:right">4</td>
+<td>0.51—0.59</td>
+<td>0.59—0.74</td>
+<td style="text-align:right">4/4</td>
+</tr>
+<tr>
+<td>Qwen 色块布局</td>
+<td style="text-align:right">4</td>
+<td>0.69—0.87</td>
+<td>0.50—0.66</td>
+<td style="text-align:right">0/4</td>
+</tr>
+<tr>
+<td>Qwen 圈选编辑</td>
+<td style="text-align:right">4</td>
+<td>0.73—0.89</td>
+<td>0.51—0.67</td>
+<td style="text-align:right">0/4</td>
+</tr>
+<tr>
+<td>ChatGPT 布局图＋文字</td>
+<td style="text-align:right">2</td>
+<td>0.31—0.32</td>
+<td>0.68—0.70</td>
+<td style="text-align:right">0/2</td>
+</tr>
+</tbody>
+</table>
+<p>全部18张都保持了人物横向顺序、两成人一儿童的基本身份，以及标记清除；没有发现新增人物或道具。主要差异在位置与尺度，而不是能否生成完整画面。</p>
+<h3>FLUX 原生区域表</h3>
+<p>四张B/A均约0.50，C/A约0.66，脚底最大单轴归一化偏差约1.0%。在两个新种子、两种镜像布局下，人物画面区域保持得最接近目标。</p>
+<p>但两张原布局图都把后墙门画成侧墙门。它们保持了门的屏幕区域，却改变了所属墙面；这不是布局完全正确。边界框不能独立编码深度、表面朝向或物理连接。</p>
+<h3>FLUX 布局图加明确文字</h3>
+<p>四张都保持了人物站位、左右关系，门与墙线也更贴近参考图。人物比例仍在宽松探索范围内，但B/A波动至约0.51—0.59，C/A约0.59—0.74，明显不如原生区域表集中。</p>
+<p>因此，若需要保留已有场景结构，可优先考虑这套方式；不能把本轮保留门墙的结果推广为所有复杂背景均不改变。尚未测试“场景参考图＋原生区域表”的混合方案，不能将它列为已经验证的最优配方。</p>
+<h3>Qwen 色块与圈选</h3>
+<p>两种方式都能清除标记、识别左右布局，但每张B的画面高度都超过目标范围，且脚底明显前移。色块B/A约0.69—0.87，圈选约0.73—0.89；圈选没有显示出稳定优势。部分镜像图的儿童也缩得过小。</p>
+<p>本轮没有证实换种子或将色块改为圈选能解决精确比例问题。此结论仅限本机已测的两种参考图编辑方式，未验证或否定其他区域插件、独立蒙版、ControlNet或尚未确认的原生边界框协议。</p>
+<h3>ChatGPT 复验</h3>
+<p>两张保持布局和标记清除，但B/A仍约0.31—0.33，与此前出现的后景人物过小一致。因此布局图＋明确文字可引导大体构图，当前不宜承担精确的后景尺度约束。没有比较其他提示配方或独立纯净会话，不能声称已经找到ChatGPT自身的最优形式。</p>
+<h2>推荐用法</h2>
+<table>
+<thead>
+<tr>
+<th>任务</th>
+<th>当前推荐</th>
+<th>需要保留的检查</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>人物二维位置、画面占比优先</td>
+<td>FLUX原生区域表＋自然场景描述</td>
+<td>人物尺度、物件深度、墙面归属、遮挡与表演</td>
+</tr>
+<tr>
+<td>已有门墙及构图结构需要保留</td>
+<td>FLUX简洁布局图＋明确空间文字</td>
+<td>人物大小漂移、背景变化；不能默认像素保真</td>
+</tr>
+<tr>
+<td>Qwen只需大体布局</td>
+<td>保持图示简洁；本轮色块与圈选均不作为精确约束</td>
+<td>特别检查后景成人是否被拉近放大</td>
+</tr>
+<tr>
+<td>ChatGPT只需大体构图</td>
+<td>使用简洁占位图＋明确身份与空间关系</td>
+<td>特别检查后景人物是否过小</td>
+</tr>
+</tbody>
+</table>
+<h3>FLUX 区域表的组织方式</h3>
+<p>正文描述整体场景、人物关系、自然动作、光照和线描风格，并用<code>&lt;obj_1&gt;</code>等标记关联对象。每个对象一行<code>id、bbox、desc</code>，程序从明确的目标画面区域转换坐标，不让模型手工拼接机械字段。</p>
+<p>坐标约定保持一致：左上角为原点，按0—1000归一化，边界框顺序为<code>[y_min,x_min,y_max,x_max]</code>。输出比例应与布局画布一致。描述保留身份、前后关系和必要行为，区域表承担二维位置与尺度。标签、顺序和参考图引用由程序维护。</p>
+<p>当前原生测试没有给FLUX人偶截图。若正式设计中的人物姿态尚未确定，不能直接把预演默认站姿的包围盒当作必须服从的身体轮廓；应使用已经明确的画面占位意图，并把姿态设计作为另一个依据。</p>
+<h3>布局图与文字的组织方式</h3>
+<p>去掉网格、坐标轴、摄影机图标和密集说明，只保留必要场景结构和对象占位。文字区分身份、左右前后、脚底位置、投影尺度及哪些图形需要清除。保持场景的要求与替换占位的要求分别说清楚。</p>
+<p>这套做法在FLUX上有本轮证据，在Qwen和ChatGPT上只支持大体构图。不能用同一张提示图与同一段通用提示替代所有模型的适配。</p>
+<h2>接入边界</h2>
+<p>推荐将已确定的三维设计投影为中立布局数据，再分别转换为模型输入。预演中未确定的姿态、模拟或接触不进入正式出图依据。二维布局符合也不自动表示关键帧正确，物品和人物的空间关系仍需单独复核。</p>
+<p>本轮只覆盖一个简单场景、两个本地种子与镜像变化，没有不同景别、俯仰、复杂遮挡或多人交互。后续若验证混合输入、动作姿态或复杂空间，应另设隔离实验，不用增加无界重试来制造通过结果。本报告不新增产品实现，也没有自动切换生图后端。</p>
+<h2>原始材料</h2>
+<ul>
+<li><a href="../artifacts/spatial-reference-test-20261107-repeat/comparison.html">全部18张原图对照</a></li>
+<li><a href="../artifacts/spatial-reference-test-20261107-repeat/protocol.json">预先记录的测试设计</a></li>
+<li><a href="../artifacts/spatial-reference-test-20261107-repeat/assessment.json">逐图人工标注与计算</a></li>
+<li><a href="../artifacts/spatial-reference-test-20261107-repeat/manual-annotations.json">原始近似标注点</a></li>
+<li><a href="../artifacts/spatial-reference-test-20261107-repeat/comfy-repeat-summary.json">本地16次真实工作流及回执索引</a></li>
+<li><a href="../artifacts/spatial-reference-test-20261107-repeat/chatgpt-results.json">ChatGPT两次调用记录</a></li>
+<li><a href="../artifacts/spatial-reference-test-20261107-repeat/run-comfy-repeat.py">本地复现脚本</a></li>
+<li><a href="SPATIAL_LAYOUT_GENERATION_TEST_REPORT_20261107.md">前三轮独立报告</a></li>
+</ul>
+<p>旧报告、旧图和历史回执均未覆盖。此前16张与本轮18张分组保存，不合并成模型准确率。</p>
+</main></html>

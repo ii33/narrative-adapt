@@ -70,7 +70,8 @@ def attempt(ops, row, expected, call):
         try:
             result = call(row['arguments'])
         except _errors() as exc:
-            row.update(status='staged', submission_status='staged', validation_status='invalid', problems=_problem(exc))
+            row.update(status='staged', submission_status='staged', validation_status='invalid',
+                problems=_problem(exc, operation=row['operation'], arguments=row['arguments'], target=row['target']))
             _CONTEXT.reset(token)
             token = _CONTEXT.set(None)
             store.stage_content_submission(row['target']['node_id'], row, expected)

@@ -157,7 +157,7 @@ class NativeBridge(QObject):
     @Slot(int, object, object)
     def _on_worker_done(self, request_id: int, payload: object, error: object) -> None:
         with self._assistant_lock:
-            self._assistant_jobs.pop(request_id, None)
+            assistant_job = self._assistant_jobs.pop(request_id, None)
         request = self._requests.pop(request_id, None)
         if not self._requests:
             self.busyChanged.emit(False)
@@ -169,6 +169,11 @@ class NativeBridge(QObject):
         if kind == "graph_view" and not self._unified_active:
             return
         if error is not None:
+            if assistant_job and assistant_job.get("writing_target"):
+                self.resultReady.emit("screenplay_writing_failed", {
+                    "target": assistant_job["writing_target"], "task_id": assistant_job["task_id"],
+                    "project_path": assistant_job["project_path"], "error": str(error),
+                })
             conflict = self._content_forms.take_conflict(content_form)
             if conflict:
                 self.resultReady.emit("content_submission_conflict", {**conflict, "form_id": content_form,
@@ -971,7 +976,9 @@ class NativeBridge(QObject):
         def work(ops):
             try:
                 actions = {
-                    "read_storyboard", "check_storyboard", "preview_storyboard", "preview_storyboard_changes", "apply_storyboard_changes",
+                    "read_storyboard", "read_storyboard_usage_tips", "check_storyboard", "preview_storyboard", "preview_storyboard_changes", "apply_storyboard_changes",
+                    "read_storyboard_assets_context", "submit_storyboard_assets",
+                    "create_missing_storyboard_assets",
                     "load_storyboard_camera_presets", "save_storyboard_camera_preset",
                     "read_storyboard_video_settings", "save_storyboard_video_settings", "read_storyboard_video_receipts",
                     "set_storyboard_animation", "render_storyboard_animatic", "attach_storyboard_video", "detach_storyboard_video",
@@ -986,10 +993,31 @@ class NativeBridge(QObject):
             except (ValueError, OSError, KeyError) as exc:
                 return {"token": token, "operation": operation, "error": str(exc)}
             except Exception as exc:
-                if operation != "check_storyboard":
+                if operation not in {"check_storyboard", "read_storyboard_usage_tips"}:
                     raise
                 # A background diagnostic must never release an unrelated write.
                 return {"token": token, "operation": operation, "error": str(exc), "error_type": type(exc).__name__}
+        if operation == "read_storyboard_usage_tips":
+            def failed(exc):
+                return {"token": token, "operation": operation, "error": str(exc), "error_type": type(exc).__name__}
+
+            try:
+                path = self._project()
+            except Exception as exc:
+                self.resultReady.emit("storyboard", failed(exc))
+                return
+
+            def read_help():
+                try:
+                    return work(project_catalog.open_graph_project(path))
+                except Exception as exc:
+                    return failed(exc)
+
+            try:
+                self._submit("storyboard", read_help)
+            except Exception as exc:
+                self.resultReady.emit("storyboard", failed(exc))
+            return
         self._project_task("storyboard", work)
 
     @Slot(str, str, str)
@@ -1050,17 +1078,33 @@ class NativeBridge(QObject):
         self._project_task("adaptation_check", lambda ops: ops.check_adaptation())
 
     @Slot(str, str, str)
-    def loadAssets(self, category: str, moment: str, node_id: str) -> None:
+    @Slot(str, str, str, str)
+    def loadAssets(self, category: str, moment: str, node_id: str, domain: str = "adaptation") -> None:
         def work(ops):
-            result = ops.list_assets(category, moment=moment, node_id=node_id)
-            return result | {"moments": ops.asset_moments(),
-                             "nodes": ops.adaptation_snapshot().get("nodes", [])}
+            result = ops.list_assets(category, moment=moment, node_id=node_id, domain=domain)
+            snapshot = ops.adaptation_snapshot() if domain == "adaptation" else ops.graph_snapshot()
+            return result | {"moments": ops.asset_moments(domain=domain),
+                             "nodes": snapshot.get("nodes", [])}
         self._project_task("assets", work)
 
     @Slot("QVariantMap", int)
     def saveAsset(self, payload: dict, revision: int) -> None:
         self._project_task("asset_saved", lambda ops: {
             "asset": ops.save_asset(dict(payload), expected_revision=revision)})
+
+    @Slot("QVariantMap", int, int)
+    def saveStoryboardElementAsset(self, payload: dict, revision: int, token: int) -> None:
+        project_path = str(self._project_path or "")
+        frozen = json.loads(json.dumps(dict(payload), ensure_ascii=False))
+
+        def work(ops):
+            result = {"token": token, "project_path": project_path}
+            try:
+                return result | {"asset": ops.save_asset(frozen, expected_revision=revision)}
+            except Exception as exc:
+                return result | {"error": str(exc), "error_type": type(exc).__name__}
+
+        self._project_task("storyboard_element_asset", work)
 
     @Slot(str)
     def loadAsset(self, asset_id: str) -> None:
@@ -1491,24 +1535,39 @@ class NativeBridge(QObject):
 
     @Slot(str, "QVariantMap")
     def screenplayWritingTurn(self, text: str, target: dict) -> None:
+        frozen_target = json.loads(json.dumps(dict(target), ensure_ascii=False))
+        frozen_path = str(self._project_path or "")
+
+        def failed(message):
+            self.resultReady.emit("screenplay_writing_failed", {
+                "target": frozen_target, "task_id": "", "project_path": frozen_path, "error": str(message),
+            })
+
         try:
             requested_chat, access_mode = self._capture_assistant_access(self._assistant_chat)
         except (ValueError, OSError) as exc:
+            failed(exc)
             self.errorOccurred.emit("screenplay_writing", str(exc))
             return
-        frozen_target = json.loads(json.dumps(dict(target), ensure_ascii=False))
 
         def apply(task):
-            self._assistant_turn(text, "", requested_chat, writing_task=task, access_mode_override=access_mode)
-            with self._assistant_lock:
-                task_id = self._assistant_jobs.get(self._next_request, {}).get("task_id", "")
-            return {"target": task.get("target", frozen_target), "started": True, "task_id": task_id}
+            if "writing_prepare_error" in task:
+                failed(task["writing_prepare_error"])
+                self.errorOccurred.emit("screenplay_writing", task["writing_prepare_error"])
+                return {"target": frozen_target, "started": False, "error": task["writing_prepare_error"]}
+            task_id = self._assistant_turn(text, "", requested_chat, writing_task=task, access_mode_override=access_mode)
+            return {"target": task.get("target", frozen_target), "started": bool(task_id), "task_id": task_id or ""}
 
-        self._project_task("screenplay_writing", lambda ops: ops.prepare_script_writing_task(
-            frozen_target, prompt=text), apply)
+        def prepare(ops):
+            try:
+                return ops.prepare_script_writing_task(frozen_target, prompt=text)
+            except Exception as exc:
+                return {"writing_prepare_error": str(exc)}
+
+        self._project_task("screenplay_writing", prepare, apply)
 
     def _assistant_turn(self, text: str, image_path: str, requested_chat: str | None,
-                        *, writing_task: dict | None = None, access_mode_override: str | None = None, attachment_paths: list[str] | None = None) -> None:
+                        *, writing_task: dict | None = None, access_mode_override: str | None = None, attachment_paths: list[str] | None = None) -> str | None:
         """Run an assistant turn with the tools in assistant.ASSISTANT_TOOLS.
 
         Native tools create source slices, plan exact pattern ranges, and
@@ -1524,16 +1583,24 @@ class NativeBridge(QObject):
         )
 
         paths = list(attachment_paths or [])
+        def fail_start(error):
+            if writing_task is not None:
+                self.resultReady.emit("screenplay_writing_failed", {
+                    "target": writing_task.get("target", {}), "task_id": "",
+                    "project_path": str(self._project_path or ""), "error": str(error),
+                })
+            self.errorOccurred.emit("assistant", str(error))
+
         if str(image_path or "").strip():
             paths.append(str(image_path).strip())
         message = (text or "").strip() or ("请查看本条附件。" if paths else "")
         if not message:
-            self.errorOccurred.emit("assistant", "先说一句想问什么")
+            fail_start("先说一句想问什么")
             return
         try:
             path = self._project()
         except ValueError as exc:
-            self.errorOccurred.emit("assistant", str(exc))
+            fail_start(exc)
             return
         image = str(image_path or "").strip()
         try:
@@ -1542,11 +1609,13 @@ class NativeBridge(QObject):
             if access_mode_override not in {"standard", "full"}:
                 raise ValueError("访问模式须为standard或full")
         except (ValueError, OSError) as exc:
-            self.errorOccurred.emit("assistant", str(exc))
+            fail_start(exc)
             return
 
         job = {"chat_id": requested_chat, "task_id": f"{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}-{uuid4().hex[:8]}", "runtime": None,
                "cancel": threading.Event(), "stop_reason": "user_stopped"}
+        if writing_task is not None:
+            job.update(writing_target=writing_task.get("target", {}), project_path=str(path))
 
         def check_cancelled(metadata=None):
             if job.get("control_error"):
@@ -1686,12 +1755,13 @@ class NativeBridge(QObject):
                         if not step["ok"]:
                             raise ValueError(step["error"])
                         committed = isinstance(step["result"], dict) and step["result"].get("status") in {"accepted", "unchanged"}
-                        if committed and effective_name in {"apply_storyboard_changes", "generate_storyboard_sketch", "generate_storyboard_panel", "generate_storyboard_panels", "render_storyboard_style",
+                        if committed and effective_name in {"apply_storyboard_changes", "submit_storyboard_assets", "create_missing_storyboard_assets", "generate_storyboard_sketch", "generate_storyboard_panel", "generate_storyboard_panels", "render_storyboard_style",
                                     "set_storyboard_animation", "attach_storyboard_video", "detach_storyboard_video",
                                     "prepare_storyboard_video", "submit_storyboard_video", "refresh_storyboard_video"}:
                             self._conversation_event(ops, path, {
                                 "event": "storyboard_submission", "chat_id": chat_id, "task_id": task_id,
-                                "unit_id": effective_args.get("unit_id"), "board": step["result"],
+                                "unit_id": effective_args.get("unit_id"),
+                                "board": step["result"].get("board", step["result"]),
                             })
                         if committed and writing_task is not None and effective_name in {"submit_script_unit", "apply_script_block_changes"}:
                             unit_id = str(effective_args.get("unit_id") or "")
@@ -1894,6 +1964,7 @@ class NativeBridge(QObject):
             request_id = self._next_request + 1
             self._assistant_jobs[request_id] = job
         self._project_task("assistant", work, apply)
+        return job["task_id"]
 
     @Slot(str, str)
     def assistantStop(self, chat_id: str, task_id: str) -> None:

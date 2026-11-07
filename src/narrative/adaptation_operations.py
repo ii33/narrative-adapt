@@ -202,6 +202,9 @@ def _issues(state):
         value = ("未知" if values[-1].get("state_kind") == "unknown" else values[-1].get("value")) if values else None
         if not isinstance(value, str) or (value not in {"无", "未知"} and (value not in active or value == identifier)):
             issue("ITEM_HOLDER_REQUIRED", f"物品“{node['name']}”缺少明确持有者，请在事件处指定节点、无或未知", identifier)
+
+    from .event_location import event_location_issues
+    issues.extend(event_location_issues(list(nodes.values()), state["properties"], snapshot=state))
     return issues
 
 
@@ -271,6 +274,37 @@ def _merge_source(state, source_nodes, records, source_revision, *, partial=Fals
 
 
 
+def _set_initial_location(state, db, node, value):
+    def invalid(message):
+        raise ContentValidationError(message, problems=[{"code": "EVENT_LOCATION_VALUE", "message": message,
+            "path": ["changes", "initial_location"], "object_id": node["id"]}])
+    if node["node_type"] != "event":
+        invalid("initial_location只适用于事件节点")
+    nodes = {item["id"]: item for item in state["nodes"]}
+    target = nodes.get(value) if isinstance(value, str) else None
+    if not isinstance(value, str) or (value not in {"无", "未知"} and
+            (not target or target["node_type"] != "location" or target.get("suppressed") or target.get("retracted")
+             or target.get("context_id", "canon") != node.get("context_id", "canon"))):
+        invalid("事件地点须为同语境活动location节点编号、无或未知")
+    from .event_location import LOCATION_PROPERTIES, LOCATION_SEMANTICS
+    definition = next((row for row in state["properties"] if row.get("kind") == "property_definition"
+        and (row["id"] in LOCATION_PROPERTIES or row.get("semantic") in LOCATION_SEMANTICS)), None)
+    if definition is None:
+        definition = {"id": "地点", "kind": "property_definition", "value_type": "either", "cardinality": "one", "semantic": "event_location"}
+        state["properties"].append(definition)
+    if definition.get("value_type") not in {"node", "either"}:
+        invalid("既有地点属性定义须先明确修正为node或either类型")
+    if value == "无" and definition["value_type"] == "node":
+        definition["value_type"] = "either"
+    row = {"id": _value_id(db, state), "kind": "property_change", "node_id": node["id"], "property_id": definition["id"],
+           "event_id": node["id"], "context_id": node.get("context_id", "canon"), "scope": "world",
+           "op": "unknown" if value == "未知" else "set",
+           "sequence": max((r["sequence"] for r in state["properties"] if r.get("kind") == "property_change" and r.get("event_id") == node["id"]), default=-1) + 1}
+    if value != "未知":
+        row["value"] = value
+    state["properties"].append(row)
+
+
 class AdaptationOperationsMixin:
     _store: GraphStore
 
@@ -290,7 +324,7 @@ class AdaptationOperationsMixin:
                 issues = _issues(state)
             blockers = issues
             if blockers:
-                raise ContentValidationError(blockers[0]["message"])
+                raise ContentValidationError(blockers[0]["message"], problems=blockers)
             state["revision"] += 1
             db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)", (_KEY, json.dumps(state, ensure_ascii=False)))
             revision = int(db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0])
@@ -342,7 +376,7 @@ class AdaptationOperationsMixin:
         report = {}
         def mutate(state, db):
             if node_id is None:
-                raw = {k: v for k, v in changes.items() if k not in _EXTRA and k != "initial_holder"}
+                raw = {k: v for k, v in changes.items() if k not in _EXTRA and k not in {"initial_holder", "initial_location"}}
                 node = Node.model_validate({"id": "pending", **raw}).model_dump(mode="json")
                 node["id"] = _node_id(db, state, node["node_type"])
                 node.update(sort_id=max([n["sort_id"] for n in state["nodes"]] or [0]) + 1024,
@@ -362,10 +396,18 @@ class AdaptationOperationsMixin:
                 report["created_node_id"] = node["id"]
             else:
                 node = _find(state, node_id)
-                node.update(changes)
+                node.update({key: value for key, value in changes.items() if key != "initial_location"})
+            if "initial_location" in changes:
+                _set_initial_location(state, db, node, changes["initial_location"])
             if parent_id is not None:
                 _parent(state, node["id"], parent_id)
-        return self._adaptation_write(mutate, expected_revision, reason) | report
+        try:
+            return self._adaptation_write(mutate, expected_revision, reason) | report
+        except ContentValidationError as error:
+            for problem in error.problems:
+                if problem.get("code", "").startswith("EVENT_LOCATION"):
+                    problem["path"] = ["changes", "initial_location"]
+            raise
 
     def copy_adaptation_node(self, node_id, after_id=None, parent_id=None,
                              expected_revision=None, reason="复制改编节点") -> dict:
@@ -610,7 +652,15 @@ class AdaptationOperationsMixin:
                 row.pop("value", None)
             else:
                 row["value"] = copy.deepcopy(value)
-        return self._adaptation_write(mutate, expected_revision, reason)
+        try:
+            return self._adaptation_write(mutate, expected_revision, reason)
+        except ContentValidationError as error:
+            for problem in error.problems:
+                code = problem.get("code", "")
+                if code.startswith("EVENT_LOCATION"):
+                    field = "event_id" if code == "EVENT_LOCATION_ANCHOR" else "scope" if scope not in {None, "world"} else "op" if op in {"clear", "remove"} else "value"
+                    problem["path"] = [field]
+            raise
 
     def delete_adaptation_property_changes(self, record_ids, expected_revision=None, reason="删除改编属性变更"):
         def mutate(state, _db):

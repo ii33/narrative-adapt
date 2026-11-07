@@ -13,6 +13,32 @@ SplitView {
     property var elements: []
     property var drafts: ({})
     property string savingId: ""
+    property var elementAction: ({})
+    property bool elementActionPending:false
+    property int elementAssetToken:0
+    property int elementBindToken:0
+    property var createdElementAsset: ({})
+    function elementScope(shotId,index) {
+        const owner=desk.shots.find(s=>s.id===shotId),row=(owner?.visual_elements||[])[index]
+        return row?{project:desk.app.project.path,unit_id:desk.unitId,shot_id:shotId,index:index,revision:desk.board.revision,row:JSON.parse(JSON.stringify(row))}:({})
+    }
+    function bindElement(scope,asset,created) {
+        if(!scope.shot_id)return
+        const owner=desk.shots.find(s=>s.id===scope.shot_id),row=(owner?.visual_elements||[])[scope.index]
+        if(scope.project!==desk.app.project.path||scope.unit_id!==desk.unitId||scope.revision!==desk.board.revision||JSON.stringify(row)!==JSON.stringify(scope.row)){
+            desk.message=(created?"资产“"+asset.title+"”已建立；":"")+"镜头元素已变化，关联未完成，请重新选择该元素。";elementActionPending=false;return
+        }
+        elementAction=scope;createdElementAsset=created?asset:({});elementActionPending=true
+        const rows=JSON.parse(JSON.stringify(owner.visual_elements||[]));rows[scope.index].asset_id=asset.id
+        desk.request("apply_storyboard_changes",{unit_id:scope.unit_id,revision:scope.revision,changes:[{op:"update_shot",shot_id:scope.shot_id,visual_elements:rows}]})
+        elementBindToken=desk.token
+    }
+    function chooseElement(shotId,index,kind) {assetPicker.choose(index,kind,elementScope(shotId,index))}
+    function createElement(shotId,index) {
+        const scope=elementScope(shotId,index);if(!scope.shot_id)return
+        elementAction=scope;createdElementAsset=({});assetCreate.category=({person:"appearance",prop:"item",set:"location"}[scope.row.kind]);assetCreate.revision=-1
+        assetCreateTitle.text=scope.row.name||"";assetCreateDetail.text="";assetCreate.errorText="";assetCreate.open();bridge.loadAssets(assetCreate.category,"","","adaptation")
+    }
     function captureDraft(){if(loadedId)drafts[loadedId]={description:description.text,language:language.text,sound_notes:soundNotes.text,elements:JSON.parse(JSON.stringify(elements))}}
     function loadDraft() {
         if(savingId&&desk.board.revision!==loadedRevision){delete drafts[savingId];if(loadedId===savingId)loadedId="";savingId=""}
@@ -26,34 +52,85 @@ SplitView {
     function saveDraft() {
         if(loadedId!==desk.shot.id||loadedRevision!==desk.board.revision)return
         savingId=loadedId
-        desk.save({op:"update_shot",shot_id:loadedId,description:description.text,shot_language:language.text,sound_notes:soundNotes.text,visual_elements:elements})
+        desk.save({op:"update_shot",shot_id:loadedId,description:description.text,shot_language:language.text,sound_notes:soundNotes.text,visual_elements:elements.map(e=>({kind:e.kind,name:e.name,usage:e.usage||"",asset_id:e.asset_id||null}))})
     }
     function pictureRows(owner){
         if((owner.panels||[]).length)return owner.panels.map((p,i)=>{const c=(p.candidates||[]).find(c=>c.id===p.adopted_candidate_id);const f=(owner.keyframes||[]).find(f=>f.id===p.frame_id);return {shot_id:owner.id,panel_id:p.id,label:"画格 "+(i+1),intent:p.intent||"",path:c?.path||p.base?.path||f?.sketch_path||"",snapshot:p.base?.kind==="snapshot"?p.base.png:""}})
         return (owner.keyframes||[]).filter(f=>!!f.sketch_path).map((f,i)=>({label:"关键帧 "+(i+1)+" · "+desk.seconds(f.offset_ms),intent:"",path:f.sketch_path,snapshot:""}))
     }
     function pictureSource(row){if(row.panel_id&&bridge)return bridge.storyboardPanelPreviewUrl(desk.board,row.shot_id,row.panel_id);return row.snapshot?"data:image/png;base64,"+row.snapshot:bridge&&row.path?bridge.storyboardImageUrl(row.path):""}
-    Connections { target:desk; function onShotChanged(){Qt.callLater(script.loadDraft)} function onBoardChanged(){Qt.callLater(script.loadDraft)} function onUnitIdChanged(){drafts=({});loadedId=""} }
+    Connections { target:desk; function onShotChanged(){Qt.callLater(script.loadDraft)} function onBoardChanged(){Qt.callLater(script.loadDraft)} function onUnitIdChanged(){drafts=({});loadedId="";assetCreate.close();assetPicker.close()} }
     Dialog {
         id:assetPicker;objectName:"storyboardVisualAssetPicker";title:"选择项目素材";modal:true;anchors.centerIn:parent;width:500;height:420
         property int elementIndex:-1
         property string category:""
         property var assets:[]
-        function choose(index,kind){elementIndex=index;category=({person:"appearance",prop:"item",set:"location"}[kind]);assets=[];bridge.loadAssets(category,"","");open()}
-        Connections {target:bridge;function onResultReady(kind,result){if(kind==="assets"&&assetPicker.opened&&result.category===assetPicker.category)assetPicker.assets=result.assets||[]}}
-        contentItem:ListView {
+        property string domain:"adaptation"
+        property var directScope: ({})
+        function choose(index,kind,scope){directScope=scope||({});elementIndex=index;category=({person:"appearance",prop:"item",set:"location"}[kind]);assets=[];domain="adaptation";bridge.loadAssets(category,"","",domain);open()}
+        Connections {target:bridge;function onResultReady(kind,result){if(kind==="assets"&&assetPicker.opened&&result.category===assetPicker.category&&(result.domain||"adaptation")===assetPicker.domain)assetPicker.assets=result.assets||[]}}
+        contentItem:ColumnLayout {
+            ComboBox {objectName:"storyboardAssetDomain";currentIndex:assetPicker.domain==="extraction"?1:0;model:["改编资产","提取资产"];onActivated:{assetPicker.domain=currentIndex===1?"extraction":"adaptation";assetPicker.assets=[];bridge.loadAssets(assetPicker.category,"","",assetPicker.domain)}}
+            ListView { Layout.fillWidth:true;Layout.fillHeight:true
             clip:true;model:assetPicker.assets
             delegate:ItemDelegate {
                 required property var modelData
+                objectName:"storyboardElementAssetOption"
+                property string assetId:modelData.id
                 width:ListView.view.width;height:70
                 contentItem:RowLayout {
                     Image {source:bridge&&(modelData.images||[])[0]?.path?bridge.storyboardImageUrl(modelData.images[0].path):"";Layout.preferredWidth:80;Layout.preferredHeight:54;fillMode:Image.PreserveAspectFit}
                     Label {text:modelData.title+" · "+({appearance:"人物形象",item:"物品",location:"地点"}[assetPicker.category]);wrapMode:Text.Wrap;Layout.fillWidth:true}
                 }
-                onClicked:{script.elements[assetPicker.elementIndex].asset_id=modelData.id;script.elements=Array.from(script.elements);assetPicker.close()}
+                onClicked:{if(assetPicker.directScope.shot_id){script.bindElement(assetPicker.directScope,modelData,false);assetPicker.close();return}script.elements[assetPicker.elementIndex].asset_id=modelData.id;script.elements[assetPicker.elementIndex].asset_title=modelData.title;script.elements=Array.from(script.elements);assetPicker.close()}
+            }
             }
         }
     }
+    Dialog {
+        id:assetCreate;objectName:"storyboardCreateElementAssetDialog";title:"建立元素资产";modal:true;anchors.centerIn:parent;width:420
+        property var app:script.desk.app
+        property alias pending:script.elementActionPending
+        property string category:""
+        property int revision:-1
+        property string errorText:""
+        SubmissionState {id:elementAssetSubmission;objectName:"storyboardElementAssetSubmission";owner:assetCreate;enabled:assetCreate.visible;operation:"save_asset";target:({"payload.category":assetCreate.category,"payload.domain":"adaptation"});onRestoreRequested:function(a){assetCreateTitle.text=a.payload.title||"";assetCreateDetail.text=a.payload.detail||""}}
+        contentItem:ColumnLayout {
+            SubmissionFeedback{state:elementAssetSubmission}
+            Label {text:({appearance:"人物形象",item:"物品",location:"地点"}[assetCreate.category])||"资产"}
+            TextField {id:assetCreateTitle;objectName:"storyboardCreateElementAssetTitle";Layout.fillWidth:true;placeholderText:"资产名称 / 具体形象"}
+            TextArea {id:assetCreateDetail;objectName:"storyboardCreateElementAssetDetail";Layout.fillWidth:true;Layout.preferredHeight:90;placeholderText:"设定说明（可选）";wrapMode:TextEdit.Wrap}
+            Label {text:assetCreate.errorText;visible:!!text;color:desk.t.warn;Layout.fillWidth:true;wrapMode:Text.Wrap}
+            RowLayout {
+                Button {objectName:"storyboardSaveElementAsset";text:script.elementActionPending?"正在保存…":"建立并关联";enabled:!!assetCreateTitle.text.trim()&&assetCreate.revision>=0&&!script.elementActionPending&&!script.createdElementAsset.id;onClicked:{
+                    script.elementActionPending=true;script.elementAssetToken=desk.app.nextStoryboardToken();assetCreate.errorText=""
+                    bridge.saveStoryboardElementAsset({category:assetCreate.category,node_id:"",domain:"adaptation",title:assetCreateTitle.text,detail:assetCreateDetail.text},assetCreate.revision,script.elementAssetToken)
+                }}
+                Button {text:script.createdElementAsset.id?"关闭":"取消";enabled:!script.elementActionPending;onClicked:assetCreate.close()}
+            }
+        }
+    }
+    Connections {target:bridge;function onResultReady(kind,payload){
+        if(kind==="assets"&&assetCreate.opened&&payload.category===assetCreate.category&&(payload.domain||"adaptation")==="adaptation")assetCreate.revision=payload.revision
+        if(kind==="storyboard_element_asset"&&payload.token===script.elementAssetToken&&bridge.recentProjectKey(payload.project_path||"")===bridge.recentProjectKey(script.elementAction.project||"")){
+            script.elementActionPending=false
+            if(payload.error){assetCreate.errorText=payload.error;return}
+            const asset=payload.asset||{}
+            if(asset.status==="staged"){assetCreate.errorText="资产内容有问题，请根据提示修改后保存。";return}
+            if(!asset.id){assetCreate.errorText="资产未建立，未执行关联。";return}
+            script.createdElementAsset=asset
+            script.bindElement(script.elementAction,asset,true)
+            if(!script.elementActionPending)assetCreate.errorText=desk.message
+        }
+        if(kind==="storyboard"&&payload.token===script.elementBindToken&&script.elementActionPending){
+            script.elementActionPending=false
+            if(payload.error||payload.result?.status==="staged"){
+                const prefix=script.createdElementAsset.id?"资产“"+script.createdElementAsset.title+"”已建立；":""
+                desk.message=prefix+"元素关联未完成："+(payload.error||"请处理元素检查问题。")
+                if(assetCreate.opened)assetCreate.errorText=desk.message
+            } else {if(assetCreate.opened)assetCreate.close();desk.message="已关联资产"}
+        }
+    }}
     Dialog {
         id:intentEditor;objectName:"storyboardIntentDialog";title:"修改声音意图";modal:true;anchors.centerIn:parent;width:360
         property string intentId:""
@@ -93,6 +170,7 @@ SplitView {
                 ColumnLayout {
                     id:rowContent;anchors.fill:parent;anchors.margins:10
                     RowLayout {
+                        CheckBox { objectName:"storyboardAssetShotCheck";property string shotId:modelData.id;checked:desk.assetShotIds.includes(modelData.id);enabled:!desk.assetAnalysisPending;onToggled:desk.toggleAssetShot(modelData.id,checked) }
                         Label { text:(index+1)+" · "+modelData.title+"　"+desk.seconds(modelData.duration_ms);font.bold:true;Layout.fillWidth:true;wrapMode:Text.Wrap }
                         Button { objectName:"storyboardScriptSelect";visible:!desk.scriptReadOnly;text:"定位";onClicked:desk.seek(desk.startOf(index)) }
                         Button { objectName:"storyboardScriptPanel";visible:!desk.scriptReadOnly;text:"画格";onClicked:{desk.seek(desk.startOf(index));desk.deskMode=1} }
@@ -109,7 +187,28 @@ SplitView {
                     }
                     Label { text:modelData.description||"尚未填写画面说明";Layout.fillWidth:true;wrapMode:Text.Wrap;color:desk.t.ink }
                     Label { text:"镜头语言："+(modelData.shot_language||"未填写");Layout.fillWidth:true;wrapMode:Text.Wrap;color:desk.t.muted }
-                    Label { text:(modelData.visual_elements||[]).map(e=>({person:"人物",prop:"道具",set:"场景"}[e.kind])+" · "+e.name+(e.usage?"："+e.usage:"")+(e.asset_id?"（已绑定素材）":"")).join("；");visible:!!text;Layout.fillWidth:true;wrapMode:Text.Wrap }
+                    ColumnLayout {
+                        objectName:"storyboardShotAssetTable"
+                        Layout.fillWidth:true;spacing:3
+                        property int missingCount:(modelData.asset_elements||[]).filter(e=>["unbound","missing","type_mismatch"].includes(e.status)).length
+                        property int imageMissingCount:(modelData.asset_elements||[]).filter(e=>e.status==="image_missing").length
+                        Label { text:"资产元素"+(parent.missingCount?" · 待确定 / 缺失 "+parent.missingCount+" 项":"")+(parent.imageMissingCount?" · 待出图 "+parent.imageMissingCount+" 项":"");font.bold:true;color:parent.missingCount?desk.t.bad:parent.imageMissingCount?desk.t.warn:desk.t.ink }
+                        Label { visible:!(modelData.visual_elements||[]).length;text:modelData.asset_elements_status==="empty"?"已分析：无出场元素":"尚未分析出场元素";color:desk.t.muted }
+                        Repeater {
+                            model:modelData.asset_elements||modelData.visual_elements||[]
+                            RowLayout {
+                                required property var modelData
+                                required property int index
+                                Layout.fillWidth:true
+                                Label { objectName:"storyboardAssetElementLabel";text:(modelData.label||modelData.name+(modelData.asset_title&&modelData.asset_title!==modelData.name?" — "+modelData.asset_title:""))+(modelData.message?" · "+modelData.message:(!modelData.asset_id?"（待确定）":""));Layout.fillWidth:true;wrapMode:Text.Wrap;color:["unbound","missing","type_mismatch"].includes(modelData.status)?desk.t.bad:modelData.status==="image_missing"?desk.t.warn:desk.t.ink }
+                                Label { text:modelData.usage||"";Layout.fillWidth:true;wrapMode:Text.Wrap;color:desk.t.muted }
+                                Button {objectName:"storyboardChooseElementAsset";text:"选择资产";visible:!desk.scriptReadOnly;enabled:!desk.busy&&!desk.approved&&!script.elementActionPending;onClicked:script.chooseElement(shotId,index,modelData.kind)}
+                                Button {objectName:"storyboardCreateElementAsset";property int elementIndex:index;property string ownerShotId:shotId;text:"建立资产";visible:!desk.scriptReadOnly&&!modelData.asset_id;enabled:!desk.busy&&!desk.approved&&!desk.assetAnalysisPending&&!script.elementActionPending;onClicked:desk.createMissingAssetRow(shotId,index)}
+                                Button {objectName:"storyboardCreateDetailedElementAsset";text:"详细建立";visible:!desk.scriptReadOnly&&!modelData.asset_id;enabled:!desk.busy&&!desk.approved&&!desk.assetAnalysisPending&&!script.elementActionPending;onClicked:script.createElement(shotId,index)}
+                                Button { objectName:"storyboardOpenElementAsset";text:"资产";enabled:!!modelData.asset_id;onClicked:desk.openAsset(modelData.asset_id) }
+                            }
+                        }
+                    }
                     Label {visible:(modelData.source_block_ids||[]).length>0;text:"正文："+(desk.scene?.unit.blocks||[]).filter(b=>(modelData.source_block_ids||[]).includes(b.id)).map(b=>b.payload?.text||"").join("\n");Layout.fillWidth:true;wrapMode:Text.Wrap;color:desk.t.muted}
                     Label {text:modelData.sound_notes||"";visible:!!text;Layout.fillWidth:true;wrapMode:Text.Wrap}
                     Label { text:(modelData.sound_intent_ids||[]).map(id=>(desk.board.sound_intents||[]).find(s=>s.id===id)).filter(Boolean).map(s=>(s.speaker?s.speaker+"：":"")+s.text).join("\n");visible:!!text;Layout.fillWidth:true;wrapMode:Text.Wrap }
@@ -130,7 +229,7 @@ SplitView {
             TextArea { id:description;objectName:"storyboardScriptDescription";Layout.fillWidth:true;Layout.preferredHeight:110;wrapMode:TextEdit.Wrap;enabled:!!desk.shot.id&&!desk.busy&&!desk.approved;placeholderText:"人物动作、空间关系、构图与可见内容" }
             Label { text:"镜头语言" }
             TextArea { id:language;objectName:"storyboardScriptLanguage";Layout.fillWidth:true;Layout.preferredHeight:75;wrapMode:TextEdit.Wrap;enabled:description.enabled;placeholderText:"景别、角度、机位与运镜意图" }
-            Label { text:"视觉元素与素材绑定";font.bold:true }
+            Label { text:"资产元素表";font.bold:true }
             Repeater {
                 model:script.elements
                 ColumnLayout {
@@ -144,7 +243,7 @@ SplitView {
                     }
                     TextField { text:modelData.usage||"";placeholderText:"本镜用途";Layout.fillWidth:true;enabled:description.enabled;onTextEdited:script.elements[index].usage=text }
                     RowLayout {
-                        Label {text:modelData.asset_id?"已绑定项目素材":"尚未绑定素材";Layout.fillWidth:true}
+                        Label {text:modelData.asset_title||modelData.asset_id?modelData.asset_title||"已绑定项目资产":"缺少对应资产";Layout.fillWidth:true}
                         Button {objectName:"storyboardChooseVisualAsset";text:"选择素材";enabled:description.enabled;onClicked:assetPicker.choose(index,modelData.kind)}
                         Button {text:"解除";enabled:description.enabled&&!!modelData.asset_id;onClicked:{script.elements[index].asset_id=null;script.elements=Array.from(script.elements)}}
                     }

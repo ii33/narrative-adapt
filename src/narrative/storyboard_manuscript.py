@@ -58,8 +58,8 @@ def manuscript(board, unit, illustrated, annotated):
             page.paragraphs.append(shot["description"])
         if shot.get("shot_language"):
             page.paragraphs.append("镜头　" + shot["shot_language"])
-        for element in shot.get("visual_elements", []):
-            details = " · ".join(filter(None, [element["name"], element.get("usage"), element.get("asset_id")]))
+        for element in shot.get("asset_elements", shot.get("visual_elements", [])):
+            details = " · ".join(filter(None, [element.get("label", element["name"]), element.get("usage")]))
             page.paragraphs.append("视觉　" + details)
         for key in shot.get("sound_intent_ids", []):
             cue = sound_by_id[key]

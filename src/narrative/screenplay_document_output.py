@@ -35,11 +35,14 @@ def _style(settings, kind):
         style.update(alignment="center", space_before_pt=0, space_after_pt=24)
     elif kind == "transition":
         style["alignment"] = "right"
+    elif kind == "source_reference":
+        style.update(alignment="left", indent_left_mm=0, indent_right_mm=0,
+                     space_before_pt=0, space_after_pt=6)
     return style
 
 
 def _font_size(settings, kind):
-    return settings["font_size_pt"] * (22 / 12 if kind == "title" else 16 / 12 if kind in {"episode", "act"} else 1)
+    return settings["font_size_pt"] * (22 / 12 if kind == "title" else 16 / 12 if kind in {"episode", "act"} else .85 if kind == "source_reference" else 1)
 
 
 def _write_docx(elements, title, path, settings):
@@ -80,10 +83,10 @@ def _write_docx(elements, title, path, settings):
         fmt.left_indent, fmt.right_indent = Mm(style["indent_left_mm"]), Mm(style["indent_right_mm"])
         fmt.space_before, fmt.space_after = Pt(style["space_before_pt"]), Pt(style["space_after_pt"])
         fmt.line_spacing = settings["line_height"]
-        fmt.keep_with_next = kind in {"title", "episode", "act", "segment", "scene", "speaker", "parenthetical"}
+        fmt.keep_with_next = kind in {"title", "episode", "act", "segment", "scene", "speaker", "parenthetical", "source_reference"}
         run.bold = kind in {"title", "episode", "act", "segment", "scene", "speaker"}
         run.font.size = Pt(_font_size(settings, kind))
-        run.font.color.rgb = RGBColor(0, 0, 0)
+        run.font.color.rgb = RGBColor(96, 96, 96) if kind == "source_reference" else RGBColor(0, 0, 0)
         run.font.name = settings["font_family"]
         run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), settings["font_family"])
     footer = section.footer.paragraphs[0]
@@ -119,7 +122,7 @@ def _write_pdf(elements, title, path, settings):
                    "alignment": {"left": TA_LEFT, "center": TA_CENTER, "right": TA_RIGHT, "justify": TA_JUSTIFY}[style["alignment"]],
                    "leftIndent": style["indent_left_mm"] * mm, "rightIndent": style["indent_right_mm"] * mm,
                    "spaceBefore": style["space_before_pt"], "spaceAfter": style["space_after_pt"],
-                   "keepWithNext": False}
+                   "keepWithNext": kind == "source_reference"}
         styles[kind] = ParagraphStyle(kind, **options)
     story: list[Flowable] = []
     for kind, text in _paragraphs(elements):

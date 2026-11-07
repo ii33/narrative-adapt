@@ -4,7 +4,7 @@ import QtQuick.Layouts
 
 Dialog {
     id: editor
-    SubmissionState{id:contentSubmission;owner:editor;operation:"edit_screenplay_timeline_node";target:({screenplay_id:editor.scope.screenplay_id||null,node_id:editor.nodeId||null});onRestoreRequested:function(a){editor.openFor(a.node_id?"edit":"new",a.node_id);editor.scope=Object.assign({},editor.scope,{expected_timeline_revision:a.expected_timeline_revision});name.text=a.changes.name||"";type.currentIndex=Math.max(0,editor.kinds.indexOf(a.changes.node_type));parentChoice.currentIndex=Math.max(0,editor.parentOptions.findIndex(function(x){return x.id===a.parent_id}));after.currentIndex=Math.max(0,editor.afterOptions.findIndex(function(x){return x.id===a.after_id}))}}
+    SubmissionState{id:contentSubmission;owner:editor;operation:"edit_screenplay_timeline_node";target:({screenplay_id:editor.scope.screenplay_id||null,node_id:editor.nodeId||null});onRestoreRequested:function(a){editor.openFor(a.node_id?"edit":"new",a.node_id);editor.scope=Object.assign({},editor.scope,{expected_timeline_revision:a.expected_timeline_revision});name.text=a.changes.name||"";type.currentIndex=Math.max(0,editor.kinds.indexOf(a.changes.node_type));parentChoice.currentIndex=Math.max(0,editor.parentOptions.findIndex(function(x){return x.id===a.parent_id}));after.currentIndex=Math.max(0,editor.afterOptions.findIndex(function(x){return x.id===a.after_id}));initialLocation.currentIndex=Math.max(0,editor.initialLocationOptions.findIndex(function(x){return x.id===a.changes.initial_location}))}}
 
     objectName: "scriptTimelineEditor"
     property var host
@@ -27,6 +27,7 @@ Dialog {
         })
         return result
     }
+    readonly property var initialLocationOptions:[{id:null,name:"请选择事件地点"},{id:"无",name:"无"},{id:"未知",name:"未知"}].concat(((host.workspace.timeline||{}).nodes||[]).filter(function(n){return n.node_type==="location"&&!n.suppressed&&!n.retracted&&(n.context_id||"canon")==="canon"}))
     readonly property var afterOptions: [{id: null, name: "时间表最前"}].concat(((host.workspace.timeline || {}).nodes || []).filter(function(node) {
         return kinds.indexOf(node.node_type) >= 0 && !blockedIds[node.id]
     }).sort(function(a,b) { return a.sort_id-b.sort_id }).map(function(node) { return {id: node.id, name: node.name + "之后"} }))
@@ -42,7 +43,7 @@ Dialog {
         type.currentIndex = Math.max(0, kinds.indexOf(node.node_type || "scene"))
         name.text = node.name || ""
         parentChoice.currentIndex = 0
-        after.currentIndex = 0
+        after.currentIndex = 0;initialLocation.currentIndex=0
         var preferred = nextMode === "new" ? host.timelineSelectedId : null
         if (nextMode === "move") {
             var ordered = nodes.slice().sort(function(a,b) { return a.sort_id-b.sort_id })
@@ -59,6 +60,11 @@ Dialog {
         if(mode === "move") args.after_id=(afterOptions[after.currentIndex] || {}).id
         else {
             args.changes={node_type: kind, name: name.text.trim()}
+            if(mode === "new"&&kind==="event"){
+                var location=(initialLocationOptions[initialLocation.currentIndex]||{}).id;
+                if(location===null||location===undefined){host.app.toast("请选择事件地点，未交代时请明确选择未知",true);return}
+                args.changes.initial_location=location;
+            }
             if(mode === "new") args.after_id=(afterOptions[after.currentIndex] || {}).id
         }
         host.timelineBusy=true
@@ -75,6 +81,8 @@ Dialog {
         Label { Layout.fillWidth:true; wrapMode:Text.Wrap; color:editor.t.muted; text:"修改当前剧本的独立时间表。事件须归场景或事件，动作须直属事件。" }
         TextField { id:name; objectName:"scriptTimelineNodeName"; Layout.fillWidth:true; visible:editor.mode!=="move"; placeholderText:"时间点名称" }
         ComboBox { id:type; objectName:"scriptTimelineNodeType"; Layout.fillWidth:true; model:editor.kindLabels; enabled:editor.mode!=="move"; onCurrentIndexChanged:parentChoice.currentIndex=0 }
+        Label {text:"事件地点（必选）";visible:editor.mode==="new"&&editor.kind==="event";color:editor.t.ink}
+        ComboBox{id:initialLocation;objectName:"scriptTimelineInitialLocation";Layout.fillWidth:true;visible:editor.mode==="new"&&editor.kind==="event";model:editor.initialLocationOptions;textRole:"name";currentIndex:0}
         Label { text:"归属"; color:editor.t.ink }
         ComboBox { id:parentChoice; objectName:"scriptTimelineNodeParent"; Layout.fillWidth:true; model:editor.parentOptions; textRole:"name" }
         Label { text:"顺序"; color:editor.t.ink; visible:editor.mode!=="edit" }
@@ -85,7 +93,7 @@ Dialog {
             Item { Layout.fillWidth:true }
             Button { text:"取消"; onClicked:editor.close() }
             Button { objectName:"scriptTimelineNodeSave"; text:editor.mode==="move"?"移动":"保存"; highlighted:true
-                enabled:!editor.host.timelineBusy && !editor.host.app.busy && (editor.mode==="move" || name.text.trim().length>0) && !(editor.mode==="new" && (editor.kind==="event"||editor.kind==="action") && !(editor.parentOptions[parentChoice.currentIndex]||{}).id)
+                enabled:!editor.host.timelineBusy && !editor.host.app.busy && (editor.mode==="move" || name.text.trim().length>0) && !(editor.mode==="new"&&editor.kind==="event"&&initialLocation.currentIndex<=0) && !(editor.mode==="new" && (editor.kind==="event"||editor.kind==="action") && !(editor.parentOptions[parentChoice.currentIndex]||{}).id)
                 onClicked:editor.submit()
             }
         }

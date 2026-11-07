@@ -47,8 +47,10 @@ def _save(db, row):
 
 
 def summary(row):
-    return {'valid': row['validation_status'] == 'valid', **({'diagnostics': deepcopy(row['problems'])} if row['status'] == 'staged' else {}), 'editable_roots': list(CONTENT_OPERATIONS[row['operation']].editable), **{key: deepcopy(row[key]) for key in ('status', 'submission_id', 'submission_revision', 'submission_status',
-        'validation_status', 'operation', 'target', 'base_revisions', 'problems')}}
+    from .diagnostic_locations import normalize_problems
+    problems = normalize_problems(row['problems'], operation=row['operation'], target=row['target'])
+    return {'valid': row['validation_status'] == 'valid', **({'diagnostics': deepcopy(problems)} if row['status'] == 'staged' else {}), 'editable_roots': list(CONTENT_OPERATIONS[row['operation']].editable), **{key: deepcopy(row[key]) for key in ('status', 'submission_id', 'submission_revision', 'submission_status',
+        'validation_status', 'operation', 'target', 'base_revisions')}, 'problems': problems}
 
 
 def _cas(db, identifier, revision):
@@ -61,13 +63,21 @@ def _cas(db, identifier, revision):
         raise ContentConflictError('内容暂存revision已变化，请重读')
 
 
-def _problem(exc):
+def _problem(exc, *, operation=None, arguments=None, target=None):
+    from .diagnostic_locations import normalize_problems
     declared = getattr(exc, 'problems', None) or getattr(exc, 'diagnostics', None)
     if declared:
-        return [{**deepcopy(d), 'path': d.get('path', [])} for d in declared]
-    if isinstance(exc, ValidationError):
-        return [{'code': 'CONTENT_VALIDATION', 'message': e['msg'], 'path': [], 'model_location': list(e['loc'])} for e in exc.errors(include_url=False, include_context=False, include_input=False)]
-    return [{'code': 'CONTENT_VALIDATION', 'message': str(exc), 'path': []}]
+        problems = declared
+    elif isinstance(exc, ValidationError):
+        from .content_errors import _located_errors
+        problems = _located_errors(exc, [], arguments or {})
+        for problem in problems:
+            # A model-local field is not automatically an operation argument.
+            if problem['path'] and problem['path'][0] not in (arguments or {}):
+                problem['path'] = []
+    else:
+        problems = [{'code': 'CONTENT_VALIDATION', 'message': str(exc), 'path': []}]
+    return normalize_problems(problems, operation=operation, target=target)
 
 
 def _new(ops, operation, arguments):
@@ -128,7 +138,8 @@ def _attempt(ops, row, expected, call):
                 _cas(db, row['submission_id'], expected)
                 _save(db, row)
         except _errors() as exc:
-            row.update(status='staged', submission_status='staged', validation_status='invalid', problems=_problem(exc))
+            row.update(status='staged', submission_status='staged', validation_status='invalid',
+                problems=_problem(exc, operation=row['operation'], arguments=row['arguments'], target=row['target']))
             with ops._store.connect(write=True) as db:
                 _cas(db, row['submission_id'], expected)
                 _save(db, row)

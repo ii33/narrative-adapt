@@ -209,7 +209,7 @@ class AssetOperationsMixin:
                         raise ContentGuardError('材质资产不关联节点，无法按此路由保存')
                     if card['valid_from'] or card['valid_to']:
                         raise ValueError('材质不关联时间点')
-                else:
+                elif card["node_id"]:
                     node = next((node for node in snapshot["nodes"] if node["id"] == card["node_id"]
                                  and not node.get("suppressed") and not node.get("retracted")), None)
                     if node is None or node.get("node_type") != CATEGORIES[category]:

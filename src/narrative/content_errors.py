@@ -54,7 +54,16 @@ def content_guard(function):
 
 def _located_errors(error, prefix, value, payload_fields=None):
     result = []
-    for item in error.errors(include_url=False, include_context=False, include_input=False):
+    for item in error.errors(include_url=False, include_context=True, include_input=False):
+        cause = (item.get('ctx') or {}).get('error')
+        if isinstance(cause, ContentValidationError) and cause.problems:
+            for problem in cause.problems:
+                row = dict(problem, path=[*prefix, *item['loc'], *problem.get('path', [])])
+                row.setdefault('model_location', list(item['loc']))
+                if 'related_paths' in problem:
+                    row['related_paths'] = [[*prefix, *item['loc'], *path] for path in problem['related_paths']]
+                result.append(row)
+            continue
         current, path = value, list(prefix)
         for component in item['loc']:
             if isinstance(current, dict) and component in (current.get('op'), current.get('type')) and component not in current:
@@ -71,7 +80,8 @@ def _located_errors(error, prefix, value, payload_fields=None):
                 current = current[component]
             else:
                 current = None
-        result.append({'code': 'CONTENT_VALIDATION', 'message': item['msg'], 'path': path})
+        result.append({'code': 'CONTENT_VALIDATION', 'message': item['msg'], 'path': path,
+            'model_location': list(item['loc'])})
     return result
 
 

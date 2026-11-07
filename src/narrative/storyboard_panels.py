@@ -244,10 +244,10 @@ def _mark_font():
 
 class StoryboardPanelsMixin:
     def generate_storyboard_panels(
-        self, unit_id, shot_id, expected_revision, missing_only=True, prompt=""
+        self, unit_id, shot_id, expected_revision, missing_only=True, prompt="", simple_color=False
     ):
-        if type(missing_only) is not bool:
-            raise ValueError("补缺选项须为布尔值")
+        if type(missing_only) is not bool or type(simple_color) is not bool or not isinstance(prompt, str):
+            raise ValueError("补缺与简彩选项须为布尔值，提示须为文本")
         board = self.read_storyboard(unit_id)
         if board["revision"] != expected_revision:
             raise ValueError("分镜已修改，请刷新")
@@ -266,7 +266,7 @@ class StoryboardPanelsMixin:
         ]
         for identifier in identifiers:
             board = self.generate_storyboard_panel(
-                unit_id, shot_id, identifier, board["revision"], prompt
+                unit_id, shot_id, identifier, board["revision"], prompt, simple_color
             )
         return board
 
@@ -289,11 +289,12 @@ class StoryboardPanelsMixin:
             image.save(destination, format="PNG")
         return {"output_path": str(output), "panel_id": panel_id, "annotated": annotated}
 
-    def generate_storyboard_panel(self, unit_id, shot_id, panel_id, expected_revision, prompt=""):
+    def generate_storyboard_panel(self, unit_id, shot_id, panel_id, expected_revision, prompt="", simple_color=False):
+        from .storyboard_sketch_style import sketch_render_instructions
         from .storyboard_style_provider import render_sketch_image
 
-        if not isinstance(prompt, str) or type(expected_revision) is not int:
-            raise ValueError("画格提示须为文本，修订号须为整数")
+        if not isinstance(prompt, str) or type(expected_revision) is not int or type(simple_color) is not bool:
+            raise ValueError("画格提示须为文本，修订号须为整数，简彩须为布尔值")
         board = self.read_storyboard(unit_id)
         if board["revision"] != expected_revision or board["approved"]:
             raise ValueError("请刷新并解除定案后绘制画格")
@@ -307,8 +308,8 @@ class StoryboardPanelsMixin:
         import json
 
         text = (
-            "绘制影视分镜描述型黑白素描，不添加文字、箭头或界面。仅表现当前时刻。"
-            + shot["title"]
+            sketch_render_instructions(basis["sketch_style"], simple_color)
+            + "\n本镜：" + shot["title"]
             + "\n画格意图："
             + panel["intent"]
             + "\n正文与调度："
@@ -338,6 +339,7 @@ class StoryboardPanelsMixin:
                         "panel_id": panel_id,
                         "provider": receipt,
                         "prompt": text,
+                        "simple_color": simple_color,
                         "basis": panel_generation_basis(basis, shot, panel),
                     }
                 },

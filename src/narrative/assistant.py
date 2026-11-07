@@ -13,8 +13,9 @@ from pathlib import Path
 
 from . import tool_api
 from .harness import CONVERSATION_SYSTEM_PROMPT
+from .model_tool_schema import model_tool_schema
 
-ASSISTANT_VERSION = "conversation-agent/52"
+ASSISTANT_VERSION = "conversation-agent/54"
 ASSISTANT_SYSTEM_PROMPT = CONVERSATION_SYSTEM_PROMPT
 # 图片按 data URI 送进去：运行时走的是 chat-completions，认这个形状。
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -40,7 +41,7 @@ def tool_catalog(names: Iterable[str] | None = None, *, access_mode: str = "stan
         {
             "name": name,
             "description": tool_api.TOOLS[name].summary,
-            "parameters": tool_api.TOOLS[name].schema(),
+            "parameters": model_tool_schema(tool_api.TOOLS[name]),
         }
         for name, tool in tool_api.TOOLS.items()
         if name in allowed and (selected is None or name in selected)

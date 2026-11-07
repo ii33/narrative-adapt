@@ -278,6 +278,7 @@ class StoryboardArtMixin:
 
     def generate_storyboard_sketch(self, unit_id, shot_id, offset_ms, layout, expected_revision, prompt='', simple_color=False):
         """Generate a descriptive sketch from a private blocking guide; never fall back."""
+        from .storyboard_sketch_style import sketch_render_instructions
         from .storyboard_style_provider import render_sketch_image
         from .storyboard_timing import integer
 
@@ -303,11 +304,8 @@ class StoryboardArtMixin:
         asset_descriptions = [{key: card[key] for key in ('id', 'category', 'title', 'detail', 'prompt') if key in card}
                               for card in basis['assets']]
         text = (
-            '绘制可用于影视分镜判断的描述型素描，不是几何示意图。'
-            '以构图参考确认主体位置和景别，具体人物、物件和动作以正文与调度依据为准。'
-            '清楚表现关键姿态、视线、手与道具接触、主体遮挡、主光方向、明暗形体及必要投影。'
-            '不添加编辑色、编号、文字标签、运动箭头或界面。'
-            + ('允许为叙事判断保留必要简洁色彩。' if simple_color else '使用黑白灰素描，以结构和明暗表达。')
+            sketch_render_instructions(basis['sketch_style'], simple_color)
+            + '以构图参考确认主体位置和景别，具体人物、物件和动作以正文与调度依据为准。'
             + '\n镜头稿与视觉元素：' + json.dumps({key: basis[key] for key in ('description', 'shot_language', 'visual_elements', 'sound_intents', 'sound_notes')}, ensure_ascii=False)
             + '\n本镜描述：' + shot['title'] + '\n本镜正文：' + json.dumps(basis['blocks'], ensure_ascii=False)
             + '\n创作约定：' + json.dumps(basis['creative_agreement'], ensure_ascii=False)
@@ -343,6 +341,7 @@ class StoryboardArtMixin:
     def _storyboard_sketch_basis(self, board, shot, offset_ms, context, asset_db=None):
         from .storyboard_audio import preview_audio
         from .storyboard_camera import camera_view
+        from .storyboard_sketch_style import current_sketch_style
         from .storyboard_timing import object_states
 
         objects = object_states(board, shot.get('action_start_ms', 0) + offset_ms)
@@ -373,7 +372,7 @@ class StoryboardArtMixin:
         return {'unit_id': board['unit_id'], 'shot_id': shot['id'], 'offset_ms': offset_ms,
                 'sound_notes': shot.get('sound_notes', ''), 'description': shot.get('description', ''), 'shot_language': shot.get('shot_language', ''), 'visual_elements': shot.get('visual_elements', []), 'sound_intents': [row for row in board.get('sound_intents', []) if row['id'] in shot.get('sound_intent_ids', [])],
                 'action_ms': action_ms, 'named_moments': moments, 'active_sound_cues': cues,
-                'body_revision': context['unit']['body_revision'],
+                'body_revision': context['unit']['body_revision'], 'sketch_style': current_sketch_style(self),
                 'blocks': [row for row in context['unit']['blocks'] if row['id'] in shot['source_block_ids']],
                 'creative_agreement': context.get('creative_agreement', {}), 'project_style': context['project_style'],
                 'objects': objects, 'camera_view': camera_view(board, shot, offset_ms, objects), 'assets': assets}, references

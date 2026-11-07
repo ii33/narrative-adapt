@@ -18,7 +18,7 @@ def register(Tool, register_tool, validate, ToolError):
     _ASSET_DOMAIN = {"type": "string", "enum": ["adaptation", "extraction"], "description": "默认adaptation；两数据域不互相写入"}
     _ASSET_IMAGE = {"type": "object", "properties": {"id": {"type": "string"}, "path": {"type": "string"},
                     "file": {"type": "string"}, "caption": {"type": "string"}}, "additionalProperties": False}
-    _ASSET_PAYLOAD = {"type": "object", "required": True, "description": "无id新建，有id编辑；图片传本地path或已有image id，省略图片字段保留原图",
+    _ASSET_PAYLOAD = {"type": "object", "required": True, "description": "无id新建，有id编辑；node_id可省略建立独立创作资产，不创建提取或改编事实；图片传本地path或已有image id，省略图片字段保留原图",
         "properties": {"id": {"type": "string"}, "category": {"type": "string", "enum": ["appearance", "item", "location", "material"]},
                        "node_id": {"type": "string"}, "title": {"type": "string"}, "detail": {"type": "string"},
                        "domain": _ASSET_DOMAIN, "valid_from": {"type": "string"}, "valid_to": {"type": "string"},

@@ -50,10 +50,22 @@ class CompileSettings(StrictModel):
     @model_validator(mode='after')
     def usable_page(self):
         width = 210 - self.page_margins_mm.left - self.page_margins_mm.right
+        problems = []
         if width < 40 or 297 - self.page_margins_mm.top - self.page_margins_mm.bottom < 40:
-            raise ContentValidationError('页边距须保留至少40mm正文区域')
-        if any(getattr(self.paragraphs, key).indent_left_mm + getattr(self.paragraphs, key).indent_right_mm > width - 20 for key in ['scene', 'speaker', 'dialogue', 'action', 'scene_description']):
-            raise ContentValidationError('段落缩进须保留至少20mm文字区域')
+            for axis, available, first, second in [
+                ('横向', width, 'left', 'right'),
+                ('纵向', 297 - self.page_margins_mm.top - self.page_margins_mm.bottom, 'top', 'bottom')]:
+                if available < 40:
+                    problems.append({'code': 'CONTENT_VALIDATION', 'message': axis + '页边距须保留至少40mm正文区域',
+                        'path': ['page_margins_mm', first], 'related_paths': [['page_margins_mm', second]]})
+        for key in ['scene', 'speaker', 'dialogue', 'action', 'scene_description']:
+            style = getattr(self.paragraphs, key)
+            if style.indent_left_mm + style.indent_right_mm > width - 20:
+                problems.append({'code': 'CONTENT_VALIDATION', 'message': key + '段落缩进须保留至少20mm文字区域',
+                    'path': ['paragraphs', key, 'indent_left_mm'], 'related_paths': [
+                        ['paragraphs', key, 'indent_right_mm'], ['page_margins_mm', 'left'], ['page_margins_mm', 'right']]})
+        if problems:
+            raise ContentValidationError('；'.join(p['message'] for p in problems), problems=problems)
         return self
 
 

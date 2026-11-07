@@ -42,6 +42,36 @@ Item {
     property alias viewMode:variant.currentIndex
     property int deskMode: directorOnly?2:0
     property bool scriptReadOnly: false
+    property bool sketchSimpleColor:false
+    property var selectedAssetShots: []
+    property bool assetAnalysisPending: false
+    property string assetAnalysisProject: ""
+    property string assetAnalysisUnit: ""
+    property int assetAnalysisRequest:0
+    property string assetAnalysisTask:""
+    property bool missingAssetsPending:false
+    property int missingAssetsToken:0
+    readonly property int selectedMissingAssetCount:shots.filter(s=>assetShotIds.includes(s.id)).reduce((n,s)=>n+(s.visual_elements||[]).filter(e=>!e.asset_id).length,0)
+    function createMissingAssets(ids,refs) {
+        if(!ready||busy||approved||assetAnalysisPending||missingAssetsPending||!ids.length)return
+        const args={unit_id:unitId,shot_ids:ids.slice(),revision:board.revision}
+        if(refs)args.element_refs=refs
+        missingAssetsPending=true
+        request("create_missing_storyboard_assets",args)
+        missingAssetsToken=token
+    }
+    function createMissingAssetRow(shotId,index){createMissingAssets([shotId],[{shot_id:shotId,index:index}])}
+    function matchesAssetAnalysis(payload) {return assetAnalysisPending&&payload.target?.kind==="storyboard_assets"&&payload.target.client_request_token===assetAnalysisRequest&&payload.target.ids?.includes(assetAnalysisUnit)&&bridge.recentProjectKey(payload.project_path||"")===bridge.recentProjectKey(assetAnalysisProject)}
+    readonly property var assetShotIds: shots.filter(s=>selectedAssetShots.includes(s.id)).map(s=>s.id)
+    function toggleAssetShot(id, checked) { selectedAssetShots=checked?Array.from(new Set(selectedAssetShots.concat([id]))):selectedAssetShots.filter(x=>x!==id) }
+    function selectAllAssetShots(checked) { selectedAssetShots=checked?shots.map(s=>s.id):[] }
+    function analyzeAssetShots() {
+        if(!ready||busy||approved||assetAnalysisPending||!assetShotIds.length)return
+        assetAnalysisPending=true;assetAnalysisProject=app.project.path;assetAnalysisUnit=unitId;assetAnalysisRequest=app.nextStoryboardToken();assetAnalysisTask=""
+        app.assistantOpen=true
+        bridge.screenplayWritingTurn("请仅分析指定分镜实际出场的视觉元素，列出人物及形象需求、物品、地点等。先读取所选镜头的资产分析上下文，已有确定元素保持不变，只补充尚未确定的需求，提交kind、name、usage即可。不得建立资产或自动选择绑定；由用户在元素列表中手动确定。只更新所选镜头的未确定元素，不改画面、镜头顺序、正文、提取或改编事实，不生成图像或视频。",{kind:"storyboard_assets",ids:[unitId],shot_ids:assetShotIds.slice(),screenplay_id:app.screenplayId,client_request_token:assetAnalysisRequest})
+    }
+    function openAsset(id) { if(!id)return;app.currentPage="assets";Qt.callLater(function(){bridge.loadAsset(id)}) }
     function editScriptShot(){editor.openShot(false)}
     function editScriptFrame(){frames.openForShot()}
     function addScriptShot(){editor.openShot(true)}
@@ -136,6 +166,7 @@ Item {
         playing = false
         timelineEditDrags=0
         editor.close();editor.pending=false;objectEditor.close();objectEditor.pending=false;actionKeys.close();frames.close();frames.generating=false;markersEditor.close();soundEditor.close();cameraEditor.close();impactDialog.close();markerBinding.close();sourceDialog.close();phase2Pending=false;pendingPhase2=({});checkDialog.close();videoEditor.close();animationEditor.close();videoMessage=""
+        selectedAssetShots=[];assetAnalysisPending=false;assetAnalysisProject="";assetAnalysisUnit="";assetAnalysisTask="";assetAnalysisRequest=0;missingAssetsPending=false;missingAssetsToken=0
         recording=false;selectedObjectId="";loopEnabled=false;loopStart=0;loopEnd=0
         token=app.nextStoryboardToken()
         busy = false
@@ -186,6 +217,7 @@ Item {
         const snapshot=JSON.parse(JSON.stringify(result))
         if(!Array.isArray(snapshot.shots))return
         board = snapshot
+        selectedAssetShots=selectedAssetShots.filter(id=>shots.some(s=>s.id===id))
         if(selectedObjectId&&!(board.objects||[]).some(o=>o.id===selectedObjectId)){selectedObjectId="";recording=false}
         loopStart=Math.max(0,Math.min(total,loopStart));loopEnd=Math.max(0,Math.min(total,loopEnd));if(loopEnd<=loopStart)loopEnabled=false
         const i = focusNew ? shots.length - 1 : shots.findIndex(s => s.id === focusShot)
@@ -199,6 +231,7 @@ Item {
     onVisibleChanged: {
         if (visible && app) loadScreenplay(app.screenplayId || "")
         else {
+            usageTips.close()
             if(ready&&shot.id)app.storyboardSelection={project_path:app.project.path,screenplay_id:app.screenplayId,unit_id:unitId,shot_id:shot.id,offset_ms:localTime};
             playing = false; token=app.nextStoryboardToken()
         }
@@ -215,6 +248,13 @@ Item {
     Connections {
         target: bridge
         function onResultReady(kind, payload) {
+            if(kind==="storyboard"&&payload.operation==="read_storyboard_usage_tips")return
+            if(kind==="screenplay_writing"&&payload.target?.client_request_token===desk.assetAnalysisRequest&&payload.target?.kind==="storyboard_assets"&&desk.assetAnalysisPending)desk.assetAnalysisTask=payload.task_id||""
+            if(kind==="screenplay_writing_failed"&&desk.matchesAssetAnalysis(payload)&&(!desk.assetAnalysisTask||!payload.task_id||payload.task_id===desk.assetAnalysisTask)){desk.assetAnalysisPending=false;desk.message=payload.error||"元素分析未能启动"}
+            if(kind==="conversation_progress"&&payload.event==="task_complete"&&payload.writing_target?.kind==="storyboard_assets"&&payload.writing_target.ids.includes(desk.assetAnalysisUnit)&&payload.writing_target.client_request_token===desk.assetAnalysisRequest&&(!desk.assetAnalysisTask||payload.task_id===desk.assetAnalysisTask)&&bridge.recentProjectKey(payload.project_path||"")===bridge.recentProjectKey(desk.assetAnalysisProject)){
+                desk.assetAnalysisPending=false
+                if(desk.visible&&desk.unitId===desk.assetAnalysisUnit)desk.reload()
+            }
             if (!desk.visible) return
             if (kind === "screenplay_workspace" && !payload.superseded) {
                 desk.workspace = payload
@@ -228,7 +268,7 @@ Item {
                        && bridge.recentProjectKey(payload.project_path) === bridge.recentProjectKey(desk.app.project.path)) {
                 if (payload.board?.revision > (desk.board.revision || 0)) desk.updateBoard(payload.board)
             } else if (kind === "conversation_progress" && payload.event === "task_complete"
-                       && payload.writing_target?.kind === "storyboard" && payload.writing_target.ids.includes(desk.unitId) && !desk.busy) {
+                       && ["storyboard","storyboard_assets"].includes(payload.writing_target?.kind) && payload.writing_target.ids.includes(desk.unitId) && !desk.busy) {
                 desk.reload()
             } else if(kind==="storyboard"&&payload.token===desk.reviewToken){
                 const scope=desk.reviewScope,result=payload.result
@@ -240,6 +280,7 @@ Item {
                 if(desk.reviewWanted){desk.reviewWanted=false;Qt.callLater(desk.scheduleReview,true)}
             } else if (kind === "storyboard" && payload.token === desk.token) {
                 desk.busy = false
+                if(payload.token===desk.missingAssetsToken)desk.missingAssetsPending=false
                 if (payload.error) {
                     desk.phase2Pending=false
                     desk.focusNew = false
@@ -248,6 +289,10 @@ Item {
                     editor.pending=false;editor.errorText=payload.error;objectEditor.pending=false;objectEditor.errorText=payload.error
                     if(frames.generating){frames.generating=false;frames.errorText=payload.error}
                     if(videoEditor.visible){videoEditor.errorText=payload.error;if(["submit_storyboard_video","refresh_storyboard_video"].includes(payload.operation))desk.reload()}
+                } else if(payload.operation==="create_missing_storyboard_assets"){
+                    desk.updateBoard(payload.result.board)
+                    const skipped=payload.result.skipped||[],invalid=skipped.filter(row=>["missing","type_mismatch"].includes(row.status)).length
+                    desk.message="已建立并关联 "+payload.result.created_count+" 张空资产卡"+(invalid?"；另有 "+invalid+" 项已有绑定需手动处理。":skipped.length?"；已有绑定保持不变。":"。")
                 } else if(payload.operation==="check_storyboard"){desk.checkReport=payload.result;checkDialog.open()
                 } else if(["read_storyboard_video_settings","save_storyboard_video_settings"].includes(payload.operation)){videoEditor.applySettings(payload.result);if(payload.operation==="save_storyboard_video_settings")videoEditor.closeSettings()
                 } else if(payload.operation==="render_storyboard_animatic"){desk.lastExport=payload.result;desk.message="干净预演已导出："+payload.result.path
@@ -271,9 +316,10 @@ Item {
             }
         }
         function onErrorOccurred(kind, message) {
-            if (kind === "storyboard" && desk.visible) { desk.busy = false; desk.message = message;if(frames.generating){frames.generating=false;frames.errorText=message}editor.pending=false;editor.errorText=message;objectEditor.pending=false;objectEditor.errorText=message }
+            if (kind === "storyboard" && desk.visible) { desk.busy = false;desk.missingAssetsPending=false; desk.message = message;if(frames.generating){frames.generating=false;frames.errorText=message}editor.pending=false;editor.errorText=message;objectEditor.pending=false;objectEditor.errorText=message }
         }
     }
+    StoryImageUsageTips { id:usageTips; app:desk.app }
     Timer {
         interval: 30
         repeat: true
@@ -308,6 +354,7 @@ Item {
                 currentIndex:desk.scenes.findIndex(s => s.unit.id === desk.unitId)
                 onActivated: desk.selectScene(model[currentIndex].unit.id)
             }
+            ToolButton { objectName:"storyboardImageUsageTips"; text:"生图技巧"; onClicked:usageTips.showTips() }
             ToolButton { text:"刷新"; enabled:!desk.busy; onClicked:desk.loadScreenplay(desk.app.screenplayId) }
         }
         Label { visible:!!desk.message; text:desk.message; wrapMode:Text.Wrap; color:desk.t.warn; Layout.fillWidth:true }
@@ -321,6 +368,16 @@ Item {
             CheckBox { objectName:"storyboardReadOnly"; text:"纯读稿"; visible:desk.deskMode===0; checked:desk.scriptReadOnly; onToggled:desk.scriptReadOnly=checked }
             Button { objectName:"storyboardExportScript"; text:"导出分镜稿"; enabled:desk.ready&&!desk.busy; onClicked:scriptExport.open() }
         }
+        RowLayout {
+            visible:!desk.directorOnly&&desk.deskMode===0
+            Layout.fillWidth:true
+            CheckBox { objectName:"storyboardSelectAllAssets";text:"全选分镜";checked:desk.shots.length>0&&desk.assetShotIds.length===desk.shots.length;enabled:desk.ready&&!desk.assetAnalysisPending;onToggled:desk.selectAllAssetShots(checked) }
+            Label { objectName:"storyboardAssetSelectionCount";text:"已选 "+desk.assetShotIds.length+" 镜";color:desk.t.muted }
+            Button { objectName:"storyboardAnalyzeAssets";text:desk.assetAnalysisPending?"正在分析元素…":"分析出场元素";enabled:desk.ready&&!desk.busy&&!desk.approved&&!desk.assetAnalysisPending&&desk.assetShotIds.length>0;onClicked:desk.analyzeAssetShots() }
+            Button {objectName:"storyboardCreateMissingAssets";text:desk.missingAssetsPending?"正在建立…":"建立缺失资产（"+desk.selectedMissingAssetCount+"）";enabled:desk.ready&&!desk.busy&&!desk.approved&&!desk.assetAnalysisPending&&!desk.missingAssetsPending&&desk.selectedMissingAssetCount>0;onClicked:desk.createMissingAssets(desk.assetShotIds)}
+            Item { Layout.fillWidth:true }
+        }
+        Label {visible:!desk.directorOnly&&desk.deskMode===0&&desk.assetShotIds.length>0;text:"每条待确定元素建立一张独立空资产卡；需要复用时，请在元素行选择已有资产。";color:desk.t.muted;wrapMode:Text.Wrap;Layout.fillWidth:true}
         StoryboardScriptView { desk:desk; visible:!desk.directorOnly&&desk.deskMode===0; Layout.fillWidth:true; Layout.fillHeight:true }
         ShotPanelBoard { desk:desk; visible:!desk.directorOnly&&desk.deskMode===1; Layout.fillWidth:true; Layout.fillHeight:true }
         ColumnLayout { visible:desk.directorOnly; Layout.fillWidth:true; Layout.fillHeight:true
@@ -635,7 +692,7 @@ Item {
         property bool generating:false
         property string errorText:""
         function openForShot() {desk.playing=false;generating=false;errorText="";offset.value=Math.max(0,Math.min(desk.localTime,desk.shot.duration_ms-1));loadSourceForOffset();open()}
-        function loadSourceForOffset(){var source=((desk.shot.keyframes||[]).find(f=>f.offset_ms===offset.value)||{}).sketch_source||{},layout=source.layout||{};sketchPrompt.text=source.user_prompt===undefined?(desk.shot.title||""):source.user_prompt;simpleColor.checked=source.simple_color===true;composition.currentIndex=Math.max(0,["single","two_shot","object","empty"].indexOf(layout.composition||"single"));framing.currentIndex=Math.max(0,["wide","medium","close"].indexOf(layout.framing||"medium"));light.currentIndex=Math.max(0,["left","right","back","overhead"].indexOf(layout.light||"left"));setting.currentIndex=Math.max(0,["interior","exterior"].indexOf(layout.setting||"interior"))}
+        function loadSourceForOffset(){var source=((desk.shot.keyframes||[]).find(f=>f.offset_ms===offset.value)||{}).sketch_source||{},layout=source.layout||{};sketchPrompt.text=source.user_prompt===undefined?(desk.shot.title||""):source.user_prompt;if(typeof source.simple_color==="boolean")desk.sketchSimpleColor=source.simple_color;composition.currentIndex=Math.max(0,["single","two_shot","object","empty"].indexOf(layout.composition||"single"));framing.currentIndex=Math.max(0,["wide","medium","close"].indexOf(layout.framing||"medium"));light.currentIndex=Math.max(0,["left","right","back","overhead"].indexOf(layout.light||"left"));setting.currentIndex=Math.max(0,["interior","exterior"].indexOf(layout.setting||"interior"))}
         contentItem:ColumnLayout {
             Label{visible:!!frames.errorText;text:frames.errorText;wrapMode:Text.Wrap;Layout.fillWidth:true;color:desk.t.warn}
             RowLayout {
@@ -647,9 +704,9 @@ Item {
                 currentIndex:(desk.shot.keyframes||[]).findIndex(f=>f.offset_ms===offset.value)
                 displayText:currentIndex<0?"选择已有关键帧":currentText
                 onActivated:{offset.value=desk.shot.keyframes[currentIndex].offset_ms;frames.loadSourceForOffset()} }
-            Label{visible:!desk.approved;text:"使用已配置的图像服务生成本帧素描；下方选项作为构图参考。";wrapMode:Text.Wrap;Layout.fillWidth:true;color:desk.t.muted}
+            Label{objectName:"storyboardSketchStyleHint";visible:!desk.approved;text:"采用工程“描述型素描”风格，与分镜格共用；可在工程设置中修改。下方选项作为构图参考。";wrapMode:Text.Wrap;Layout.fillWidth:true;color:desk.t.muted}
             TextArea{id:sketchPrompt;objectName:"storyboardSketchPrompt";visible:!desk.approved;enabled:!frames.generating;placeholderText:"本帧画面描述：人物姿态、空间、光线和必须看清的动作";wrapMode:TextEdit.Wrap;Layout.fillWidth:true;Layout.preferredHeight:100}
-            CheckBox{id:simpleColor;objectName:"storyboardSketchSimpleColor";text:"简彩";visible:!desk.approved;enabled:!frames.generating}
+            CheckBox{id:simpleColor;objectName:"storyboardSketchSimpleColor";text:"简彩（保留素描线条）";checked:desk.sketchSimpleColor;onToggled:desk.sketchSimpleColor=checked;visible:!desk.approved;enabled:!frames.generating}
             GridLayout {
                 columns:4;visible:!desk.approved;enabled:!frames.generating
                 Label{text:"构图"} ComboBox{id:composition;model:["单人","双人","物件","空景"]}

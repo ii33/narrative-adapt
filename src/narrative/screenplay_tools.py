@@ -41,8 +41,21 @@ def register(Tool, register_tool, validate):
         "screenplay_id": {"type": ["string", "null"]}, "script_overrides": obj,
         "expected_script_revision": {"type": ["integer", "null"]}, "title": text, "language": text}, writes=True)
 
+    add("read_storyboard_usage_tips", "只读内置空间布局生图使用技巧：FLUX区域表与参考图、Qwen圈选及ChatGPT的已测用法和限制；无需选择场，不生成图片、不修改工程或模型配置", {})
+
     add("read_storyboard", "按场读取分镜、静帧、预演帧率和共享二维调度对象/动作轨。毫秒区分剪辑时间、镜内offset_ms和场内动作time_ms；revision用于下一次原子编辑", {
         "unit_id": text | {"required": True}})
+    add("read_storyboard_assets_context", "读取选中镜头及正文、全部资产对象目录，供逐镜分析人物具体形象/物品/场景；不自动建对象或猜测缺失内容", {
+        "unit_id": text | {"required": True}, "shot_ids": strings | {"required": True, "minItems": 1}})
+    add("submit_storyboard_assets", "只保存所选镜头的待确定元素需求，不创建或选择资产。每个visual_elements项仅含kind/name/usage，程序添加未绑定状态。保留所有原已确定资产行，新结果替换原未确定行，不按同名合并。允许空列表；必须覆盖shot_ids恰好一次。资产由用户在列表手动选择或建立。内容问题暂存并局部patch_content_submission修补", {
+        "unit_id": text | {"required": True}, "shot_ids": strings | {"required": True, "minItems": 1}, "revision": integer | {"required": True}, "expected_body_revision": integer | {"required": True},
+        "elements": {"type": "array", "required": True, "items": {"type": "object", "required": ["shot_id", "visual_elements"], "additionalProperties": False,
+            "properties": {"shot_id": text, "visual_elements": {"type": "array", "items": {"type": "object", "additionalProperties": False, "required": ["kind", "name", "usage"], "properties": {"kind": {"type": "string", "enum": ["person", "prop", "set"]}, "name": text, "usage": text}}}}}}}, writes=True)
+    add("create_missing_storyboard_assets", "显式即时命令：为所选镜头每条未绑定元素逐行建立独立空资产卡并关联，不调用模型或生成图片，不按名称合并。整个操作原子执行；已有绑定（含损坏引用）保留并反馈需手动处理。element_refs省略处理全部元素，指定则仅处理{shot_id,index}行；revision固定元素行定位", {
+        "unit_id": text | {"required": True}, "shot_ids": strings | {"required": True, "minItems": 1}, "revision": integer | {"required": True},
+        "expected_asset_revision": integer,
+        "element_refs": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["shot_id", "index"], "additionalProperties": False,
+            "properties": {"shot_id": text, "index": {"type": "integer", "minimum": 0}}}}}, writes=True)
     add("check_storyboard", "只读静态检查本场引用、时间、媒体缺失及实际生成依据变化；成功的视频也可需复核。返回影响范围，不改旧图、不自动生成或审批", {
         "unit_id": text | {"required": True}})
     add("preview_storyboard", "只读求指定场剪辑time_ms的镜头、镜内local_ms、共享action_ms、保持的最近静帧和二维对象状态。切点属于下一镜，片尾为末镜末画面；与导演台使用同一时间约定，不写库", {
@@ -66,11 +79,11 @@ def register(Tool, register_tool, validate):
     add("generate_storyboard_panel", "为独立画格调用一次真实草图生成，候选仅写入此格，不影响其他画格和关键帧；生成失败不回退。先用apply_storyboard_changes的create_panel建立intent/offset_ms/base，再取得panel_id。候选须明确采用。", {
         "unit_id": {"type": "string", "required": True}, "shot_id": {"type": "string", "required": True},
         "panel_id": {"type": "string", "required": True}, "expected_revision": {"type": "integer", "required": True},
-        "prompt": {"type": "string"}}, writes=True)
+        "prompt": {"type": "string"}, "simple_color": {"type": "boolean", "description": "默认false黑白灰；true仅少量必要简彩，保持统一描述型素描风格"}}, writes=True)
     add("generate_storyboard_panels", "按画格计划顺序补缺格或整镜逐格试画。missing_only默认true，仅生成没有候选、导入底图、已有格快照或绑定帧的画格；每格一次，不自动采用，任一失败即停止并保留之前已完成候选，不重试。", {
         "unit_id": {"type": "string", "required": True}, "shot_id": {"type": "string", "required": True},
         "expected_revision": {"type": "integer", "required": True}, "missing_only": {"type": "boolean"},
-        "prompt": {"type": "string"}}, writes=True)
+        "prompt": {"type": "string"}, "simple_color": {"type": "boolean", "description": "默认false黑白灰；true仅少量必要简彩，保持统一描述型素描风格"}}, writes=True)
     add("export_storyboard_panel", "将指定画格导出为新的PNG文件，默认无标注，不覆盖已有文件。", {
         "unit_id": {"type": "string", "required": True}, "shot_id": {"type": "string", "required": True},
         "panel_id": {"type": "string", "required": True}, "output_path": {"type": "string", "required": True},
@@ -153,7 +166,7 @@ def register(Tool, register_tool, validate):
     add("read_script_segment", "读取段落、场表、正文及逐场依据状态", {"segment_id": text | {"required": True}})
     add("read_scene_table_context", "读取目标段落、当前场表、范围与有效工程指导，返回提交所需修订和依据", {
         "segment_id": text | {"required": True}, "dependency_refs": objects | {"description": "可选明确参考kind/id数组；默认只含相关精简资料，可显式读取unit_plan/unit_body/previous_unit或adaptation_entity（含屏蔽/范围外参考），不会扩大创作或写入目标"}})
-    unit_draft = {"type": "object", "description": "新场可省id；已有场传真实id。kind=scene/screen_segment，enabled，scene_number及完整plan；启用场至少非空summary，其余字段遵循schema。plan.source_event_ids可选，只记录本范围有效事件引用。保留全部已有ID；停用已有场须enabled=false且plan={}，不删除正文。"}
+    unit_draft = {"type": "object", "description": "新场可省id；已有场传真实id。kind=scene/screen_segment，enabled，scene_number及完整plan；启用场至少非空summary；plan.source_event_ids可选，用于记录实际采用的当前剧本独立改编时间线有效事件ID，可多对多。未填不阻止生成，不自动补齐范围或据此推断实际使用。名称、版本与来源标注由程序派生，不由模型拼接。保留全部已有ID；停用已有场须enabled=false且plan={}，不删除正文。"}
     add("submit_scene_table", "原子提交场表及依据；沿用稳定场次ID，不隐式删除已有场或清空正文", reason | basis | {
         "segment_id": text | {"required": True}, "units": {"type": "array", "items": unit_draft, "required": True},
         "expected_outline_revision": integer | {"required": True}}, writes=True)

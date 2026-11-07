@@ -49,6 +49,38 @@ Item {
     property var writingTarget:({})
     property string writingTaskId:""
     property string writingStatus:""
+    // Transient activity can only suppress coverage; completion comes from persisted audits.
+    property var usageTasks:({})
+    property var usageFinishedTasks:({})
+    property var usagePendingReads:({})
+    readonly property bool usageBusy:Object.keys(usageTasks).concat(Object.keys(usagePendingReads)).some(function(key){
+        var task=usageTasks[key]||usagePendingReads[key];return !task.screenplay_id||task.screenplay_id===(app.screenplayId||screenplay.id)
+    })
+    readonly property var timelineEventUsage:usageBusy?Object.assign({},doc.event_usage||{},{status:"running"}):(doc.event_usage||{})
+    function usageActivity(kind,payload){
+        if(!payload.task_id||payload.project_path&&payload.project_path!==(app.project.path||""))return
+        var key=payload.task_id,target=payload.writing_target||payload.target||{},scope=target.screenplay_id||""
+        var terminal=kind==="assistant"||kind==="conversation_progress"&&payload.event==="task_complete"
+        if(terminal){
+            var pending=Object.assign({},usagePendingReads),active=Object.assign({},usageTasks),finished=Object.assign({},usageFinishedTasks)
+            pending[key]=active[key]||{screenplay_id:scope};delete active[key];finished[key]=true
+            usagePendingReads=pending;usageTasks=active;usageFinishedTasks=finished
+            return
+        }
+        if(usageFinishedTasks[key]||payload.event==="stop_ignored")return
+        if(kind!=="screenplay_writing"&&!(kind==="conversation_progress"&&(payload.busy===true||payload.event==="task_start")))return
+        var tasks=Object.assign({},usageTasks),previous=tasks[key],row=Object.assign({},previous||{screenplay_id:scope,tool_refreshed:false})
+        if(scope)row.screenplay_id=scope
+        var refresh=!previous||payload.event==="tool_complete"&&!row.tool_refreshed
+        if(payload.event==="tool_complete")row.tool_refreshed=true
+        tasks[key]=row;usageTasks=tasks
+        if(refresh)page.load()
+    }
+    function usageReadFinished(identifier){
+        var pending=Object.assign({},usagePendingReads)
+        Object.keys(pending).forEach(function(key){if(!pending[key].screenplay_id||pending[key].screenplay_id===identifier)delete pending[key]})
+        usagePendingReads=pending
+    }
     property var submittedUnitIds:[]
     property var structureEdit:({})
     property bool timelineBusy:false
@@ -225,12 +257,13 @@ Item {
     onVisibleChanged:if(visible){load();bridge.loadPromptSettings()}
     Connections {
         target:app
-        function onProjectChanged(){page.blockActionBusy=false;page.blockActionScope=({});page.restoringSelection=true;page.workspace=({});page.selectedSegmentId="";page.selectedUnitId="";page.selectedBlockId="";page.restoringSelection=false;page.effectivePrompts=({});if(app.mode==="workspace"){bridge.loadPromptSettings()}}
+        function onProjectChanged(){page.usageTasks=({});page.usageFinishedTasks=({});page.usagePendingReads=({});page.blockActionBusy=false;page.blockActionScope=({});page.restoringSelection=true;page.workspace=({});page.selectedSegmentId="";page.selectedUnitId="";page.selectedBlockId="";page.restoringSelection=false;page.effectivePrompts=({});if(app.mode==="workspace"){bridge.loadPromptSettings()}}
         function onModeChanged(){ if(app.mode==="workspace")page.load();else{page.workspace=({});page.selectedSegmentId="";page.selectedUnitId="";page.writingStatus="";page.writingTaskId="";page.submittedUnitIds=[];page.structureBusy=false} }
     }
     Connections {
         target:bridge
         function onResultReady(kind,payload) {
+            page.usageActivity(kind,payload)
             if(kind==="screenplay"&&payload.operation==="apply_script_block_changes"&&payload.request_token===page.blockActionScope.token)page.blockActionBusy=false
             if(kind==="prompt_settings"){
                 if(payload.project_path!==(app.project.path||""))return
@@ -244,6 +277,7 @@ Item {
                 var shared=app.screenplaySelection||{},restore=shared.screenplay_id===nextScreenplay.id&&shared.project_path===(app.project.path||"")
                 restoringSelection=true
                 workspace=payload
+                page.usageReadFinished(nextScreenplay.id)
                 timelineBusy=false
                 if(pendingTimelineSelection&&((workspace.timeline||{}).nodes||[]).some(function(node){return node.id===pendingTimelineSelection})){range.reveal(pendingTimelineSelection);pendingTimelineSelection=""}
                 if(storageNeedsReset)app.screenplayId=""
@@ -325,7 +359,7 @@ Item {
                 }
                 page.load()
             } else if(kind==="screenplay_export_saved")app.toast("已导出到 "+payload.path,false)
-            else if(kind==="screenplay_writing"){if(writingTaskId!==payload.task_id||!writingStatus){writingTaskId=payload.task_id || "";writingStatus="running";submittedUnitIds=[]}app.assistantOpen=true;writingDialog.close()}
+            else if(kind==="screenplay_writing"){writingTarget=payload.target||writingTarget;if(writingTaskId!==payload.task_id||!writingStatus){writingTaskId=payload.task_id || "";writingStatus="running";submittedUnitIds=[]}app.assistantOpen=true;writingDialog.close();page.load()}
             else if(kind==="conversation_progress"&&payload.writing_target&&payload.writing_target.screenplay_id===page.screenplay.id){
                 writingTaskId=payload.task_id || writingTaskId;writingStatus=payload.writing_status==="incomplete"?"failed":payload.writing_status || writingStatus;submittedUnitIds=payload.submitted_unit_ids || submittedUnitIds;page.load()
             }
@@ -406,7 +440,7 @@ Item {
                     }
                     Label {visible:!((page.workspace.timeline||{}).nodes||[]).length;text:"尚无时间点，可新建或从改编导入。";wrapMode:Text.Wrap;Layout.fillWidth:true;color:t.muted}
                     Label {visible:((page.workspace.timeline||{}).nodes||[]).length>0;text:"当前剧本独立时间线";font.pixelSize:11;Layout.fillWidth:true;color:t.muted}
-                ScriptRangePicker {id:range;objectName:"scriptRangePicker";timelineId:page.screenplay.timeline_id || "";Layout.fillWidth:true;Layout.fillHeight:true;nodes:(page.workspace.timeline||{}).nodes || [];t:page.t;onSelectionChanged:page.previewRange()}
+                ScriptRangePicker {id:range;objectName:"scriptRangePicker";timelineId:page.screenplay.timeline_id || "";eventUsage:page.timelineEventUsage;Layout.fillWidth:true;Layout.fillHeight:true;nodes:(page.workspace.timeline||{}).nodes || [];t:page.t;onSelectionChanged:page.previewRange()}
                 Label { objectName:"scriptRangeStatus";Layout.fillWidth:true;wrapMode:Text.Wrap;color:page.rangePreview.status==="valid"?t.ok:t.warn;text:page.rangePreview.status ? "范围"+(page.spanLabels[page.rangePreview.status]||"")+" · 有效 "+(page.rangePreview.effective_node_ids || []).length+" · 屏蔽 "+(page.rangePreview.suppressed_count || 0)+(page.diagnosticsText(page.rangePreview.diagnostics)?"\n"+page.diagnosticsText(page.rangePreview.diagnostics):"") : "选择范围起止，容器将展开到事件/动作" }
                 RowLayout {Layout.fillWidth:true;TextField{id:segmentTitle;objectName:"scriptSegmentTitle";placeholderText:"新段落名称";Layout.fillWidth:true}Button{objectName:"scriptCreateSegment";text:"建立段落";enabled:!!segmentTitle.text.trim()&&page.rangePreview.status==="valid";onClicked:page.createSegment()}}
 
@@ -454,6 +488,7 @@ ListView {
                             RowLayout {Layout.fillWidth:true;Label{text:(modelData.scene_number||String(index+1))+" · "+(modelData.plan.title||(modelData.kind==="screen_segment"?"独立画面段":"未命名场次"));color:t.ink;font.bold:true;Layout.fillWidth:true;Layout.minimumWidth:0;elide:Text.ElideRight}CheckBox{text:"启用";checked:modelData.enabled!==false;onClicked:page.changeSceneTable({op:"update",unit_id:modelData.id,changes:{enabled:checked}})}}
                             Label{text:(page.bodyLabels[modelData.body_presence]||"正文为空")+" · "+(page.basisLabels[modelData.basis_state]||"依据未记录");color:t.muted;font.pixelSize:10;HoverHandler{id:unitHover}ToolTip.visible:unitHover.hovered;ToolTip.text:modelData.id}
                             Label{text:page.sceneSetting(modelData.plan);color:t.body;wrapMode:Text.Wrap;Layout.fillWidth:true}
+                            Label{objectName:"scriptSceneSourceReferences";property string unitId:modelData.id;visible:((modelData.plan||{}).source_event_ids||[]).length>0;text:modelData.source_reference_text||"";color:t.muted;font.pixelSize:11;wrapMode:Text.Wrap;Layout.fillWidth:true}
                             Label{text:modelData.plan.summary;wrapMode:Text.Wrap;Layout.fillWidth:true;color:t.body}
                             Label{objectName:"scriptSceneOutcome";property string unitId:modelData.id;visible:!!(modelData.plan.outcome||"").trim();text:"结果："+(modelData.plan.outcome||"");wrapMode:Text.Wrap;Layout.fillWidth:true;color:t.body}
                             Flow{Layout.fillWidth:true;spacing:6;Button{text:"编辑场表";onClicked:{page.selectedUnitId=modelData.id;planEditor.openFor(modelData)}}Button{objectName:"scriptOpenBody";text:"打开正文";onClicked:{page.openBody(modelData.id)}}Button{implicitWidth:32;Layout.preferredWidth:32;text:"↑";enabled:index>0;onClicked:page.changeSceneTable({op:"move",unit_id:modelData.id,after_id:index>1?page.units[index-2].id:null})}Button{text:"删除";onClicked:{page.selectedUnitId=modelData.id;deleteUnitDialog.open()}}}
@@ -471,6 +506,7 @@ ListView {
 
                     ComboBox {objectName:"scriptBodyUnit";Layout.fillWidth:true;model:page.units.map(function(u){return {id:u.id,title:page.unitTitle(u)}});textRole:"title";displayText:page.unit.id?page.unitTitle(page.unit):"选择场次";currentIndex:Math.max(0,page.units.findIndex(function(u){return u.id===page.selectedUnitId}));onActivated:page.selectedUnitId=model[currentIndex].id}
                     Label {text:page.unit.id?page.unitTitle(page.unit)+" · "+(page.bodyLabels[page.unit.body_presence]||"正文为空")+" · "+(page.basisLabels[page.unit.basis_state]||"依据未记录"):"";color:t.muted;wrapMode:Text.Wrap;Layout.fillWidth:true;HoverHandler{id:bodyUnitHover}ToolTip.visible:bodyUnitHover.hovered;ToolTip.text:page.unit.id||""}
+                    Label {objectName:"scriptBodySourceReferences";visible:!!page.unit.id&&((page.unit.plan||{}).source_event_ids||[]).length>0;text:page.unit.source_reference_text||"";color:t.muted;font.pixelSize:11;wrapMode:Text.Wrap;Layout.fillWidth:true}
                     RowLayout {Layout.fillWidth:true;spacing:4
                         Button{objectName:"scriptBlockModify";property string blockId:page.selectedBlockId;text:"修改";enabled:!!page.selectedBlock.id&&!page.blockActionBusy;onClicked:blockEditor.openFor(page.selectedBlock)}
                         Button{objectName:"scriptBlockMoveUp";text:"↑";enabled:page.selectedBlockIndex>0&&!page.blockActionBusy;onClicked:page.moveSelectedBlock()}

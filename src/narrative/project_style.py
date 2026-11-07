@@ -34,9 +34,19 @@ class CreativeAgreementFields(BaseModel):
     other: str = ''
 
 
-def normalize_overrides(value):
-    if not isinstance(value, dict) or set(value) - set(FIELD_LABELS) or any(v is not None and not isinstance(v, str) for v in value.values()):
-        raise ContentValidationError('创作约定覆盖只接受规定字段的文本；null或省略继承，空串明确清空')
+def normalize_overrides(value, *, path=()):
+    message = '创作约定覆盖只接受规定字段的文本；null或省略继承，空串明确清空'
+    if not isinstance(value, dict):
+        raise ContentValidationError(message, problems=[{
+            'code': 'CONTENT_VALIDATION', 'message': '创作约定覆盖须为字段对象', 'path': list(path)}])
+    problems = []
+    for key, text in value.items():
+        if key not in FIELD_LABELS:
+            problems.append({'code': 'CONTENT_VALIDATION', 'message': '不支持的创作约定字段：' + str(key), 'path': [*path, key]})
+        elif text is not None and not isinstance(text, str):
+            problems.append({'code': 'CONTENT_VALIDATION', 'message': FIELD_LABELS[key] + '须为文本或null', 'path': [*path, key]})
+    if problems:
+        raise ContentValidationError(message, problems=problems)
     return {key: text for key, text in value.items() if text is not None}
 
 
@@ -176,7 +186,7 @@ class ProjectStyleOperationsMixin:
             if screenplay_id is None and any(value is not None for value in [script_overrides, expected_script_revision, title, language]):
                 raise ContentGuardError('剧本覆盖、名称与语言须指定剧本')
             with content_item(['script_overrides'], script_overrides):
-                overrides = normalize_overrides(script_overrides) if script_overrides is not None else None
+                overrides = normalize_overrides(script_overrides, path=['script_overrides']) if script_overrides is not None else None
             for field_name, label, value in [('title', '剧本名称', title), ('language', '语言', language)]:
                 if value is not None and (not isinstance(value, str) or not value.strip()):
                     raise ContentValidationError(label + '不能为空', problems=[{'code': 'CONTENT_VALIDATION', 'message': label + '不能为空', 'path': [field_name]}])

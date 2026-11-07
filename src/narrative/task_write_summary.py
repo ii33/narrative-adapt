@@ -99,7 +99,7 @@ def _changes(tool, args, result):
                 identifier = created.get('@' + str(ordinal)) or action.get(kind + '_id') or action.get('id') or action.get('unit_id') or action.get('block_id')
                 add(category, kind, identifier, index.get(identifier) or action.get('unit') or action.get('block') or action)
         return changes
-    if tool in {'apply_storyboard_changes', 'generate_storyboard_sketch', 'generate_storyboard_panel', 'generate_storyboard_panels', 'render_storyboard_style',
+    if tool in {'apply_storyboard_changes', 'submit_storyboard_assets', 'generate_storyboard_sketch', 'generate_storyboard_panel', 'generate_storyboard_panels', 'render_storyboard_style',
                 'set_storyboard_animation', 'attach_storyboard_video', 'detach_storyboard_video',
                 'prepare_storyboard_video', 'submit_storyboard_video', 'refresh_storyboard_video'}:
         add('saved', 'storyboard', args.get('unit_id'))

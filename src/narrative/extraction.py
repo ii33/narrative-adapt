@@ -25,58 +25,67 @@ VALUE_TYPES = ("string", "number", "boolean", "node", "any", "either")
 ALLOWED_PARTICIPANTS = ("person", "group", "item", "location")
 
 
+def _diagnostic(issues: list[dict], path: list, name: str, reason: str, **details):
+    issues.append({'name': name, 'path': path, 'reason': reason, 'message': reason, **details})
+
+
 def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], locations: dict, lookup=None) -> list[dict]:
     """Verify property observations the same way as nodes: exact quote, known owner."""
     if not isinstance(rows, list):
         return []
     properties: list[dict] = []
     for draft_index, row in enumerate(rows):
+        path = ['properties', draft_index]
         if not isinstance(row, dict):
+            _diagnostic(rejected, path, '', '属性行必须是对象')
             continue
         node_name = str(row.get("node") or "").strip()
         property_id = str(row.get("property") or "").strip()
         value_type = str(row.get("value_type") or "string").strip()
         if not node_name or not property_id:
+            for field, value in [('node', node_name), ('property', property_id)]:
+                if not value:
+                    _diagnostic(rejected, path + [field], property_id, f'{field}必须是非空字符串')
             continue
         if any(row.get(key) is not None and not isinstance(row[key], str) for key in ('node', 'holder', 'at_event')):
-            rejected.append({"name": property_id, "reason": "节点引用必须为字符串"})
+            _diagnostic(rejected, path + [next(key for key in ('node', 'holder', 'at_event') if row.get(key) is not None and not isinstance(row[key], str))], property_id, '节点引用必须为字符串')
             continue
         if (not isinstance(row.get('related_nodes', []), list)
                 or any(not isinstance(value, str) for value in row.get('related_nodes', []))):
-            rejected.append({"name": property_id, "reason": "related_nodes须为节点引用字符串数组"})
+            _diagnostic(rejected, path + ['related_nodes'], property_id, 'related_nodes须为节点引用字符串数组')
             continue
         if value_type not in VALUE_TYPES:
-            rejected.append({"name": f"{node_name}.{property_id}", "reason": f"值类型无效：{value_type}"})
+            _diagnostic(rejected, path + ['value_type'], f'{node_name}.{property_id}', f'值类型无效：{value_type}')
             continue
         if "cardinality" in row and row["cardinality"] not in ("one", "many"):
-            rejected.append({"name": f"{node_name}.{property_id}", "reason": "cardinality必须为one或many"})
+            _diagnostic(rejected, path + ['cardinality'], f'{node_name}.{property_id}', 'cardinality必须为one或many')
             continue
         if "symmetric" in row and type(row["symmetric"]) is not bool:
-            rejected.append({"name": f"{node_name}.{property_id}", "reason": "symmetric必须是布尔值"})
+            _diagnostic(rejected, path + ['symmetric'], f'{node_name}.{property_id}', 'symmetric必须是布尔值')
             continue
-        quotes = [str(item) for item in (row.get("quotes") or []) if str(item).strip()]
+        quote_entries = [(index, str(item)) for index, item in enumerate(row.get('quotes') or []) if str(item).strip()]
+        quotes = [quote for _, quote in quote_entries]
         good = []
-        for quote in quotes:
+        for quote_index, quote in quote_entries:
             index, found = _locate(text, quote, locations, lookup)
             if index < 0:
-                rejected.append({"name": f"{node_name}.{property_id}", "reason": "引文不在原文中",
-                                 "quote": quote[:60]})
+                _diagnostic(rejected, path + ['quotes', quote_index], f'{node_name}.{property_id}', '引文不在指定原文范围中', quote=quote[:60])
                 continue
             good.append({"quote": found, "start": index})
         if not good:
-            rejected.append({"name": f"{node_name}.{property_id}", "reason": "没有可用的原文引文"})
+            _diagnostic(rejected, path + ['quotes'], f'{node_name}.{property_id}', '缺少非空quotes原文引文数组' if not quotes else '没有可用的原文引文')
             continue
         good.sort(key=lambda item: item["start"])
         op = row.get('op')
         if not isinstance(op, str) or op not in {'set', 'add', 'remove', 'clear', 'unknown'}:
-            rejected.append({'name': property_id, 'reason': '必须明确事件变更op'})
+            _diagnostic(rejected, path + ['op'], property_id, '必须明确事件变更op')
             continue
         if ('value' in row) != (op in {'set', 'add', 'remove'}):
-            rejected.append({'name': property_id, 'reason': 'set/add/remove须有value，clear/unknown禁止value'})
+            _diagnostic(rejected, path + ['value'], property_id, 'set/add/remove须有value，clear/unknown禁止value')
             continue
         value = row.get('value')
         if op in {'set', 'add', 'remove'} and value_type == 'boolean' and not isinstance(value, list) and type(value) is not bool:
-            rejected.append({'name': property_id, 'reason': '布尔属性必须为true或false'})
+            _diagnostic(rejected, path + ['value'], property_id, '布尔属性必须为true或false')
             continue
         properties.append({
             "_draft_index": draft_index,
@@ -86,7 +95,7 @@ def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], lo
             "value_type": value_type,
             **({"cardinality": row["cardinality"]} if "cardinality" in row else {}),
             **({"symmetric": row["symmetric"]} if "symmetric" in row else {}),
-            "start": good[0]["start"],
+            "start": good[0]["start"] if good else 0,
             "quotes": [item["quote"] for item in good],
             "scope": str(row.get("scope") or "world").strip(),
             "holder": str(row.get("holder") or "").strip(),
@@ -165,57 +174,54 @@ def parse_nodes(payload: dict, text: str) -> dict:
     lookup = ExactQuoteLookup(text)
     rejected: list[dict] = []
     for original_index, row in rows:
+        path = ['nodes', original_index - 1]
         if not isinstance(row, dict):
+            _diagnostic(rejected, path, '', '节点行必须是对象')
             continue
         name = str(row.get("name") or "").strip()
         node_type = str(row.get("type") or "").strip()
         if node_type not in NODE_TYPES:
-            rejected.append({"name": name, "reason": f"类型无效：{node_type}"})
+            _diagnostic(rejected, path + ['type'], name, f'类型无效：{node_type}')
             continue
         if (any(row.get(field) is not None and not isinstance(row[field], str) for field in ('scene', 'event', 'big_event', 'storyline'))
                 or not isinstance(row.get('participants', []), list)
                 or any(not isinstance(value, str) for value in row.get('participants', []))
                 or not isinstance(row.get('children', []), list)
                 or any(not isinstance(value, str) for value in row.get('children', []))):
-            rejected.append({"name": name, "reason": "父级与参与者须为正式ID或@索引字符串"})
+            for field in ('scene', 'event', 'big_event', 'storyline', 'participants', 'children'):
+                value = row.get(field)
+                invalid = (value is not None and not isinstance(value, str)) if field not in ('participants', 'children') else (not isinstance(value if value is not None else [], list) or any(not isinstance(item, str) for item in (value or [])))
+                if invalid:
+                    _diagnostic(rejected, path + [field], name, '父级、参与者和子项须为正式ID或@索引字符串；数组字段须为字符串数组')
             continue
-        closing_span = None
-        if node_type == "storyline":
-            closing = row.get("closing_quote")
-            closing_positions = lookup.positions(closing, 2) if isinstance(closing, str) and closing else []
-            if not isinstance(closing, str) or not closing_positions:
-                rejected.append({"name": name, "reason": "主要故事仅在完整结束后总结，须给出原文closing_quote"})
-                continue
-            closing_start = closing_positions[0]
-            if len(closing_positions) > 1:
-                rejected.append({"name": name, "reason": "closing_quote出现多次，须用完整上下文唯一定位"})
-                continue
-            closing_span = {"start": closing_start, "end": closing_start+len(closing), "quote": closing}
-        quotes = [str(item) for item in (row.get("quotes") or []) if str(item).strip()]
-        if node_type == "storyline" and not quotes:
-            quotes = [closing_span["quote"]] if closing_span else []
+        is_container = node_type in {'scene', 'big_event', 'storyline'}
+        quote_entries = [(index, str(item)) for index, item in enumerate(row.get('quotes') or []) if str(item).strip()]
+        quotes = [quote for _, quote in quote_entries]
+        if is_container:
+            quote_entries = []  # Container evidence comes only from verified children.
         good: list[dict] = []
-        for quote in quotes:
+        for quote_index, quote in quote_entries:
             index, found = _locate(text, quote, locations, lookup)
             if index < 0:
-                rejected.append({"name": name, "reason": "引文不在原文中", "quote": quote[:60]})
+                _diagnostic(rejected, path + ['quotes', quote_index], name, '引文不在指定原文范围中', quote=quote[:60])
                 continue
             positions = lookup.positions(found, 2) if node_type == "event" else []
             if len(positions) > 1:
-                rejected.append({"name": name, "quote": found,
-                                 "positions_sample": positions,
-                                 "position_basis": "submission_relative",
-                                 "reason": "事件引文在提交范围出现多处，不能任取首处作为精确身份依据；请缩小提交范围或提供更具体的逐字引文"})
+                _diagnostic(rejected, path + ['quotes', quote_index], name,
+                            '事件引文在提交范围出现多处，不能任取首处作为精确身份依据；请缩小提交范围或提供更具体的逐字引文',
+                            quote=found, positions_sample=positions, position_basis='submission_relative')
             good.append({"quote": found, "start": index})
-        if not name or not good:
+        if not name or (not good and not is_container):
+            if not name:
+                _diagnostic(rejected, path + ['name'], name, 'name必须是非空字符串')
             if name:
-                rejected.append({"name": name, "reason": "没有可用的原文引文"})
+                _diagnostic(rejected, path + ['quotes'], name, '缺少非空quotes原文引文数组' if not quotes else '没有可用的原文引文')
             continue
         if row.get("existing_id") is not None and not isinstance(row["existing_id"], str):
-            rejected.append({"name": name, "reason": "existing_id须为节点ID字符串"})
+            _diagnostic(rejected, path + ['existing_id'], name, 'existing_id须为节点ID字符串')
             continue
         if row.get("new_occurrence") is not None and type(row["new_occurrence"]) is not bool:
-            rejected.append({"name": name, "reason": "new_occurrence须为布尔值"})
+            _diagnostic(rejected, path + ['new_occurrence'], name, 'new_occurrence须为布尔值')
             continue
         good.sort(key=lambda item: item["start"])
         participants = [
@@ -225,7 +231,7 @@ def parse_nodes(payload: dict, text: str) -> dict:
             "name": name,
             "reference": f"@{original_index}",
             "type": node_type,
-            "start": good[0]["start"],
+            "start": good[0]["start"] if good else 0,
             "quotes": [item["quote"] for item in good],
             "evidence_spans": [{"start": item["start"], "end": item["start"] + len(item["quote"]),
                                 "quote": item["quote"]} for item in good],
@@ -243,7 +249,6 @@ def parse_nodes(payload: dict, text: str) -> dict:
             # 场景归属的大事件（可选）：大事件跨场景、甚至跨章。
             "storyline": str(row.get("storyline") or "").strip(),
             "big_event": str(row.get("big_event") or "").strip(),
-            "closing_span": closing_span,
         })
 
     # Reading order inside each type, then grouped for display.
@@ -507,7 +512,7 @@ def build_extraction(ops, data: dict) -> dict:
         key = (item["type"], item["name"])
         quote = item["quotes"][0] if item["quotes"] else ""
         mention = (item["type"], item["name"], quote)
-        record_key = (item["type"], item.get("display_name", item["name"]), quote, data["source_id"], item["start"], item.get("context_id", "canon"))
+        record_key = (item["type"], item.get("display_name", item["name"]), quote, item.get("evidence_source_id", data["source_id"]), item["start"], item.get("context_id", "canon"))
         if item.get("existing_id"):
             mention_ids[mention] = item["existing_id"]
             ids.setdefault(key, mention_ids[mention])
@@ -548,7 +553,7 @@ def build_extraction(ops, data: dict) -> dict:
             mention_ids[mention] = reused
             ids.setdefault(key, reused)
             continue
-        position = (current_ordinal, item["start"])
+        position = (orders.get(item.get("evidence_source_id", data["source_id"]), current_ordinal), item["start"])
         node_type = str(item["type"])
         node_id = allocate(
             positions.setdefault(node_type, []),
@@ -644,6 +649,12 @@ def build_extraction(ops, data: dict) -> dict:
                     keys.add(_span_key(span))
             if spans:
                 updated["evidence_spans"] = spans
+            if item.get("derived_container"):
+                updated["evidence_spans"] = _node_spans(item, data["source_id"])
+                updated["disclosure"] = {"source_id": item["evidence_source_id"], "start": item["start"]}
+                updated["evidence"] = {"source_id": item["evidence_source_id"], "quote": item["quotes"][0]}
+                if item.get("derived_completion"):
+                    updated["completion"] = dict(item["derived_completion"])
             children = children_by_type.get(item["type"], {}).get(node_id, [])
             if children:
                 updated["events"] = list(dict.fromkeys([*(current.get("events") or []), *children]))
@@ -661,18 +672,12 @@ def build_extraction(ops, data: dict) -> dict:
             "aliases": item.get("aliases") or [],
             "context_id": item.get("context_id", "canon"),
             "identity_note": "原文提取",
-            "disclosure": {"source_id": data["source_id"], "start": item["start"]},
-            "evidence": {"source_id": data["source_id"], "quote": item["quotes"][0]},
+            "disclosure": {"source_id": item.get("evidence_source_id", data["source_id"]), "start": item["start"]},
+            "evidence": {"source_id": item.get("evidence_source_id", data["source_id"]), "quote": item["quotes"][0]},
             "evidence_spans": _node_spans(item, data["source_id"]),
         }
-        if item["type"] == "storyline" and item.get("closing_span"):
-            closing = item["closing_span"]
-            payload["completion"] = {"source_id": data["source_id"], "start": closing["end"]}
-            payload["disclosure"] = {"source_id": data["source_id"], "start": closing["start"]}
-            payload["evidence"] = {"source_id": data["source_id"], "quote": closing["quote"]}
-            close_evidence = {"source_id": data["source_id"], **closing}
-            if close_evidence not in payload["evidence_spans"]:
-                payload["evidence_spans"].append(close_evidence)
+        if item.get("derived_completion"):
+            payload["completion"] = dict(item["derived_completion"])
         if item["type"] in children_by_type:
             payload["events"] = children_by_type[item["type"]].get(node_id, [])
         if item["type"] in {"event", "action"}:

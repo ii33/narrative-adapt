@@ -10,11 +10,11 @@ def _host_write(value):
     if isinstance(value, list):
         return any(_host_write(item) for item in value)
     if isinstance(value, dict):
-        return value.get('name', value.get('tool')) == 'write_host_file' or any(_host_write(item) for item in value.values())
+        return value.get('name', value.get('tool')) in {'write_host_file', 'edit_host_file'} or any(_host_write(item) for item in value.values())
     return False
 
 
-def _safe_arguments(value):
+def _safe_arguments(value, fields=('content',)):
     raw = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     try:
         arguments = json.loads(value) if isinstance(value, str) else dict(value)
@@ -22,12 +22,13 @@ def _safe_arguments(value):
         return {'arguments_omitted': True, 'character_count': len(raw), 'sha256': hashlib.sha256(raw.encode()).hexdigest()}
     if not isinstance(arguments, dict):
         return {'arguments_omitted': True, 'character_count': len(raw), 'sha256': hashlib.sha256(raw.encode()).hexdigest()}
-    if arguments.get('content_omitted'):
-        return arguments
-    if 'content' in arguments:
-        content = arguments.pop('content')
+    for field in fields:
+        if field not in arguments:
+            continue
+        content = arguments.pop(field)
         encoded = content.encode() if isinstance(content, str) else json.dumps(content, ensure_ascii=False).encode()
-        arguments.update(content_omitted=True, content_bytes=len(encoded), content_sha256=hashlib.sha256(encoded).hexdigest())
+        arguments.update({field + '_omitted': True, field + '_bytes': len(encoded),
+                          field + '_sha256': hashlib.sha256(encoded).hexdigest()})
     return arguments
 
 
@@ -38,10 +39,11 @@ def sanitize_host_audit(value: Any) -> Any:
     if not isinstance(value, dict):
         return value
     result = {key: sanitize_host_audit(item) for key, item in value.items()}
-    if value.get('name', value.get('tool')) == 'write_host_file':
+    if value.get('name', value.get('tool')) in {'write_host_file', 'edit_host_file'}:
         for field in ('args', 'arguments', 'arguments_json'):
             if field in value:
-                safe = _safe_arguments(value[field])
+                fields = ('old_text', 'new_text') if value.get('name', value.get('tool')) == 'edit_host_file' else ('content',)
+                safe = _safe_arguments(value[field], fields)
                 result[field] = json.dumps(safe, ensure_ascii=False) if isinstance(value[field], str) else safe
         if 'argument_fragments' in value:
             result['argument_fragments'] = ['[host write payload omitted]']

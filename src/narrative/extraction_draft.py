@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-DRAFT_VERSION = "conversation-draft/16"
+DRAFT_VERSION = "conversation-draft/19"
 
 RESULT_SCHEMA = {
     "type": "object", "required": ["nodes", "properties"],
@@ -14,9 +14,10 @@ RESULT_SCHEMA = {
             "properties": {
                 "name": {"type": "string"},
                 "type": {"type": "string", "enum": ["person", "group", "item", "location", "storyline", "big_event", "scene", "event", "action"],
-                    "description": "event记录完整发生，通常包含同一叙事目标下的过程与直接结果；不把准备、动作链或收尾单独改标event。真正独立的新展开才另分事件。action仅在明确请求动作提取时使用。"},
-                "quotes": {"type": "array", "items": {"type": "string"}},
-                "closing_quote": {"type": "string", "description": "storyline完整结束后总结时须给出逐字唯一闭合证据，程序计算completion"},
+                    "description": "event是介于场景与动作之间、有自身推进与落点的完整情节单元；同场同总目标可有多个事件，不按章节或实施步骤机械拆分。action仅在明确请求动作提取时使用。"},
+                "quotes": {"type": "array", "items": {"type": "string"},
+                    "description": "事件及实体的准确原文证据；event默认一条代表性引文。scene/big_event/storyline不填，程序从直属下级自动派生。属性与关系证据单独记录。"},
+                "location": {"type": "string", "description": "仅event：明确地点location节点ID/@引用，或无/未知；程序复用本事件quotes生成自身world地点变更，不与显式地点properties双写；省略不自动补未知"},
                 "aliases": {"type": "array", "items": {"type": "string"}},
                 "existing_id": {"type": "string", "description": "查证后引用本工程已有节点；不新建同一事件"},
                 "new_occurrence": {"type": "boolean", "description": "同名但原文明确是另一次发生时声明"},
@@ -33,7 +34,7 @@ RESULT_SCHEMA = {
             "properties": {
                 "node": {"type": "string", "description": "属性主体；身份、关系或作用角色中为参照方A"}, "property": {"type": "string", "description": "关系描述对方相对node的身份、关系或作用中的角色；node=A,property=父亲,value=B表示B是A的父亲；事件地点使用属性名‘地点’并引用地点节点"},
                 "op": {"type": "string", "enum": ["set", "add", "remove", "clear", "unknown"], "description": "在at_event处建立/设置、增添、移除、明确清空或变为未知；不填写有效期"},
-                "value": {"description": "node/either节点引用表示被指向的对方ID；普通string/any值保持字面内容；事件地点的value引用location节点"}, "value_type": {"type": "string", "enum": ["string", "number", "boolean", "node", "either", "any"], "description": "节点引用用node/either；事件地点使用node，string/any即使内容像P编号也是字面值"},
+                "value": {"description": "node/either节点引用表示被指向的对方ID；普通string/any值保持字面内容；每个event必须有自身world地点，value引用location节点或显式‘无’‘未知’，也可op=unknown不携value"}, "value_type": {"type": "string", "enum": ["string", "number", "boolean", "node", "either", "any"], "description": "节点引用用node/either；事件地点建议either以支持location引用及‘无’‘未知’，已有node定义可引用location；string/any即使内容像P编号也是字面值"},
                 "quotes": {"type": "array", "items": {"type": "string"}},
                 "cardinality": {"type": "string", "enum": ["one", "many"], "description": "新定义默认one；多值状态显式many且value为数组。已有定义省略沿用，显式冲突拒绝，须显式修改定义"},
                 "symmetric": {"type": "boolean", "description": "该关系性质对称时显式true；单向false，不按名称猜测"},
@@ -85,21 +86,92 @@ def _source_range(ops, source_id: str, start: int, end: int | None):
     return source, text[start:end], start, end
 
 
+class ExtractionDraftValidationError(ValueError):
+    """Content failure carrying all independent original-input diagnostics."""
+    def __init__(self, diagnostics):
+        self.diagnostics = diagnostics
+        super().__init__('；'.join(item['message'] for item in diagnostics))
+
+
+def _draft_input_diagnostics(result):
+    issues = []
+    def issue(path, message):
+        issues.append({'severity': 'error', 'code': 'DRAFT_SCHEMA', 'path': path, 'message': message})
+    if not isinstance(result, dict):
+        issue([], 'result必须是对象')
+        return issues
+    for section in ('nodes', 'properties'):
+        if not isinstance(result.get(section), list):
+            issue([section], f'{section}缺失或不是数组；即使没有内容也须显式传空数组')
+    for key in set(result) - set(RESULT_SCHEMA['properties']):
+        issue([key], f'未知草稿字段：{key}')
+    for section in ('uncertainties', 'exclusions'):
+        rows = result.get(section, [])
+        if not isinstance(rows, list):
+            issue([section], f'{section}必须是对象数组')
+        else:
+            for index, row in enumerate(rows):
+                if not isinstance(row, dict):
+                    issue([section, index], f'{section}条目必须是对象')
+    allowed_node_fields = set(RESULT_SCHEMA['properties']['nodes']['items']['properties'])
+    for index, row in enumerate(result.get('nodes') if isinstance(result.get('nodes'), list) else []):
+        path = ['nodes', index]
+        if not isinstance(row, dict):
+            issue(path, '节点行必须是对象')
+            continue
+        for key in set(row) - allowed_node_fields:
+            issue(path + [key], f'未知节点字段：{key}')
+        if 'location' in row and (row.get('type') != 'event' or not isinstance(row['location'], str) or not row['location'].strip()):
+            issue(path + ['location'], f'nodes[{index}].location仅event可填非空地点引用、无或未知')
+        expected_parent = {'scene': 'big_event', 'big_event': 'storyline', 'event': 'scene', 'action': 'event'}.get(str(row.get('type') or ''))
+        for key in ('storyline', 'big_event', 'scene', 'event'):
+            if key in row and key != expected_parent:
+                issue(path + [key], f'父级字段{key}不适用于节点类型{row.get("type")}')
+        if row.get('type') not in {'scene', 'big_event', 'storyline'}:
+            quotes = row.get('quotes')
+            if not isinstance(quotes, list) or not quotes:
+                issue(path + ['quotes'], '缺少非空quotes原文引文数组；节点自身也必须提供逐字证据')
+            else:
+                for quote_index, quote in enumerate(quotes):
+                    if not isinstance(quote, str) or not quote.strip():
+                        issue(path + ['quotes', quote_index], '引文必须是非空原文字符串')
+    for index, row in enumerate(result.get('properties') if isinstance(result.get('properties'), list) else []):
+        path = ['properties', index]
+        if not isinstance(row, dict):
+            issue(path, '属性行必须是对象')
+            continue
+        for key in set(row) - set(_PROPERTY_DRAFT_SCHEMA['properties']):
+            issue(path + [key], f'未知属性字段：{key}；只使用事件变更合同，不接受有效期或模型sequence')
+        for field in ('node', 'property'):
+            if not isinstance(row.get(field), str) or not row.get(field, '').strip():
+                issue(path + [field], f'{field}必须是非空字符串')
+        if ('value' in row) != (isinstance(row.get('op'), str) and row['op'] in {'set', 'add', 'remove'}):
+            issue(path + ['value'], 'set/add/remove须有value，clear/unknown不能有value')
+        if not isinstance(row.get('at_event'), str) or not row.get('at_event', '').strip():
+            issue(path + ['at_event'], '必须明确at_event事件引用')
+        if not isinstance(row.get('op'), str) or row['op'] not in {'set', 'add', 'remove', 'clear', 'unknown'}:
+            issue(path + ['op'], '必须明确有效op：set/add/remove/clear/unknown')
+        quotes = row.get('quotes')
+        if not isinstance(quotes, list) or not quotes:
+            issue(path + ['quotes'], '缺少非空quotes原文引文数组')
+    return issues
+
+
 def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
     from .extraction import build_extraction, parse_nodes
 
     snapshot = ops.capture_changes()
     reader = snapshot.reader
     source, selected, start, end = _source_range(reader, source_id, start, end)
-    if (not isinstance(result, dict) or not isinstance(result.get("nodes"), list)
-            or not isinstance(result.get("properties"), list)):
-        raise ValueError("完整草稿需要nodes和properties数组")
+    input_issues = _draft_input_diagnostics(result)
+    if input_issues:
+        raise ExtractionDraftValidationError(input_issues)
     allowed_node_fields = set(RESULT_SCHEMA["properties"]["nodes"]["items"]["properties"])
     for index, row in enumerate(result["nodes"]):
         if not isinstance(row, dict):
             raise ValueError(f"nodes[{index}]必须是对象")
-        if "closing_quote" in row and row.get("type") != "storyline":
-            raise ValueError(f"nodes[{index}]仅主要故事使用closing_quote")
+        if 'location' in row and (row.get('type') != 'event' or not isinstance(row['location'], str) or not row['location'].strip()):
+            raise ValueError(f'nodes[{index}].location仅event可填非空地点引用、无或未知')
         expected_parent = {"scene": "big_event", "big_event": "storyline", "event": "scene", "action": "event"}.get(str(row.get("type") or ""))
         invalid_parent = {key for key in ("storyline", "big_event", "scene", "event") if key in row and key != expected_parent}
         if invalid_parent:
@@ -125,6 +197,33 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
     current_graph = reader.graph_snapshot()
     current_records = reader.property_records()
     definitions = {row['id']: row for row in current_records if row.get('kind') == 'property_definition'}
+    from .event_location import LOCATION_PROPERTIES, LOCATION_SEMANTICS
+    shortcut_indices = []
+    explicit_count = len(original['properties'])
+    location_definitions = [row for key, row in definitions.items()
+        if key in LOCATION_PROPERTIES or row.get('semantic') in tuple(LOCATION_SEMANTICS)]
+    if len(location_definitions) > 1 and any('location' in row for row in original['nodes']):
+        raise ExtractionDraftValidationError([{'severity': 'error', 'code': 'DRAFT_SCHEMA',
+            'path': ['nodes', index, 'location'],
+            'message': '存在多个地点定义，请用显式properties指定，不能猜测location快捷字段的目标定义',
+            'related_objects': [{'property_id': definition['id']} for definition in location_definitions]}
+            for index, row in enumerate(original['nodes']) if 'location' in row])
+    location_definition = location_definitions[0] if location_definitions else None
+    property_id = location_definition['id'] if location_definition else '地点'
+    for index, row in enumerate(original['nodes']):
+        if 'location' not in row:
+            continue
+        location = row['location'].strip()
+        generated = {'node': f'@{index+1}', 'property': property_id, 'at_event': f'@{index+1}',
+            'scope': 'world', 'op': 'unknown' if location == '未知' else 'set',
+            'quotes': list(row.get('quotes') or []),
+            'value_type': location_definition['value_type'] if location_definition else 'either'}
+        if location != '未知':
+            generated['value'] = ([location] if location_definition and location_definition.get('cardinality') == 'many' else location)
+        if location_definition:
+            generated['cardinality'] = location_definition.get('cardinality', 'one')
+        original['properties'].append(generated)
+        shortcut_indices.append(index)
     # Resolve omitted type information from explicit definitions anywhere in this batch.
     # A later clear/unknown must not turn an earlier node reference into a string.
     for row in original['properties']:
@@ -142,24 +241,64 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
             raise ValueError(f"{key}必须是对象数组")
         data[key] = rows
     data = bind(data, current_graph, current_records)
-    issues = list(data.get("rejected") or []) + content_diagnostics(data, selected, source["title"])
+    for index in shortcut_indices:
+        reference = f'@{index+1}'
+        owner = next((row['name'] for row in data['nodes'] if row['reference'] == reference), reference)
+        generated_index = explicit_count + shortcut_indices.index(index)
+        generated = next((row for row in data['properties'] if row.get('_draft_index') == generated_index), None)
+        if generated is None:
+            message = f'nodes[{index}].location无法定位事件地点证据，请核对本事件quotes'
+            data['rejected'].append({'name': owner, 'path': ['nodes', index, 'location'], 'message': message, 'reason': message,
+                                     'related_paths': [['nodes', index, 'quotes']]})
+            continue
+        if generated.get('op') != 'unknown':
+            values = generated.get('value')
+            values = values if isinstance(values, list) else [values]
+            if any(value not in ('无', '未知') and data['reference_types'].get(value) != 'location' for value in values):
+                path = ['nodes', index, 'location']
+                causes = [item for item in data['rejected'] if item.get('path') == ['properties', generated_index, 'value']]
+                message = f'nodes[{index}].location必须引用通过校验的location节点，或填写无/未知'
+                if causes:
+                    message += '；' + '；'.join(item.get('message') or item.get('reason', '') for item in causes)
+                data['rejected'].append({'name': owner, 'path': path, 'message': message, 'reason': message,
+                    'related_paths': [related for item in causes for related in item.get('related_paths', [])]})
+        explicit_locations = [row for row in data['properties'] if row.get('_draft_index', explicit_count) < explicit_count
+            and row.get('node') == owner and row.get('at_event') == owner
+            and row.get('scope', 'world') == 'world'
+            and (row.get('property') in LOCATION_PROPERTIES or definitions.get(row.get('property'), {}).get('semantic') in tuple(LOCATION_SEMANTICS))]
+        if explicit_locations:
+            message = f'nodes[{index}].location与本事件显式地点properties双写；保留一种明确表达后修补，不自动选择'
+            data['rejected'].append({'name': owner, 'path': ['nodes', index, 'location'], 'message': message, 'reason': message,
+                'related_paths': [['properties', row['_draft_index']] for row in explicit_locations]})
+    shortcut_paths = {explicit_count + order: ['nodes', index, 'location'] for order, index in enumerate(shortcut_indices)}
+    for item in data.get('rejected', []):
+        path = item.get('path', [])
+        if len(path) >= 2 and path[0] == 'properties' and path[1] in shortcut_paths:
+            item['path'] = shortcut_paths[path[1]]
+    issues = content_diagnostics(data, selected, source["title"])
     for kind in ("nodes", "properties"):
         for row in data[kind]:
             row["start"] += start
             if kind == "nodes":
-                if row.get("closing_span"):
-                    row["closing_span"]["start"] += start
-                    row["closing_span"]["end"] += start
                 for span in row.get("evidence_spans") or []:
                     span["start"] += start
                     span["end"] += start
+    from .extraction_containers import derive
+    data = derive(data, current_graph, reader, source_id)
+    if data.get("rejected"):
+        diagnostics = [{"severity": "error", "code": "EXTRACTION_CONTENT", **item,
+                        "object_id": item.get("name"), "message": item.get("message") or item.get("reason")}
+                       for item in data["rejected"]]
+        outcome = {"valid": False, "revision": snapshot.revision, "diagnostics": diagnostics}
+        return data, {}, None, outcome
     data.update(source_id=source_id, chapter=source["title"],
                 slice_text=selected, slice_start=start, slice_end=end)
     built = build_extraction(reader, data)
     issues += list(built.get("skipped") or [])
     prepared = None
     diagnostics = [{"severity": "error", "code": "EXTRACTION_CONTENT",
-                    "object_id": item.get("name"), "message": item.get("reason") or str(item)} for item in issues]
+                    "object_id": item.get("name"), "message": item.get("reason") or str(item),
+                    **{key: item[key] for key in ('path', 'related_paths', 'quote', 'positions_sample', 'position_basis') if key in item}} for item in issues]
     if not issues and not built.get("empty"):
         prepared = ops.prepare_changes(built["objects"], built["property_records"], snapshot.revision, snapshot=snapshot)
         diagnostics += prepared.diagnostics
@@ -175,8 +314,8 @@ def _compact(outcome: dict) -> dict:
     diagnostics = outcome.get("diagnostics") or []
     actionable = [row for row in diagnostics if row.get("severity") in {"error", "warning"}]
     if actionable:
-        result["diagnostics"] = [{key: row[key] for key in ("severity", "code", "object_id", "message")
-                                  if row.get(key) is not None} for row in actionable]
+        from .diagnostic_locations import normalize_problems
+        result['diagnostics'] = normalize_problems(actionable, operation='submit_extraction')
     info_count = sum(row.get("severity") == "info" for row in diagnostics)
     if info_count:
         result["info_count"] = info_count
@@ -184,7 +323,11 @@ def _compact(outcome: dict) -> dict:
 
 
 def preview(ops, source_id: str, result: dict, start: int = 0, end: int | None = None) -> dict:
-    return _compact(_prepare(ops, source_id, result, start, end)[3])
+    try:
+        return _compact(_prepare(ops, source_id, result, start, end)[3])
+    except ExtractionDraftValidationError as error:
+        return _compact({'valid': False, 'revision': ops.graph_project_info()['revision'],
+                         'diagnostics': error.diagnostics})
 
 
 def submit(ops, source_id: str, result: dict, start: int = 0, end: int | None = None) -> dict:
@@ -238,6 +381,7 @@ def content_diagnostics(data: dict, text: str, title: str = "") -> list[dict]:
             rejected.append({
                 "name": f"{prop.get('node')}.{prop.get('property')}",
                 "node": prop.get("node"), "property": prop.get("property"), "value": prop.get("value"),
+                "path": ['properties', prop['_draft_index'], 'property'] if '_draft_index' in prop else [],
                 "reason": "人物关系的 property 需要具体关系性质，不能把分类名“关系”当作性质；"
                           "请依据原文判断，无法确定则说明存疑而非编造",
             })
@@ -249,6 +393,7 @@ def content_diagnostics(data: dict, text: str, title: str = "") -> list[dict]:
             ):
                 rejected.append({
                     "name": node.get("display_name", node.get("name")), "type": "big_event",
-                    "reason": "大事件引文只来自卷章组织标题，缺少正文发生过程证据",
+                    "path": ['nodes', int(node['reference'][1:]) - 1, 'children'] if node.get('reference', '').startswith('@') else [],
+                    "reason": "大事件下级证据只来自卷章组织标题，缺少正文发生过程证据；请核对下级节点及其证据",
                 })
     return rejected

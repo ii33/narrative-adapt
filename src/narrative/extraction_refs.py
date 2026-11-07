@@ -19,7 +19,8 @@ class References:
         identities = {}
         for ref, row in self.local.items():
             key = json.dumps([row.get('type'), row.get('name'), (row.get('quotes') or [''])[0],
-                              row.get('context_id', 'canon')],
+                              row.get('context_id', 'canon'),
+                              ref if row.get('type') in {'scene', 'big_event', 'storyline'} else None],
                              ensure_ascii=False, sort_keys=True)
             canonical = identities.setdefault(key, ref)
             self.aliases[ref] = canonical
@@ -78,38 +79,48 @@ def bind(data: dict, snapshot: dict, records: list[dict]) -> dict:
     result = deepcopy(data)
     resolver = References(result['nodes'], snapshot['nodes'])
     issues = result.setdefault('rejected', [])
-    def ref(value, owner, **options):
+    def ref(value, owner, path, **options):
         try:
             return resolver.resolve(value, **options)
         except ValueError as exc:
-            issues.append({'name': owner, 'reference': value, 'reason': str(exc)})
+            causes = []
+            if isinstance(value, str) and re.fullmatch(r'@[1-9][0-9]*', value):
+                target = ['nodes', int(value[1:]) - 1]
+                causes = [issue for issue in issues if issue.get('path', [])[:2] == target]
+            message = str(exc)
+            if causes:
+                message += '；引用目标未通过校验：' + '；'.join(dict.fromkeys(str(c.get('message') or c.get('reason')) for c in causes))
+            issues.append({'name': owner, 'reference': value, 'path': path, 'reason': message,
+                           'message': message, **({'related_paths': [c['path'] for c in causes]} if causes else {})})
             return ''
     for row in result['nodes']:
         name = row['name']
+        path = ['nodes', int(row['reference'][1:]) - 1]
         row['display_name'] = name
         row['name'] = resolver.aliases[row['reference']]
         context = row.get('context_id', 'canon')
         for field, kind in [('scene', 'scene'), ('event', 'event'), ('big_event', 'big_event'), ('storyline', 'storyline')]:
-            row[field] = ref(row.get(field), name, allowed={kind}, context=context, optional=True)
+            row[field] = ref(row.get(field), name, path + [field], allowed={kind}, context=context, optional=True)
         child_kind = {'storyline':'big_event','big_event':'scene','scene':'event','event':'action'}.get(row['type'])
-        row['children'] = [ref(value, name, allowed=({"scene", "event"} if row["type"] == "scene" else {child_kind}) if child_kind else set(), context=context)
-                           for value in row.get('children', [])]
-        row['participants'] = [ref(value, name, allowed=ENTITY_TYPES) for value in row.get('participants', [])]
+        row['children'] = [ref(value, name, path + ['children', index], allowed=({"scene", "event"} if row["type"] == "scene" else {child_kind}) if child_kind else set(), context=context)
+                           for index, value in enumerate(row.get('children', []))]
+        row['participants'] = [ref(value, name, path + ['participants', index], allowed=ENTITY_TYPES) for index, value in enumerate(row.get('participants', []))]
         row['participants_not_in_text'] = []
     types = {row['id']: row.get('value_type') for row in records if row.get('kind') == 'property_definition'}
-    for row in result.get('properties', []):
+    for property_index, row in enumerate(result.get('properties', [])):
         owner = str(row.get('node')) + '.' + str(row.get('property'))
-        row['node'] = ref(row.get('node'), owner)
+        path = ['properties', row.get('_draft_index', property_index)]
+        row['node'] = ref(row.get('node'), owner, path + ['node'])
         value_type = row.get('value_type') or 'string'
         types[row['property']] = value_type
         if value_type in {'node', 'either'} and 'value' in row:
             value = row.get('value')
-            row['value'] = ([ref(item, owner, literal=value_type == 'either') for item in value]
-                            if isinstance(value, list) else ref(value, owner, literal=value_type == 'either'))
-        row['holder'] = ref(row.get('holder'), owner, allowed={'person'},
+            row['value'] = ([ref(item, owner, path + ['value', index], literal=value_type == 'either') for index, item in enumerate(value)]
+                            if isinstance(value, list) else ref(value, owner, path + ['value'], literal=value_type == 'either'))
+        row['holder'] = ref(row.get('holder'), owner, path + ['holder'], allowed={'person'},
                             optional=(row.get('scope') or 'world') == 'world')
-        row['at_event'] = ref(row.get('at_event'), owner, allowed=MOMENT_TYPES)
-        row['related_nodes'] = [ref(value, owner) for value in row.get('related_nodes', [])]
+        row['at_event'] = ref(row.get('at_event'), owner, path + ['at_event'], allowed=MOMENT_TYPES)
+        row['related_nodes'] = [ref(value, owner, path + ['related_nodes', index]) for index, value in enumerate(row.get('related_nodes', []))]
     result['reference_types'] = {**{ref: row['type'] for ref, row in resolver.local.items()},
                                  **{ref: row['node_type'] for ref, row in resolver.current.items()}}
     result['property_reference_types'] = types

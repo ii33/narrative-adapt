@@ -156,10 +156,14 @@ def prepare(snapshot: BatchSnapshot, graph_objects: list[dict], property_records
     except (ValueError, TypeError) as exc:
         return _state(snapshot, snapshot._graph, snapshot._records,
                       [{'severity': 'error', 'code': 'RECORD', 'message': str(exc)}])
+    from .container_evidence import refresh_container_evidence
+    graph = refresh_container_evidence(graph, snapshot._sources, snapshot._graph)
     return _state(snapshot, graph, records, validate(snapshot, graph, records))
 
 
 def prepare_state(snapshot: BatchSnapshot, graph: dict, records: list[dict]) -> PreparedChanges:
+    from .container_evidence import refresh_container_evidence
+    graph = refresh_container_evidence(graph, snapshot._sources, snapshot._graph)
     return _state(snapshot, graph, records, validate(snapshot, graph, records))
 
 

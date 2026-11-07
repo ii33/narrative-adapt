@@ -5,12 +5,14 @@ import QtQuick.Dialogs
 
 Rectangle {
     id: page
-    SubmissionState{id:contentSubmission;owner:page;enabled:page.editing;operation:"save_asset";target:page.card.id?({"payload.id":page.card.id}):({"payload.category":page.category,"payload.domain":"adaptation"});onRestoreRequested:function(a){page.edit(a.payload)}}
+    SubmissionState{id:contentSubmission;owner:page;enabled:page.editing;operation:"save_asset";target:page.card.id?({"payload.id":page.card.id,"payload.domain":page.card.domain||page.domain}):({"payload.category":page.category,"payload.domain":page.card.domain||page.domain});onRestoreRequested:function(a){page.edit(a.payload)}}
 
     objectName: "assetsPage"
     property var app
     readonly property var t: app.theme
     color: t.paper
+    property string domain: "adaptation"
+    property var pendingCard: ({})
     property string category: "appearance"
     property string moment: ""
     property string nodeId: ""
@@ -28,7 +30,7 @@ Rectangle {
         var start = moments.find(function(m) { return m.id === n.point_id })
         return !current || !start || start.sort_id <= current.sort_id
     })
-    function reload() { bridge.loadAssets(category, category === "material" ? "" : moment, category === "material" ? "" : nodeId) }
+    function reload() { bridge.loadAssets(category, category === "material" ? "" : moment, category === "material" ? "" : nodeId, domain) }
     function edit(c) {
         if(!contentSubmission.restoring)contentSubmission.begin()
         card = c; titleEdit.text = c.title || ""; detailEdit.text = c.detail || ""; promptEdit.text = c.prompt || ""
@@ -44,9 +46,17 @@ Rectangle {
         target: bridge
         function onResultReady(kind, result) {
             if (kind === "project" || kind === "project_closed") { payload = ({assets: [], nodes: [], moments: [], revision: 0}); card = ({}); editing = false; nodeId = ""; moment = "" }
-            if (kind === "assets" && result.category === page.category && (result.node_id || "") === page.nodeId && (result.moment || "") === page.moment) payload = result
+            if (kind === "assets" && result.category === page.category && (result.domain||"adaptation")===page.domain && (result.node_id || "") === page.nodeId && (result.moment || "") === page.moment) {
+                payload=result
+                if(pendingCard.id&&pendingCard.category===category&&(pendingCard.domain||"adaptation")===domain){var c=pendingCard;pendingCard=({});page.edit(c)}
+            }
             if (kind === "asset_saved") { editing = false; reload() }
-            if (kind === "asset_detail" && result.asset.category === page.category) page.edit(result.asset)
+            if (kind === "asset_detail") {
+                page.pendingCard=result.asset;page.editing=false;page.domain=result.asset.domain||"adaptation";page.nodeId="";page.moment=""
+                assetDomain.currentIndex=page.domain==="extraction"?1:0
+                categoryTabs.currentIndex=page.categoryKeys.indexOf(result.asset.category)
+                page.category=result.asset.category;page.reload()
+            }
         }
     }
     FileDialog {
@@ -66,6 +76,7 @@ Rectangle {
         anchors.fill: parent; anchors.margins: 20; spacing: 12
         Label { text: "资产"; font.pixelSize: 22; font.bold: true; color: t.ink }
         TabBar {
+            id:categoryTabs
             Layout.fillWidth: true
             onCurrentIndexChanged: {
                 page.category = page.categoryKeys[currentIndex]; page.nodeId = ""; page.moment = ""; page.editing = false
@@ -76,6 +87,11 @@ Rectangle {
             TabButton { text: "物品" }
             TabButton { text: "地点" }
             TabButton { text: "材质" }
+        }
+        RowLayout {
+            Layout.fillWidth:true
+            Label {text:"资料域";color:t.muted}
+            ComboBox {id:assetDomain;objectName:"assetDomainPicker";model:["改编","提取"];onActivated:{page.domain=currentIndex===1?"extraction":"adaptation";page.nodeId="";page.moment="";page.editing=false;page.reload()}}
         }
         RowLayout {
             visible: page.category !== "material"; Layout.fillWidth: true
@@ -90,15 +106,15 @@ Rectangle {
             ComboBox {
                 id: assetNodeChoice
                 objectName: "assetNodePicker"; Layout.fillWidth: true
-                model: [{id: "", name: "请选择"}].concat(page.relevantNodes); textRole: "name"
+                model: [{id: "", name: "全部 / 独立资产"}].concat(page.relevantNodes); textRole: "name"
                 onActivated: { page.nodeId = model[currentIndex].id; page.editing = false; page.reload() }
             }
         }
         RowLayout {
             Layout.fillWidth: true
-            Label { text: page.category === "appearance" ? "选择角色后管理其全部形象设定" : "视觉设定资料卡"; color: t.muted }
+            Label { text: page.category === "appearance" ? "人物形象设定，可独立建立或关联角色" : "视觉设定资料卡"; color: t.muted }
             Item { Layout.fillWidth: true }
-            Button { objectName: "assetAdd"; text: "新增设定"; enabled: page.category === "material" || !!page.nodeId; onClicked: page.edit({node_id: page.nodeId}) }
+            Button { objectName: "assetAdd"; text: "新增设定"; enabled:true; onClicked: page.edit({node_id: page.nodeId}) }
         }
         Repeater {
             model: page.payload.diagnostics || []
@@ -159,8 +175,8 @@ Rectangle {
                     Button { text: "添加参考图"; onClicked: { imagePicker.reference = true; imagePicker.open() } }
                     TextArea { id: promptEdit; Layout.fillWidth: true; Layout.preferredHeight: 90; placeholderText: "图像提示词（可选）"; wrapMode: TextEdit.Wrap; background: Rectangle { color: t.card; border.color: t.line; radius: t.radius } }
                     RowLayout {
-                        Button { objectName: "assetSave"; text: "保存设定"; enabled: !!titleEdit.text.trim(); onClicked: {
-                            var c = {category: page.category, node_id: page.category === "material" ? "" : (page.card.node_id || page.nodeId), domain: "adaptation", title: titleEdit.text, detail: detailEdit.text, prompt: promptEdit.text, images: page.images, reference_images: page.references, valid_from: page.category === "material" ? "" : fromChoice.model[fromChoice.currentIndex].id, valid_to: page.category === "material" ? "" : toChoice.model[toChoice.currentIndex].id}
+                        Button { objectName: "assetSave"; text: "保存设定"; enabled: !!titleEdit.text.trim()&&page.payload.category===page.category&&(page.payload.domain||"adaptation")===page.domain; onClicked: {
+                            var c = {category: page.category, node_id: page.category === "material" ? "" : (page.card.node_id || page.nodeId), domain: page.card.domain||page.domain, title: titleEdit.text, detail: detailEdit.text, prompt: promptEdit.text, images: page.images, reference_images: page.references, valid_from: page.category === "material" ? "" : fromChoice.model[fromChoice.currentIndex].id, valid_to: page.category === "material" ? "" : toChoice.model[toChoice.currentIndex].id}
                             if (page.card.id) c.id = page.card.id
                             bridge.saveAsset(c, page.payload.revision || 0)
                         } }

@@ -40,7 +40,7 @@ def test_source_sound_reference_and_shot_notes(project):
 
 def test_visual_asset_delete_requires_unbinding(project):
     ops, unit, _ = setup_board(project)
-    asset = ops.save_asset({'category': 'material', 'title': '窗格参考'})
+    asset = ops.save_asset({'category': 'location', 'title': '窗格参考'})
     board = ops.apply_storyboard_changes(unit, 0, [{'op': 'create_shot', 'title': '窗前', 'visual_elements': [{'kind': 'set', 'name': '窗', 'usage': '背景', 'asset_id': asset['id']}]}])
     with pytest.raises(ValueError, match='分镜引用'):
         ops.delete_asset(asset['id'])

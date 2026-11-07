@@ -29,7 +29,8 @@ class ScenePlan(WritingModel):
     outcome: str = ""
     estimated_duration_seconds: float | None = Field(default=None, gt=0)
     narrative_mode: Literal["normal", "flashback", "dream", "imagined"] = "normal"
-    source_event_ids: list[str] = Field(default_factory=list)
+    source_event_ids: list[str] = Field(default_factory=list,
+        description='可选，本场实际使用的剧本独立改编时间线有效事件ID，可多对多；不填不阻止生成，也不自动视为已使用全部范围，名称与版本由程序派生')
     continuity_requirements: list[dict[str, Any]] = Field(default_factory=list)
     production_notes: str = ""
     presentation: Literal["title_card", "black_screen", "credits", "other"] | None = None
@@ -51,6 +52,7 @@ class ScriptUnit(WritingModel):
     enabled: bool = True
     scene_number: str | None = None
     plan: ScenePlan
+    source_reference_origin: Literal['explicit', 'single_scene'] = 'explicit'
     plan_revision: int = Field(default=1, ge=1, strict=True)
     body_revision: int = Field(default=0, ge=0, strict=True)
     revision: int = Field(default=1, ge=1, strict=True)

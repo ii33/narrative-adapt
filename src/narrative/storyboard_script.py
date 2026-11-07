@@ -50,7 +50,10 @@ def validate_script(board, asset_lookup=None, source_blocks=None):
                 if not isinstance(identifier, str) or not identifier:
                     raise ValueError('视觉资源须为实际资产编号或null')
                 if asset_lookup:
-                    asset_lookup(identifier)
+                    card = asset_lookup(identifier)
+                    expected = {'person': 'appearance', 'prop': 'item', 'set': 'location'}[row['kind']]
+                    if card.get('category') != expected:
+                        raise ValueError('视觉元素类型与资产类别不匹配')
         refs = shot.get('sound_intent_ids', [])
         if not isinstance(refs, list) or any(not isinstance(ref, str) or ref not in intents for ref in refs) or len(refs) != len(set(refs)):
             raise ValueError('镜头声音须引用本场有效且无重复的声音意图')

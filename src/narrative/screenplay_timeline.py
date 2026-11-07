@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 
 from .adaptation_operations import AdaptationOperationsMixin, _issues, _merge_source, _public
-from .content_errors import ContentGuardError, content_write
+from .content_errors import ContentGuardError, ContentValidationError, content_write
 from .screenplay_models import ScriptTimeline
 from .screenplay_store import expect_revision, new_id, now, read_context, write_transaction
 from .state_anchors import anchor_nodes, merge_anchors, selection_anchors
@@ -228,7 +228,7 @@ class _TimelineEditor(AdaptationOperationsMixin):
                 local.pop("_scope_timeline_id", None)
             issues = _issues(local)
             if issues:
-                raise ValueError(issues[0]["message"])
+                raise ContentValidationError(issues[0]["message"], problems=issues)
             local["revision"] += 1
             local["updated_at"] = now()
             return screenplay_timeline(state, source, self.screenplay_id) | {"status": "accepted"}

@@ -252,7 +252,8 @@ class MaterialStore:
     ) -> dict:
         title = (title or "").strip()
         if not title:
-            raise ContentValidationError("资料需要一个标题")
+            raise ContentValidationError("资料需要一个标题", problems=[{
+                'code': 'CONTENT_VALIDATION', 'message': '资料标题不能为空', 'path': ['title']}])
         self._check_window(valid_from, valid_to, snapshot)
         data = self.load(node_id)
         prefix = f"{node_id}-card-"
@@ -282,7 +283,9 @@ class MaterialStore:
         if start is None or end is None:
             return
         if start >= end:
-            raise ContentValidationError("失效时间要在生效时间之后")
+            raise ContentValidationError("失效时间要在生效时间之后", problems=[{
+                'code': 'CONTENT_VALIDATION', 'message': '失效时间要在生效时间之后',
+                'path': ['valid_to'], 'related_paths': [['valid_from']]}])
 
     @_serialized
     def update_card(
@@ -301,7 +304,8 @@ class MaterialStore:
         card = self._card(data, card_id)
         if title is not None:
             if not title.strip():
-                raise ContentValidationError("资料标题不能为空")
+                raise ContentValidationError("资料标题不能为空", problems=[{
+                    'code': 'CONTENT_VALIDATION', 'message': '资料标题不能为空', 'path': ['title']}])
             card["title"] = title.strip()
         if detail is not None:
             card["detail"] = str(detail)

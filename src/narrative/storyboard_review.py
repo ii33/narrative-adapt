@@ -63,6 +63,10 @@ def check_storyboard(ops, board):
     except (ValueError, TypeError) as error:
         issue('shot_script_invalid', error)
     for shot in board['shots']:
+        for diagnostic in shot.get('asset_elements_diagnostics', []):
+            issue(diagnostic['code'], diagnostic['message'], severity=diagnostic['severity'], shot=shot, path=diagnostic['path'])
+        if shot.get('asset_elements_status') == 'unanalysed':
+            issue('ASSET_ELEMENTS_UNANALYSED', '本镜资产元素待分析', severity='info', shot=shot, path=['shots', board['shots'].index(shot), 'visual_elements'])
         for element in shot.get('visual_elements', []):
             if element.get('asset_id'):
                 try:
@@ -168,7 +172,7 @@ def check_storyboard(ops, board):
             if generation.get('status') == 'succeeded' and not output:
                 issue('generation_output_missing', '成功记录未保存实际返回视频', shot=shot, generation_id=generation['id'])
     return {'unit_id': board['unit_id'], 'revision': board['revision'], 'ok': not any(row['severity'] == 'error' for row in diagnostics),
-            'needs_review': bool(diagnostics), 'diagnostics': diagnostics,
+            'needs_review': any(row['severity'] != 'info' for row in diagnostics), 'diagnostics': diagnostics,
             'affected_shots': [{'shot_id': shot['id'], 'title': shot['title']} for shot in board['shots'] if shot['id'] in affected],
             'affected_frames': [{'shot_id': shot, 'frame_id': frame} for shot, frame in sorted(frames)], 'generations': generations,
             'dependency_scope': 'shot source blocks and bound assets; scene objects/markers conservatively shared; 2.5D is not mesh occlusion'}

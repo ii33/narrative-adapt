@@ -8,9 +8,18 @@ from threading import Barrier
 
 import pytest
 from agent_fixtures import project as project
-from test_current_state_contract import setup
 
 from narrative import batch_write
+
+
+def setup(project):
+    """Minimal current-contract fixture for immutable batches and CAS checks."""
+    text = '甲。'
+    source = project.import_source('事务测试', text)
+    result = project.submit_extraction(source, {'nodes': [
+        {'type': 'person', 'name': '甲', 'quotes': [text]},
+    ], 'properties': []})
+    assert result['status'] == 'accepted', result
 
 
 def prepared_update(project, name):
@@ -54,7 +63,9 @@ def test_snapshot_consistent_and_encoded_commit_cannot_be_mutated(project):
     )
     assert snapshot.revision < project.graph_snapshot()["revision"]
     with project.project.store.connect() as db:
-        actions = list(db.execute("SELECT id,revision,summary FROM actions"))
+        actions = list(db.execute("SELECT id,revision,summary FROM actions "
+                                  "WHERE action NOT IN ('extraction_staging','content_staging')"))
+    assert any(identifier == f"r{result['revision']}" for identifier, _, _ in actions)
     assert all(identifier == f"r{revision}" for identifier, revision, _ in actions)
     assert all('"before"' not in summary and '"after"' not in summary for _, _, summary in actions)
 

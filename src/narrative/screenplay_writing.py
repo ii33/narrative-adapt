@@ -295,7 +295,8 @@ def _context(state, adaptation, segment_id, unit_id=None, dependency_refs=None, 
     creation_scope = {"screenplay_id": segment["screenplay_id"], "timeline_id": adaptation["timeline_id"],
         "segment_id": segment_id, "unit_id": unit_id,
         "effective_event_ids": [identifier for identifier in (bound_events or effective_events) if identifier in effective_events],
-        "plan_event_binding": "explicit" if bound_events else "plan_and_range", "current_scene_plan": plan_input,
+        "plan_event_binding": ('single_scene_derived' if bound_events and unit.get('source_reference_origin') == 'single_scene'
+                               else 'explicit' if bound_events else 'plan_and_range'), "current_scene_plan": plan_input,
         "plot_authority": ["specified_screenplay_timeline_and_bound_range", "consistent_current_scene_plan"],
         "expression_authority": ["current_user_request", "creative_agreement", "segment_and_scene_creative_requirements"],
         "invalid_event_ids": invalid_events,
@@ -303,11 +304,14 @@ def _context(state, adaptation, segment_id, unit_id=None, dependency_refs=None, 
     context_input = {"fingerprint_version": 4, "timeline_id": adaptation["timeline_id"],
                      "dependencies": inputs, "plan_entities": entities, "project_style": project_style, "creative_agreement": creative_agreement,
                      "creation_scope": creation_scope}
+    from .screenplay_scene_policy import scene_source_diagnostics
+    source_diagnostics = scene_source_diagnostics([unit] if unit else _units(state, segment_id), resolved)
     return {"segment_id": segment_id, "unit_id": unit_id, "timeline_id": adaptation["timeline_id"], "span": resolved,
             "span_fingerprint": resolved["span_fingerprint"], "context_fingerprint": _fingerprint(context_input),
             "plan_fingerprint": _fingerprint(plan_input) if unit else None, "dependency_refs": refs,
             "reference_context": context_input, "plan_input": plan_input,
             "project_style": project_style, "creative_agreement": creative_agreement, "creation_scope": creation_scope,
+            "source_reference_diagnostics": source_diagnostics,
             "generation_allowed": resolved["status"] == "valid" and not invalid_events and (not unit or bool(unit["plan"]["summary"].strip())),
             "reference_policy": {"guidance": prompt_texts["reference_policy"]}}
 
@@ -333,24 +337,30 @@ def _basis_state(state, adaptation, target_kind, target_id, basis_id):
 
 
 def writing_unit_view(state, adaptation, unit_id):
+    from .screenplay_scene_policy import scene_source_references
+    from .screenplay_spans import resolve_span
     unit = copy.deepcopy(_get(state, "script_units", unit_id))
+    segment = _get(state, 'script_segments', unit['segment_id'])
+    timeline = _segment_timeline(state, adaptation, unit['segment_id'])
+    resolved = resolve_span(timeline, state['adaptation_spans'][segment['span_id']])
     blocks = copy.deepcopy(_blocks(state, unit_id))
     diagnostics = [{"code": "DIALOGUE_SPEAKER_UNBOUND", "severity": "warning", "block_id": block["id"],
                     "message": "对白人物尚未绑定实体"} for block in blocks if block["type"] == "dialogue" and not block["payload"].get("speaker_id")]
     if not unit["plan"].get("location_id") and not unit["plan"].get("location_text") and unit["kind"] == "scene":
         diagnostics.append({"code": "SCENE_LOCATION_UNSPECIFIED", "severity": "warning", "message": "场次地点尚未指定"})
-    return unit | {"blocks": blocks, "entity_usages": [copy.deepcopy(row) for row in state["script_entity_usages"].values() if row["unit_id"] == unit_id],
+    return unit | scene_source_references(unit, timeline, resolved) | {"blocks": blocks, "entity_usages": [copy.deepcopy(row) for row in state["script_entity_usages"].values() if row["unit_id"] == unit_id],
                    "body_presence": "present" if blocks else "empty", "basis_state": _basis_state(state, adaptation, "unit", unit_id, unit.get("body_basis_id")),
                    "diagnostics": diagnostics}
 
 
 def writing_segment_view(state, adaptation, segment_id):
-    from .screenplay_scene_policy import scene_source_diagnostics
+    from .screenplay_scene_policy import scene_event_usage, scene_source_diagnostics
     from .screenplay_spans import resolve_span
     segment = copy.deepcopy(_get(state, "script_segments", segment_id))
     adopted = segment.get("adopted_outline_revision")
     resolved = resolve_span(_segment_timeline(state, adaptation, segment_id), state["adaptation_spans"][segment["span_id"]])
-    return segment | {"units": [writing_unit_view(state, adaptation, unit["id"]) for unit in _units(state, segment_id)],
+    units = [writing_unit_view(state, adaptation, unit["id"]) for unit in _units(state, segment_id)]
+    return segment | {"units": units, "event_usage": scene_event_usage(units, resolved),
                       "scene_partition_diagnostics": scene_source_diagnostics(_units(state, segment_id), resolved),
                       "outline_state": "planning" if adopted is None else "adopted" if adopted == segment["outline_revision"] else "changed",
                       "outline_basis_state": _basis_state(state, adaptation, "segment", segment_id, segment.get("outline_basis_id"))}
@@ -406,8 +416,10 @@ def _update_unit(unit, changes):
     from .screenplay_store import now
     from .screenplay_writing_models import ScenePlan
     changes = copy.deepcopy(changes)
+    source_origin = changes.pop('_source_reference_origin', None)
     if "plan" in changes:
         changes["plan"] = ScenePlan.model_validate(changes["plan"]).model_dump(mode="json")
+        unit['source_reference_origin'] = source_origin or 'explicit'
     before = _plan_input(unit)
     unit.update(copy.deepcopy(changes))
     if _plan_input(unit) != before:
@@ -418,11 +430,14 @@ def _update_unit(unit, changes):
 
 def _create_unit(state, segment_id, draft, position):
     from .screenplay_store import new_id
+    draft = copy.deepcopy(draft)
+    source_origin = draft.pop('_source_reference_origin', 'explicit')
     draft = UnitDraft.model_validate(draft).model_dump(mode="json")
     if draft["id"]:
         raise ValueError("新场次ID由程序分配；已有场次须按稳定ID更新")
     identifier = new_id("unit")
-    state["script_units"][identifier] = ScriptUnit.model_validate(draft | {"id": identifier, "segment_id": segment_id, "position": position}).model_dump(mode="json")
+    state["script_units"][identifier] = ScriptUnit.model_validate(draft | {"id": identifier, "segment_id": segment_id, "position": position,
+        'source_reference_origin': source_origin}).model_dump(mode="json")
     return identifier
 
 
@@ -503,6 +518,10 @@ class WritingOperationsMixin:
             for unit in _units(state, segment_id)]
         from .prompt_settings import prompt_snapshot
         context = _context(state, adaptation, segment_id, dependency_refs=dependency_refs, allow_unusable=True)
+        from .screenplay_scene_policy import scene_source_references
+        timeline = _segment_timeline(state, adaptation, segment_id)
+        for unit in segment['units']:
+            unit.update(scene_source_references(state['script_units'][unit['id']], timeline, context['span']))
         return context | {"segment": segment, "expected_outline_revision": segment["outline_revision"],
                           "scene_table_policy": scene_table_policy(context["span"], prompt_snapshot(self))}
 
@@ -557,12 +576,14 @@ class WritingOperationsMixin:
                         raise ContentGuardError('场表操作不能扩大到别段')
             edits = validate_content(TypeAdapter(list[UnitChange]), changes, 'changes')
             timeline = _segment_timeline(state, adaptation, segment_id)
+            changed_plans = []
             for index, model in enumerate(edits):
                 action = model.model_dump(mode="json", exclude_unset=True)
                 op = action["op"]
                 if op == "insert":
                     _plan_content_refs(action['unit']['plan'], timeline, ['changes', index, 'unit', 'plan'])
                     identifier = _create_unit(state, segment_id, action["unit"], 0)
+                    changed_plans.append((identifier, ['changes', index, 'unit', 'plan']))
                     _place(state, "script_units", "segment_id", segment_id, identifier, action.get("after_id"))
                 else:
                     unit = _get(state, "script_units", action["unit_id"])
@@ -576,11 +597,24 @@ class WritingOperationsMixin:
                             _plan_content_refs(patch['plan'], timeline, ['changes', index, 'changes', 'plan'])
                         with content_item(['changes', index, 'changes'], patch):
                             _update_unit(unit, patch)
+                        if 'plan' in patch or patch.get('enabled') is True or patch.get('kind') == 'scene':
+                            changed_plans.append((unit['id'], ['changes', index, 'changes', 'plan']))
                     elif op == "move":
                         _place(state, "script_units", "segment_id", segment_id, unit["id"], action.get("after_id"))
                         unit["revision"] += 1
                     else:
                         _delete_unit(state, unit, action["body_policy"])
+            if changed_plans:
+                from .screenplay_scene_policy import prepare_generated_scene_table
+                from .screenplay_spans import resolve_span
+                resolved = resolve_span(timeline, state['adaptation_spans'][segment['span_id']])
+                count = sum(u['enabled'] and u['kind'] == 'scene' for u in _units(state, segment_id))
+                candidates = [state['script_units'][key] for key, _path in changed_plans]
+                prepared = prepare_generated_scene_table(candidates, resolved,
+                    paths=[path for _key, path in changed_plans], active_scene_count=count)
+                for (key, _path), updated in zip(changed_plans, prepared, strict=True):
+                    state['script_units'][key]['plan'] = updated['plan']
+                    state['script_units'][key]['source_reference_origin'] = updated['_source_reference_origin']
             if edits:
                 _touch_outline(segment)
             return writing_segment_view(state, adaptation, segment_id) | {"status": "accepted"}
@@ -776,7 +810,7 @@ class WritingOperationsMixin:
     def prepare_script_writing_task(self, target, prompt=""):
         from .screenplay_store import read_context
         state, _adaptation = read_context(self)
-        if not isinstance(target, dict) or target.get("kind") not in {"screenplay", "episode", "act", "segment", "scene_table", "unit", "blocks", "storyboard"}:
+        if not isinstance(target, dict) or target.get("kind") not in {"screenplay", "episode", "act", "segment", "scene_table", "unit", "blocks", "storyboard", "storyboard_assets"}:
             raise ValueError("写作任务须显式指定目标kind及ids")
         ids = target.get("ids")
         if not isinstance(ids, list) or not ids or any(not isinstance(identifier, str) for identifier in ids) or len(set(ids)) != len(ids):
@@ -791,9 +825,9 @@ class WritingOperationsMixin:
             if option in target and not isinstance(target[option], bool):
                 raise ValueError("写作任务选项须为boolean")
         segment_ids, unit_ids, block_ids = [], [], []
-        if kind == "storyboard" and len(ids) != 1:
+        if kind in {"storyboard", "storyboard_assets"} and len(ids) != 1:
             raise ValueError("分镜任务须指定一个场次")
-        if kind in {"unit", "blocks", "storyboard"}:
+        if kind in {"unit", "blocks", "storyboard", "storyboard_assets"}:
             if kind == "blocks":
                 block_ids = list(ids)
                 unit_ids = list(dict.fromkeys(_get(state, "script_blocks", identifier)["unit_id"] for identifier in ids))
@@ -831,12 +865,17 @@ class WritingOperationsMixin:
                   "include_existing": manifest["include_existing"] if manifest else bool(target.get("include_existing", False))}
         if manifest is not None:
             result["target_manifest"] = copy.deepcopy(manifest)
-        if kind not in {"blocks", "unit", "scene_table", "storyboard"}:
+        if kind not in {"blocks", "unit", "scene_table", "storyboard", "storyboard_assets"}:
             result["target_manifest"] = self.prepare_script_writing_targets(screenplays[0], unit_ids,
                 include_existing=bool(target.get("include_existing", False)), include_screen_segments=bool(target.get("include_screen_segments", False)))
         from .prompt_settings import effective_prompt
         key = "scene_table" if kind == "scene_table" else "writing" if kind in {"unit", "blocks"} else "batch_writing"
-        result["instruction"] = effective_prompt(self, "storyboard" if kind == "storyboard" else key)
+        if kind == "storyboard_assets":
+            analysis = self.read_storyboard_assets_context(unit_ids[0], target.get('shot_ids'))
+            result['shot_ids'] = list(analysis['shot_ids'])
+            result['storyboard_revision'] = analysis['revision']
+            result['expected_body_revision'] = analysis['expected_body_revision']
+        result["instruction"] = effective_prompt(self, "storyboard_assets" if kind == "storyboard_assets" else "storyboard" if kind == "storyboard" else key)
         return result
 
 
@@ -868,6 +907,16 @@ def validate_script_writing_tool_call(task, name, args, ops=None):
             raise ValueError("项目风格约定已变化，本次写作依据已过期；请按新约定重新开始任务，旧正文未改动")
     segments, units, blocks = set(task["segment_ids"]), set(task["unit_ids"]), set(task["block_ids"])
     kind = task["target"]["kind"]
+    if kind == "storyboard_assets":
+        if name != 'submit_storyboard_assets' or args.get('unit_id') not in units:
+            raise ValueError('元素分析任务只能保存所选镜头的待确定需求，不允许建立或选择资产')
+        if args.get('shot_ids') != task['shot_ids']:
+            raise ValueError('不能改变元素分析的固定镜头清单')
+        if args.get('expected_body_revision') != task['expected_body_revision']:
+            raise ValueError('不能替换元素分析的固定正文依据')
+        if args.get('revision') != task['storyboard_revision']:
+            raise ValueError('不能替换元素分析的固定分镜依据')
+        return
     if kind == "storyboard":
         if name not in {"apply_storyboard_changes", "generate_storyboard_sketch", "render_storyboard_style",
                         "export_storyboard_script", "export_storyboard_panel", "generate_storyboard_panel", "generate_storyboard_panels",

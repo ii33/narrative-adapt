@@ -447,6 +447,16 @@ def audit_properties(
                              node=names.get(identifier or ""), property_id=finding.get("property_id"),
                              records=[row for row in records if row.get("id") in involved],
                              suggestion="用world持有者节点或显式无/未知同批修复；认知持有人不能替代"))
+    from .event_location import event_location_issues
+
+    for finding in event_location_issues(list(names.values()), usage_records if usage_records is not None else records):
+        identifier = finding['object_id']
+        if node_ids is not None and identifier not in node_ids:
+            continue
+        involved = set(finding.get('record_ids', []))
+        issues.append(_issue(finding['code'], ERROR, finding['message'], node=names.get(identifier),
+            property_id=finding.get('property_id'), records=[r for r in records if r.get('id') in involved],
+            suggestion='在本事件记录world地点节点、无或未知；不从场景推断'))
     issues.sort(key=lambda item: (
         {"error": 0, "warning": 1, "info": 2}.get(item["severity"], 3),
         str(item.get("node_id") or ""),

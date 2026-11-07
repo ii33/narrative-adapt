@@ -14,6 +14,18 @@ Dialog {
     property string errorText: ""
     property bool showAdvanced: false
     readonly property var t: host.t
+    readonly property var sourceOptions: {
+        var allowed=(((host.segment||{}).span||{}).input||{}).source_event_ids||[];
+        var selected=plan.source_event_ids||[],nodes=((host.workspace||{}).timeline||{}).nodes||[];
+        var ids=allowed.concat(selected.filter(function(id){return allowed.indexOf(id)<0}));
+        return ids.map(function(id){var node=nodes.find(function(n){return n.id===id});return {id:id,name:node?node.name:"节点不存在",available:allowed.indexOf(id)>=0}});
+    }
+    function selectSource(id,checked){
+        var selected=(plan.source_event_ids||[]).slice();
+        if(checked&&selected.indexOf(id)<0)selected.push(id);
+        if(!checked)selected=selected.filter(function(value){return value!==id});
+        plan=Object.assign({},plan,{source_event_ids:selected});
+    }
     modal: true; width: Math.min(820, host.width-40); height: Math.min(740,host.height-30); anchors.centerIn: parent
     title: creating ? "新增场次 / 画面段" : "编辑场表 · " + (unit.plan.title || "未命名场次")
     function openFor(value) {
@@ -52,6 +64,11 @@ Dialog {
             RowLayout { ComboBox { id:interior; model:["UNSPECIFIED","INT","EXT","INT_EXT"] } TextField { id:location; placeholderText:"地点文字"; Layout.fillWidth:true } TextField { id:time; placeholderText:"时间，如夜 / 连续"; Layout.fillWidth:true } }
             TextField { id:locationId; objectName:"scriptPlanLocationId"; placeholderText:"地点实体ID（可选）"; Layout.fillWidth:true }
             TextField { id:cast; placeholderText:"人物/群体ID，逗号分隔（草稿可不绑定）"; Layout.fillWidth:true }
+            Label {objectName:"scriptPlanSourceLabel";text:"依据节点（可选，剧本当前独立改编时间线）";color:t.ink;Layout.fillWidth:true}
+            Label {visible:!editor.sourceOptions.length;text:"当前段落没有可标注的事件。";color:t.muted;wrapMode:Text.Wrap;Layout.fillWidth:true}
+            Repeater {model:editor.sourceOptions
+                CheckBox {required property var modelData;objectName:"scriptPlanSourceOption";Layout.fillWidth:true;text:modelData.id+" · "+modelData.name+(modelData.available?"":"（不在当前有效范围）");checked:(editor.plan.source_event_ids||[]).indexOf(modelData.id)>=0;enabled:modelData.available||checked;onClicked:editor.selectSource(modelData.id,checked)}
+            }
             RowLayout { TextField { id:duration; placeholderText:"预计秒数"; validator:DoubleValidator { bottom:0.01 } Layout.fillWidth:true } ComboBox { id:mode; model:["normal","flashback","dream","imagined"] } ComboBox { id:presentation; visible:kind.currentIndex===1; model:["title_card","black_screen","credits","other"] } }
             TextField { id:goal; placeholderText:"目标"; Layout.fillWidth:true }
             TextField { id:conflict; placeholderText:"冲突"; Layout.fillWidth:true }
@@ -60,7 +77,6 @@ Dialog {
             Button {objectName:"scriptPlanAdvancedToggle";text:editor.showAdvanced?"收起来源与可选信息":"来源与可选信息";onClicked:editor.showAdvanced=!editor.showAdvanced}
             ColumnLayout {
                 objectName:"scriptPlanAdvanced";visible:editor.showAdvanced;Layout.fillWidth:true
-                Label {visible:(editor.plan.source_event_ids||[]).length>0;text:"来源事件："+(editor.plan.source_event_ids||[]).join("、");color:t.muted;wrapMode:Text.Wrap;Layout.fillWidth:true}
                 TextArea {id:notes;objectName:"scriptPlanProductionNotes";placeholderText:"创作备注（可选）";wrapMode:TextEdit.Wrap;Layout.fillWidth:true}
                 Label {text:"仅明确的人物/物品状态连续性（可选JSON数组）";color:t.muted;wrapMode:Text.Wrap;Layout.fillWidth:true}
                 TextField {id:continuity;objectName:"scriptPlanContinuity";Layout.fillWidth:true}

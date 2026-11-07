@@ -43,6 +43,10 @@ def compile_elements(state, document, timeline, children, require):
                 heading = " — ".join(str(x) for x in (plan.get("interior_exterior"), location, plan.get("time_label")) if x and x != "UNSPECIFIED")
                 elements.append({"kind": "scene", "text": heading or plan.get("title") or "画面段", "number": number,
                                  "source_scene_number": unit.get("scene_number"), "unit_id": unit["id"], "segment_id": key})
+                if unit.get("source_reference_text"):
+                    elements.append({"kind": "source_reference", "text": unit["source_reference_text"],
+                                     "unit_id": unit["id"], "segment_id": key,
+                                     "source_references": unit.get("source_references", {})})
                 if not unit.get("blocks"):
                     diagnostics.append({"severity": "warning", "code": "COMPILE_BODY_EMPTY", "message": "启用场尚无正文", "unit_id": unit["id"]})
                 for block in unit.get("blocks", []):
@@ -74,6 +78,8 @@ def render_text(elements, fountain=False):
             lines.extend(["", ("# " if fountain else "") + text])
         elif kind == "scene":
             lines.extend(["", ("." + text + " #" + str(e["number"]) + "#") if fountain else str(e["number"]) + ". " + text])
+        elif kind == "source_reference":
+            lines.append('[[ ' + text.replace(']]', '] ]') + ' ]]' if fountain else '【' + text + '】')
         elif kind == "dialogue":
             lines.extend(["", ("@" if fountain else "    ") + speaker_text(e)])
             if e.get("parenthetical"):
@@ -102,13 +108,15 @@ def render_html(elements, title, settings=None):
         elif kind in {"title", "episode", "act", "segment", "scene"}:
             tag = "h1" if kind == "title" else "h2" if kind in {"episode", "act"} else "h3"
             parts.append('<' + tag + ' class="' + kind + '">' + (str(e["number"]) + '. ' if kind == "scene" else '') + text + '</' + tag + '>')
+        elif kind == "source_reference":
+            parts.append('<aside class="source_reference">' + text + '</aside>')
         else:
             prefix = {"screen_text": "字幕：", "sound": "声音："}.get(kind, "")
             parts.append('<p class="' + kind + '">' + prefix + text + '</p>')
     return '<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>' + html.escape(title) + '</title><style>' + CSS + typography_css(settings) + '</style></head><body><main>' + '\n'.join(parts) + '</main></body></html>'
 
 
-CSS = '''@page{size:A4;margin:25mm 23mm}body{font-family:"Noto Serif CJK SC","SimSun",serif;color:#111;background:white;font-size:12pt;line-height:1.65}main{max-width:170mm;margin:auto}h1{text-align:center;margin:2em 0}h2{margin-top:2em}h3{font-size:12pt;page-break-after:avoid}p{white-space:normal;margin:1em 0}.dialogue{margin:1em 16% 1em 24%;page-break-inside:avoid}.speaker{text-align:center;font-weight:bold}.parenthetical{text-align:center}.transition{text-align:right;font-weight:bold}.screen_text{text-align:center}.sound{font-style:italic}@media print{body{margin:0}main{max-width:none}.episode{break-before:page}}'''
+CSS = '''@page{size:A4;margin:25mm 23mm}body{font-family:"Noto Serif CJK SC","SimSun",serif;color:#111;background:white;font-size:12pt;line-height:1.65}main{max-width:170mm;margin:auto}h1{text-align:center;margin:2em 0}h2{margin-top:2em}h3{font-size:12pt;page-break-after:avoid}p{white-space:normal;margin:1em 0}.dialogue{margin:1em 16% 1em 24%;page-break-inside:avoid}.speaker{text-align:center;font-weight:bold}.parenthetical{text-align:center}.transition{text-align:right;font-weight:bold}.screen_text{text-align:center}.sound{font-style:italic}.source_reference{color:#666;font-size:85%;margin:0 0 .8em;text-align:left;white-space:normal}@media print{body{margin:0}main{max-width:none}.episode{break-before:page}}'''
 
 
 def json_text(document):
@@ -131,6 +139,10 @@ def render_qt_html(elements, settings=None):
         elif kind in {"title", "episode", "act", "segment", "scene"}:
             tag = "h1" if kind == "title" else "h2" if kind in {"episode", "act"} else "h3"
             parts.append('<' + tag + (' align="center"' if kind == 'title' else (' ' + qt_style(settings, 'scene') if kind == 'scene' else '')) + '>' + (str(e["number"]) + '. ' if kind == 'scene' else '') + text + '</' + tag + '>')
+        elif kind == "source_reference":
+            from .compile_settings import default_settings
+            size = (settings or default_settings())['font_size_pt'] * .85
+            parts.append('<p align="left" style="color:#666;font-size:' + str(size) + 'pt;margin-top:0px;margin-bottom:6px">' + text + '</p>')
         else:
             prefix = {"screen_text": "字幕：", "sound": "声音："}.get(kind, "")
             parts.append('<p ' + (qt_style(settings, kind) if kind in {'action', 'scene_description'} else 'align="' + ('right' if kind == 'transition' else 'left') + '"') + '>' + prefix + text + '</p>')

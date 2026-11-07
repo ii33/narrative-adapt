@@ -36,6 +36,7 @@ CONTENT_OPERATIONS = {
     'apply_script_block_changes': ContentOperationSpec(('changes',), ('unit_id', 'target_block_ids'), 'changes', frozenset({'insert', 'update'})),
     'apply_screenplay_structure': ContentOperationSpec(('actions',), ('screenplay_id',), 'actions', frozenset({'create_episode', 'create_act', 'update_episode', 'update_act', 'update_screenplay'})),
     'apply_storyboard_changes': ContentOperationSpec(('changes',), ('unit_id',), 'changes', frozenset({'create_shot', 'update_shot', 'create_object', 'update_object', 'set_action_keyframe', 'create_marker', 'update_marker', 'bind_keyframe_marker', 'bind_action_keyframe_marker', 'set_camera_keyframe', 'set_camera_overlays', 'set_camera_preset', 'create_sound_intent', 'update_sound_intent', 'create_panel', 'update_panel', 'set_fps'})),
+    'submit_storyboard_assets': ContentOperationSpec(('elements',), ('unit_id', 'shot_ids')),
     'save_asset': ContentOperationSpec(('payload',), ('payload.id', 'payload.node_id', 'payload.category', 'payload.domain'), medium='asset'),
     'save_storyboard_camera_preset': ContentOperationSpec(('name', 'settings')),
     'set_storyboard_animation': ContentOperationSpec(('mode', 'layers'), ('unit_id', 'shot_id')),
@@ -137,12 +138,14 @@ def validate_protected_arguments(before, after, spec):
     """Retain identities/route fields of existing rows, even for root replacement."""
     from .content_errors import ContentGuardError
     route_keys = {'id', 'unit_id', 'block_id', 'shot_id', 'object_id', 'marker_id', 'panel_id', 'sound_id', 'keyframe_id', 'record_id', 'node_id', 'event_id', 'existing_id', 'path', 'file'}
-    stable_arrays = {'nodes', 'properties', 'graph_objects', 'property_records', 'changes', 'actions', 'blocks', 'units', 'images', 'reference_images', 'slices'}
+    stable_arrays = {'nodes', 'properties', 'graph_objects', 'property_records', 'changes', 'actions', 'blocks', 'units', 'images', 'reference_images', 'slices', 'elements'}
     def protected_keys(path):
         if len(path) == 2 and path[0] == 'graph_objects':
             return {'id'}
         if len(path) == 2 and path[0] == 'property_records':
             return {'id', 'node_id', 'event_id'}
+        if len(path) == 2 and path[0] == 'elements':
+            return {'shot_id'}
         if len(path) == 2 and path[0] in {'blocks', 'units', 'nodes'}:
             return {'id', 'existing_id'}
         if len(path) == 2 and path[0] in {'changes', 'actions'}:
@@ -185,6 +188,16 @@ def preflight(ops, operation, arguments):
     loaders = {'save_compile_settings': ops.load_compile_settings,
                'save_prompt_override': ops.load_prompt_settings,
                'save_project_style': ops.load_project_style}
+    if operation == 'submit_storyboard_assets':
+        board = ops.read_storyboard(arguments.get('unit_id'))
+        ops._asset_analysis_targets(board, arguments.get('shot_ids'))
+        if board.get('approved'):
+            raise ContentGuardError('请先解除定案再编辑镜头元素')
+        if type(arguments.get('revision')) is not int or arguments['revision'] != board['revision']:
+            raise ContentConflictError('分镜已改变，请重读分析上下文')
+        current_body = ops.read_script_unit_context(arguments.get('unit_id'))['unit']['body_revision']
+        if type(arguments.get('expected_body_revision')) is not int or arguments['expected_body_revision'] != current_body:
+            raise ContentConflictError('正文依据已变化，请重读分析上下文')
     if operation in loaders:
         revision = loaders[operation]()['revision']
         if type(arguments.get('expected_revision')) is not int or arguments['expected_revision'] != revision:
