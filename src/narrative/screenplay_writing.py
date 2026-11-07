@@ -261,7 +261,7 @@ def _context(state, adaptation, segment_id, unit_id=None, dependency_refs=None, 
     screenplay = state["screenplays"][segment["screenplay_id"]]
     project_style = effective_style(adaptation, screenplay)
     creative_agreement = agreement_context(adaptation, screenplay)
-    creative_defaults = copy.deepcopy(adaptation.get("_creative_defaults", {"fields": {"other": adaptation.get("_project_style", {}).get("text", "")}}))
+    creative_defaults = copy.deepcopy(adaptation["_creative_defaults"])
     prompt_texts = adaptation.get("_prompt_config", {}).get("texts") or {key: row["text"] for key, row in DEFAULT_PROMPTS.items()}
     adaptation = _segment_timeline(state, adaptation, segment_id)
     adaptation["_creative_defaults"] = creative_defaults

@@ -6,7 +6,7 @@ import sys
 
 def check_qt_imports() -> None:
     try:
-        for module in ("QtCore", "QtGui", "QtQml", "QtQuick", "QtQuickControls2", "QtWidgets"):
+        for module in ("QtCore", "QtGui", "QtQml", "QtQuick", "QtQuickControls2"):
             importlib.import_module(f"PySide6.{module}")
     except ImportError as exc:
         if isinstance(exc, ModuleNotFoundError) and exc.name == "PySide6":

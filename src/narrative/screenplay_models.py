@@ -25,14 +25,13 @@ class Screenplay(CurrentObject):
     title: str = Field(min_length=1)
     format: Literal["single", "series"] = "single"
     language: str = "zh-CN"
-    creative_brief: dict = Field(default_factory=dict)
-    creative_agreement_overrides: dict[str, str] | None = None
+    creative_agreement_overrides: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("creative_agreement_overrides")
     @classmethod
     def agreement_fields(cls, value):
         from .project_style import normalize_overrides
-        return normalize_overrides(value) if value is not None else None
+        return normalize_overrides(value)
     structure_revision: int = Field(default=1, ge=1)
 
 

@@ -18,7 +18,7 @@ DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 def prepare(ops):
     local = ops.edit_adaptation_node(changes={"node_type": "scene", "name": "渡桥"})
     scene_id = local["nodes"][0]["id"]
-    source = ops.edit_adaptation_node(changes={"node_type": "event", "name": "甲渡桥"}, parent_id=scene_id)
+    source = ops.edit_adaptation_node(changes={"node_type": "event", "name": "甲渡桥", "initial_location": "未知"}, parent_id=scene_id)
     event_id = next(n["id"] for n in source["nodes"] if n["node_type"] == "event")
     screenplay = ops.create_screenplay("渡桥剧本", reason="依据编号测试")["screenplay"]
     timeline = ops.append_screenplay_timeline(screenplay["id"], [scene_id], 0, source["revision"], reason="导入独立副本")
@@ -145,17 +145,17 @@ def test_cache_removal_cannot_reassign_an_old_handle_to_a_new_basis(project):
 def test_only_known_metadata_is_encoded_and_parameter_copy_preserves_user_literals(project):
     digest = "f" * 64
     result = {"span_fingerprint": digest, "text": digest, "payload": {"context_fingerprint": digest},
-              "creative_brief": {"span_fingerprint": digest}, "value": {"plan_fingerprint": digest},
+              "creative_agreement_overrides": {"span_fingerprint": digest}, "value": {"plan_fingerprint": digest},
               "unrelated_hash": digest, "plan": {"story_time": {"fingerprint": digest}}}
     original = copy.deepcopy(result)
     encoded = encode_tool_result(project, result)
     assert result == original
-    for key in ("text", "payload", "creative_brief", "value", "unrelated_hash", "plan"):
+    for key in ("text", "payload", "creative_agreement_overrides", "value", "unrelated_hash", "plan"):
         assert encoded[key] == original[key]
     decoded = decode_tool_parameters(project, encoded)
     assert decoded == original
-    decoded["creative_brief"]["span_fingerprint"] = "user edit"
-    assert encoded["creative_brief"]["span_fingerprint"] == digest
+    decoded["creative_agreement_overrides"]["span_fingerprint"] = "user edit"
+    assert encoded["creative_agreement_overrides"]["span_fingerprint"] == digest
 
 
 def test_storage_snapshot_reference_keeps_original_reset_concurrency_check(project):

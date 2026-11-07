@@ -25,7 +25,7 @@ _FIELD_KINDS = {
 }
 # These objects are user content, rather than fingerprint-bearing transport
 # metadata. Never reinterpret a literal digest or an identically named user key.
-_OPAQUE_FIELDS = {"text", "raw", "prompt", "instruction", "creative_brief", "brief", "payload",
+_OPAQUE_FIELDS = {"text", "raw", "prompt", "instruction", "creative_agreement_overrides", "brief", "payload",
                   "value", "plan", "story_time", "continuity_requirements", "config"}
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _NAMESPACE = re.compile(r"[a-z2-7]{12}\Z")

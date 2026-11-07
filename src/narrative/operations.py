@@ -1,7 +1,7 @@
 """Thin graph-project entry points.
 
-The legacy v3 Operations facade has been removed. Use GraphOperations for graph
-projects and project_catalog for listing/creating/opening them.
+Use GraphOperations for project business operations and project_catalog for
+listing, creating and opening projects.
 """
 
 from __future__ import annotations

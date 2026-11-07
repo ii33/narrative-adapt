@@ -34,3 +34,11 @@ def test_qt_import_failure_reports_cause(monkeypatch, capsys, error, expected, u
     assert expected in diagnostic
     assert str(error) in diagnostic
     assert unexpected not in diagnostic
+
+
+@pytest.mark.parametrize("arguments", [["--render-loop", "basic"], ["--paint-workaround"]])
+def test_removed_render_workarounds_are_rejected(arguments, capsys):
+    with pytest.raises(SystemExit) as result:
+        native_app.main(arguments)
+    assert result.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err

@@ -1,8 +1,6 @@
 """Project catalog and graph project entry points.
 
-This module deliberately does not import the legacy Operations facade. UI and
-CLI graph commands can list/create/open projects without loading the old
-Store/Service/extraction/analysis stack.
+UI and CLI commands share these project listing, creation and opening functions.
 """
 
 from __future__ import annotations

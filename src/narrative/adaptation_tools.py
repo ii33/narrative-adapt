@@ -22,7 +22,7 @@ def register(Tool, register_tool, validate, ToolError):
                    "parent_id": {"type": ["string", "null"], "description": "新父节点ID；省略或null保留原归属"}}
     _adaptation_tool("adaptation_snapshot", "读取独立改编节点、排序、属性及同步冲突", {})
     _adaptation_tool("check_adaptation", "静态检查改编结构、引用和属性有效区间", {})
-    _adaptation_tool("load_project_style", "读取工程共享风格约定及独立修订；单剧本特殊要求保留在creative_brief", {})
+    _adaptation_tool("load_project_style", "读取工程共享风格约定及独立修订；单剧本特殊要求保留在creative_agreement_overrides", {})
     _adaptation_tool("save_project_style", "保存工程共享风格约定，可空；使用独立修订并记录审计，不改正文", {
         "text": {"type": "string", "required": True}, "expected_revision": {"type": "integer", "required": True},
         "reason": {"type": "string"}}, writes=True)

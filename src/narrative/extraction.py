@@ -365,7 +365,7 @@ def _event_reuse_candidates(item: dict, snapshot: dict, source_id: str,
         if (candidate.get("disclosure") or {}).get("source_id") != source_id:
             continue
         recorded = list(candidate.get("evidence_spans") or [])
-        # Preserve exact legacy primary evidence matching. Do not read history
+        # Match the recorded primary evidence exactly. Do not read history
         # or invent other evidence that the node did not retain.
         primary = candidate.get("evidence") or {}
         start = (candidate.get("disclosure") or {}).get("start")
@@ -376,7 +376,7 @@ def _event_reuse_candidates(item: dict, snapshot: dict, source_id: str,
             primary.get("quote") == item["quotes"][0]
             and primary.get("source_id") == source_id and start == item["start"]
         )
-        # The previous strict primary-quote identity remains valid when a
+        # Strict primary-quote identity remains valid when a
         # correction supplies no scene/participants; omitted structure is not a
         # claim that the event had no scene or participants. Additional evidence
         # may prove identity only with the full scene/participant checks.

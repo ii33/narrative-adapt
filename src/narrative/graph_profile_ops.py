@@ -87,9 +87,8 @@ def save_global_settings(store: ProviderStore, settings: dict) -> dict:
 class ProfileService:
     """Read/write model settings for one project.
 
-    Settings live in an application-level store keyed by ``project_id``; the
-    graph database is only read once as a fallback for projects created before
-    the split, and never written again.
+    Settings live exclusively in an application-level store keyed by
+    ``project_id``. The graph database stores project content and its title.
     """
 
     def __init__(self, store: GraphStore, project_id: str, provider_store: ProviderStore) -> None:

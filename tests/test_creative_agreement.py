@@ -40,29 +40,29 @@ def save(ops, loaded, **patch):
     return ops.save_creative_agreement(**(args | patch))
 
 
-def test_legacy_preservation_structured_overrides_and_atomic_revisions(project):
+def test_structured_overrides_and_atomic_revisions(project):
     ops, script, _ = project
     ops.save_project_style('保留原工程长文本', 0)
-    legacy = ops.create_screenplay('旧要求', creative_brief={'tone': '轻松', 'old_note': '保留旧剧本要求'}, reason='旧式要求')['screenplay']
-    loaded = ops.load_creative_agreement(legacy['id'])
+    created = ops.create_screenplay('当前要求', creative_agreement_overrides={'tone': '轻松', 'other': '剧本要求'}, reason='结构化要求')['screenplay']
+    loaded = ops.load_creative_agreement(created['id'])
     assert loaded['project_defaults']['other'] == '保留原工程长文本'
-    assert loaded['script_overrides'] == {'tone': '轻松', 'other': 'old_note：保留旧剧本要求'}
+    assert loaded['script_overrides'] == {'tone': '轻松', 'other': '剧本要求'}
     updated = save(ops, loaded, project_defaults=loaded['project_defaults'] | {'tone': '工程基调'},
                    script_overrides={'tone': '', 'other': loaded['script_overrides']['other']}, title='新标题', language='en-US')
     assert updated['effective']['tone'] == '' and updated['effective_sources']['tone'] == 'script'
     assert updated['title'] == '新标题' and updated['language'] == 'en-US'
-    assert ops.read_screenplay(legacy['id'])['screenplay']['creative_brief'] == legacy['creative_brief']
-    before = ops.load_creative_agreement(legacy['id'])
+    assert ops.read_screenplay(created['id'])['screenplay']['creative_agreement_overrides'] == updated['script_overrides']
+    before = ops.load_creative_agreement(created['id'])
     with pytest.raises(ValueError, match='剧本.*已变化'):
         ops.save_creative_agreement(before['project_defaults'] | {'tone': '不得半保存'}, before['project_revision'],
-                                    '过期', legacy['id'], {}, loaded['script_revision'])
-    assert ops.load_creative_agreement(legacy['id']) == before
+                                    '过期', created['id'], {}, loaded['script_revision'])
+    assert ops.load_creative_agreement(created['id']) == before
     inherited = save(ops, before, script_overrides={'tone': None})
     assert inherited['script_overrides'] == {} and inherited['effective']['tone'] == '工程基调'
     assert inherited['effective']['other'] == '保留原工程长文本'
     invalid = save(ops, inherited, script_overrides={'unknown': '错误'})
     assert invalid['status'] == 'staged' and invalid['problems']
-    persisted = ops.load_creative_agreement(legacy['id'])
+    persisted = ops.load_creative_agreement(created['id'])
     assert {key: inherited[key] for key in persisted} == persisted
     # Another script was never rewritten by editing this script's agreement.
     assert ops.read_screenplay(script)['screenplay']['revision'] == 1
@@ -110,3 +110,36 @@ def test_storyboard_conversation_can_only_edit_selected_scene(project):
     for tool, unit_id in [('apply_storyboard_changes', second['id']), ('submit_script_unit', first['id'])]:
         with pytest.raises(ValueError, match='分镜任务'):
             validate_script_writing_tool_call(task, tool, {'unit_id': unit_id}, ops)
+
+
+def test_current_agreement_without_extraction_and_obsolete_input_rejection(tmp_path):
+    from narrative.operations import Operations
+    from narrative.screenplay_models import Screenplay
+    ops = Operations.create_graph_project(tmp_path / 'agreement.nproj')
+    created = ops.create_screenplay('Current', creative_agreement_overrides={'tone': 'quiet'}, reason='test')['screenplay']
+    loaded = ops.load_creative_agreement(created['id'])
+    assert loaded['script_overrides'] == {'tone': 'quiet'}
+    updated = save(ops, loaded, project_defaults=loaded['project_defaults'] | {'other': 'project'},
+                   script_overrides={'tone': ''})
+    assert updated['effective']['tone'] == ''
+    assert updated['effective']['other'] == 'project'
+    inherited = save(ops, updated, script_overrides={})
+    assert inherited['effective_sources']['other'] == 'project'
+    assert 'creative_brief' not in inherited
+    with pytest.raises(TypeError, match='creative_brief'):
+        ops.create_screenplay('Obsolete', creative_brief={'tone': 'old'}, reason='test')
+    with pytest.raises(ValueError, match='creative_brief'):
+        Screenplay.model_validate(created | {'creative_brief': {'tone': 'old'}})
+
+
+def test_obsolete_project_agreement_format_is_rejected_without_rewriting(tmp_path):
+    from narrative.operations import Operations
+    from narrative.project_style import _KEY
+    ops = Operations.create_graph_project(tmp_path / 'agreement.nproj')
+    old_value = json.dumps({'revision': 1, 'text': 'old'})
+    with ops._store.connect(write=True) as db:
+        db.execute('INSERT INTO meta(key,value) VALUES (?,?)', (_KEY, old_value))
+    with pytest.raises(ValueError, match='当前结构化格式'):
+        ops.load_creative_agreement()
+    with ops._store.connect() as db:
+        assert db.execute('SELECT value FROM meta WHERE key=?', (_KEY,)).fetchone()[0] == old_value

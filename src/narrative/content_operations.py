@@ -25,7 +25,7 @@ CONTENT_OPERATIONS = {
     'set_adaptation_property': ContentOperationSpec(('property_id', 'op', 'value', 'scope', 'holder_id', 'context_id'), ('node_id', 'event_id', 'record_id')),
     'edit_screenplay_timeline_node': ContentOperationSpec(('changes',), ('screenplay_id', 'node_id', 'parent_id', 'after_id')),
     'set_screenplay_timeline_property': ContentOperationSpec(('property_id', 'op', 'value', 'scope', 'holder_id', 'context_id'), ('screenplay_id', 'node_id', 'event_id', 'record_id')),
-    'create_screenplay': ContentOperationSpec(('title', 'format', 'language', 'creative_brief')),
+    'create_screenplay': ContentOperationSpec(('title', 'format', 'language', 'creative_agreement_overrides')),
     'create_adaptation_span': ContentOperationSpec(('name', 'start_node_id', 'end_node_id', 'selection_ids'), ('screenplay_id',)),
     'update_adaptation_span': ContentOperationSpec(('changes',), ('span_id',)),
     'create_script_segment': ContentOperationSpec(('title', 'brief', 'role', 'target_duration_seconds'), ('screenplay_id', 'span_id', 'parent_kind', 'parent_id', 'after_entry_id')),

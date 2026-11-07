@@ -16,7 +16,12 @@ def project(tmp_path, monkeypatch):
     monkeypatch.setenv("NARRATIVE_PROVIDER_DB", str(tmp_path / "providers.sqlite3"))
     ops = Operations.create_graph_project(tmp_path / "writing.nproj")
     source = ops.import_source("合成", TEXT)
-    assert ops.submit_extraction(source, draft_result(ended=False))["status"] == "accepted"
+    draft = draft_result(ended=False)
+    draft['properties'].extend({'node': node['name'], 'property': '地点', 'value_type': 'either',
+                                'op': 'unknown', 'scope': 'world', 'at_event': node['name'],
+                                'quotes': node['quotes']} for node in draft['nodes'] if node['type'] == 'event')
+    result = ops.submit_extraction(source, draft)
+    assert result["status"] == "accepted", result
     adaptation = ops.sync_adaptation()
     events = [node for node in adaptation["nodes"] if node["node_type"] == "event"]
     screenplay = ops.create_screenplay("合成剧本", reason="测试创建")["screenplay"]

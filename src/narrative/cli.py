@@ -69,12 +69,12 @@ def main():
     graph_event_lines = commands.add_parser("graph-event-lines", help="按阅读顺序列出事件")
     graph_event_lines.add_argument("--context-id", default="canon")
     property_precheck = commands.add_parser(
-        "property-precheck", aliases=["graph-property-precheck"], help="只读预检 v5 属性追加记录"
+        "property-precheck", help="只读预检属性追加记录"
     )
     _records_arguments(property_precheck)
     property_precheck.add_argument("--expected-revision", type=int)
     property_state = commands.add_parser(
-        "property-state", aliases=["graph-property-state"], help="查询节点属性在故事时点的投影"
+        "property-state", help="查询节点属性在故事时点的投影"
     )
     property_state.add_argument("node_id")
     property_state.add_argument("property_id")
@@ -92,7 +92,6 @@ def main():
     )
     property_disclosure = commands.add_parser(
         "property-disclosure-state",
-        aliases=["graph-property-disclosure-state"],
         help="按原文披露切点查询可见状态（忽略故事时间）",
     )
     property_disclosure.add_argument("node_id")
@@ -104,13 +103,13 @@ def main():
     )
     property_disclosure.add_argument("--holder-id")
     change_precheck = commands.add_parser(
-        "change-precheck", aliases=["graph-change-precheck"], help="预检混合图/属性批次"
+        "change-precheck", help="预检混合图/属性批次"
     )
     change_precheck.add_argument("--graph", type=Path, help="图对象 JSON 文件")
     change_precheck.add_argument("--properties", type=Path, help="属性记录 JSON 文件")
     change_precheck.add_argument("--expected-revision", type=int)
     property_history = commands.add_parser(
-        "property-history", aliases=["graph-property-history"], help="查看节点属性的取值记录与有效区间"
+        "property-history", help="查看节点属性的取值记录与有效区间"
     )
     property_history.add_argument("node_id")
     property_history.add_argument("property_id")
@@ -119,14 +118,12 @@ def main():
     )
     property_history.add_argument("--holder-id")
     property_world = commands.add_parser(
-        "property-world-state", aliases=["graph-property-world-state"], help="按节点分组投影全部属性状态"
+        "property-world-state", help="按节点分组投影全部属性状态"
     )
     property_world.add_argument("at_positional", nargs="?", help="可选故事 TimeRef 值")
     property_world.add_argument("--at", help="故事 TimeRef：JSON 或 number/datetime 值；省略为当前视图")
     tool_cli.add_commands(commands)
     args = parser.parse_args()
-    if args.command.startswith("graph-property-"):
-        args.command = "property-" + args.command[len("graph-property-"):]
     if args.command == "tool" or args.command in tool_cli.ALIASES:
         try:
             return tool_cli.run(args)

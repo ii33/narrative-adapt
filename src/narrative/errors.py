@@ -1,4 +1,4 @@
-"""Shared application error type for CLI, bridge and legacy operations."""
+"""Shared application error type for CLI, bridge and graph operations."""
 
 from __future__ import annotations
 

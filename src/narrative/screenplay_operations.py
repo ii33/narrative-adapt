@@ -194,12 +194,12 @@ class ScreenplayOperationsMixin:
         return list(copy.deepcopy(state["screenplays"]).values())
 
     @content_write
-    def create_screenplay(self, title, format: Literal["single", "series"] = "single", language="zh-CN", creative_brief=None, reason=None) -> dict:
+    def create_screenplay(self, title, format: Literal["single", "series"] = "single", language="zh-CN", creative_agreement_overrides=None, reason=None) -> dict:
         def mutate(state, adaptation, _db):
             fields = object_fields("screenplay")
             local = new_script_timeline(fields["id"], adaptation)
             screenplay = Screenplay(**fields, timeline_id=local["id"], title=_text(title, "剧本名称", ["title"]),
-                                    format=format, language=language, creative_brief={} if creative_brief is None else creative_brief).model_dump(mode="json")
+                                    format=format, language=language, creative_agreement_overrides={} if creative_agreement_overrides is None else creative_agreement_overrides).model_dump(mode="json")
             state["screenplays"][screenplay["id"]] = screenplay
             state["script_timelines"][local["id"]] = local
             if format == "series":

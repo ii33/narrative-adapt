@@ -1,4 +1,4 @@
-"""OS-level project lease shared by graph and legacy agents."""
+"""OS-level project lease shared by project operations and agents."""
 
 from __future__ import annotations
 

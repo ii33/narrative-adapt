@@ -74,7 +74,7 @@
 
 | 对象 | 核心字段 | 归属与约束 |
 | --- | --- | --- |
-| Screenplay | id, timeline_id, title, format, language, creative_brief, revision, structure_revision | format 为 single 或 series；一套剧本方案；timeline_id指向其独占副本 |
+| Screenplay | id, timeline_id, title, format, language, creative_agreement_overrides, revision, structure_revision | format 为 single 或 series；一套剧本方案；timeline_id指向其独占副本 |
 | ScriptTimeline | id, screenplay_id, revision, nodes, properties, source_revision, 导入基线 | 每份剧本创建空副本；节点和状态按来源改编当前sort_id复制，不编码原文阅读顺序 |
 | ScriptEpisode | id, screenplay_id, number, title, brief, target_duration_seconds, position, revision | 仅 series 可用；number 为显示编号，position 为真实顺序 |
 | ScriptAct | id, screenplay_id, episode_id?, title, brief, target_duration_seconds, revision | single 时 episode_id 为空；series 时归一集 |

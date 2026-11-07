@@ -132,7 +132,7 @@ def register(Tool, register_tool, validate):
         "confirm_discard": {"type": "boolean", "required": True}}, writes=True)
     add("create_screenplay", "创建独立剧本方案；single单片，series剧集自动建立第1集；不写原作", reason | {
         "title": text | {"required": True}, "format": {"type": "string", "enum": ["single", "series"]},
-        "language": text, "creative_brief": obj}, writes=True)
+        "language": text, "creative_agreement_overrides": obj}, writes=True)
     add("import_screenplay_timeline_candidates", "只读列出可从源改编时间线多选导入的节点；不改变剧本副本", screenplay_id)
     add("read_screenplay_timeline", "读取指定剧本的独立时间线副本、属性、revision及来源；不自动跟随源改编", screenplay_id)
     add("import_screenplay_timeline", "将选定源改编时间点与必要状态引用复制到目标剧本；重复导入保留本地调整，不改源改编或其他剧本", screenplay_id | timeline_revision | reason | {

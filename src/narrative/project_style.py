@@ -57,8 +57,10 @@ def render_agreement(fields):
 
 def read_defaults(db):
     row = db.execute('SELECT value FROM meta WHERE key=?', (_KEY,)).fetchone()
-    value = json.loads(row[0]) if row else {'revision': 0, 'text': ''}
-    fields = value.get('defaults', {'other': value.get('text', '')})
+    value = json.loads(row[0]) if row else {'revision': 0, 'defaults': {}}
+    if 'defaults' not in value:
+        raise ContentGuardError('创作约定格式无效，须使用当前结构化格式')
+    fields = value['defaults']
     return {'revision': value['revision'], 'fields': CreativeAgreementFields.model_validate(fields).model_dump()}
 
 
@@ -67,31 +69,18 @@ def read_style(db):
     return {'revision': defaults['revision'], 'text': render_agreement(defaults['fields'])}
 
 
-def legacy_overrides(screenplay):
-    explicit = screenplay.get('creative_agreement_overrides')
-    if explicit is not None:
-        return normalize_overrides(explicit)
-    brief = screenplay.get('creative_brief') or {}
-    known, other = {}, []
-    for key, value in brief.items():
-        if key in FIELD_LABELS and isinstance(value, str):
-            known[key] = value
-        else:
-            text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-            other.append(str(key) + '：' + text)
-    if other:
-        known['other'] = '\n'.join(([known['other']] if known.get('other') else []) + other)
-    return known
+def script_overrides(screenplay):
+    return normalize_overrides(screenplay['creative_agreement_overrides'])
 
 
 def effective_fields(defaults, screenplay=None):
     fields = CreativeAgreementFields.model_validate(defaults).model_dump()
-    return fields | (legacy_overrides(screenplay) if screenplay is not None else {})
+    return fields | (script_overrides(screenplay) if screenplay is not None else {})
 
 
 def effective_style(source, screenplay):
     project = source.get('_project_style', {'revision': 0, 'text': ''})
-    defaults = source.get('_creative_defaults', {'fields': {'other': project['text']}})['fields']
+    defaults = source['_creative_defaults']['fields']
     fields = effective_fields(defaults, screenplay)
     if fields == CreativeAgreementFields.model_validate(defaults).model_dump():
         return copy.deepcopy(project)
@@ -99,9 +88,8 @@ def effective_style(source, screenplay):
 
 
 def agreement_context(source, screenplay):
-    project = source.get('_project_style', {'revision': 0, 'text': ''})
-    defaults = source.get('_creative_defaults', {'fields': {'other': project['text']}})['fields']
-    overrides = legacy_overrides(screenplay)
+    defaults = source['_creative_defaults']['fields']
+    overrides = script_overrides(screenplay)
     fields = effective_fields(defaults, screenplay)
     return {'fields': fields, 'sources': {key: 'script' if key in overrides else 'project' if fields[key].strip() else 'unrestricted' for key in fields}}
 
@@ -116,17 +104,17 @@ def _load_view(db, screenplay_id=None):
             raise ContentGuardError('剧本不存在，不能读取创作约定')
     return {'screenplay_id': screenplay_id, 'project_revision': defaults['revision'],
             'script_revision': screenplay['revision'] if screenplay else None,
-            'project_defaults': defaults['fields'], 'script_overrides': legacy_overrides(screenplay) if screenplay else {},
+            'project_defaults': defaults['fields'], 'script_overrides': script_overrides(screenplay) if screenplay else {},
             'effective': effective_fields(defaults['fields'], screenplay),
-            'effective_sources': {key: 'script' if screenplay and key in legacy_overrides(screenplay) else 'project' if text.strip() else 'unrestricted' for key, text in effective_fields(defaults['fields'], screenplay).items()},
-            'effective_style': effective_style({'_project_style': read_style(db), '_creative_defaults': defaults}, screenplay or {}),
+            'effective_sources': {key: 'script' if screenplay and key in script_overrides(screenplay) else 'project' if text.strip() else 'unrestricted' for key, text in effective_fields(defaults['fields'], screenplay).items()},
+            'effective_style': effective_style({'_project_style': read_style(db), '_creative_defaults': defaults}, screenplay or {'creative_agreement_overrides': {}}),
             'title': screenplay['title'] if screenplay else None, 'language': screenplay['language'] if screenplay else None,
             'fields': [{'id': key, 'label': label} for key, label in FIELD_LABELS.items()]}
 
 
 def _write_defaults(db, fields, revision):
     db.execute('INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)', (_KEY, json.dumps(
-        {'revision': revision, 'text': render_agreement(fields), 'defaults': fields}, ensure_ascii=False)))
+        {'revision': revision, 'defaults': fields}, ensure_ascii=False)))
 
 
 class ProjectStyleOperationsMixin:

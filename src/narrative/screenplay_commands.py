@@ -24,7 +24,6 @@ class ActChanges(ScriptModel):
 class ScreenplayChanges(ScriptModel):
     title: str | None = None
     language: str | None = None
-    creative_brief: dict | None = None
 
 
 class CreateEpisode(ScriptModel):

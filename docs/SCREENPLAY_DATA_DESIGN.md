@@ -151,7 +151,7 @@ erDiagram
 | `series_id / episode_number` | nullable string | 可选系列信息；一集一份剧本 |
 | `timeline_id` | string | 限定本剧本所有时间段的数据域 |
 | `target_duration_seconds` | nullable number | 正数，目标时长 |
-| `creative_brief` | object | 受众、风格、改编约束等 |
+| `creative_agreement_overrides` | object | 受众、风格、改编约束等 |
 | `status` | enum | `draft / ready`，工作标记而非审批状态 |
 | `revision` | integer | 第一版所有剧本文档编辑使用此聚合并发版本 |
 | `created_at / updated_at` | UTC timestamp | 元数据 |
