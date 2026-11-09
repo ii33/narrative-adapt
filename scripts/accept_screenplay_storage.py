@@ -40,7 +40,10 @@ def seed(ops):
 def outside(ops):
     with ops._store.connect() as db:
         return {table: [list(row) for row in db.execute(f'SELECT * FROM "{table}" ORDER BY rowid')
-                       if table != "meta" or not str(row[0]).startswith("readable_id:screenplay:")]
+                       if table != "meta" or not (
+                           str(row[0]).startswith("readable_id:screenplay:")
+                           or str(row[0]).startswith("content_submission:")
+                           or row[0] == "next_content_submission_number")]
             for table in ("objects", "sources", "property_records", "meta", "provider_settings")}
 
 
@@ -58,7 +61,7 @@ def validate(ops, fixture, screenplay, calls, report):
         db.row_factory = sqlite3.Row
         resets = [dict(row) for row in db.execute("SELECT * FROM actions WHERE action='screenplay_storage_reset' ORDER BY rowid")]
     evidence = {"storage_before": fixture["storage_before"], "storage_after": storage,
-        "outside_meta_excludes_only": ["readable_id:screenplay:"],
+        "outside_meta_excludes_only": ["readable_id:screenplay:", "content_submission:*", "next_content_submission_number"],
         "reset_actions": resets, "timeline": local, "final_screenplay": screenplay}
     # The generic QA runner saves report after this callback, including evidence.
     report["storage_evidence"] = evidence

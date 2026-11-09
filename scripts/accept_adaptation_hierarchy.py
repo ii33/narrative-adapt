@@ -22,7 +22,7 @@ def seed(ops):
         {"type": "event", "name": "甲等待", "scene": "桥头等候", "participants": ["甲"], "quotes": ["甲停下等人。"]},
         {"type": "event", "name": "乙入站", "scene": "车站等候", "participants": ["乙"], "quotes": ["乙走入车站。"]},
         {"type": "event", "name": "乙坐下", "scene": "车站等候", "participants": ["乙"], "quotes": ["乙穿着蓝衣坐下。"]}],
-        "properties": [{"node": "乙", "property": "服装", "value": "蓝衣", "value_type": "string",
+        "properties": [{"node": "乙", "property": "服装"  , "value": "蓝衣", "value_type": "string",
             "at_event": "乙坐下", "quotes": ["乙穿着蓝衣坐下。"]}]})
     assert result["status"] == "accepted", result
     ids = {node["name"]: node["id"] for node in ops.graph_snapshot()["nodes"]}

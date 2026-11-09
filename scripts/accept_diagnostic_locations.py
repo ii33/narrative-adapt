@@ -24,7 +24,7 @@ def original_draft():
         {'type': 'event', 'name': '宣布暂停发布名单并获同意', 'quotes': [TEXT],
          'scene': '@4', 'participants': ['@1', '@2'], 'location': '@3'},
     ], 'properties': [
-        {'node': '@5', 'property': '发布状态', 'op': 'set', 'value_type': 'string',
+        {'node': '@5', 'property': '发布状态'  , 'op': 'set', 'value_type': 'string',
          'scope': 'world', 'at_event': '@5', 'quotes': ['宣布暂停发布名单']},
     ]}
 
