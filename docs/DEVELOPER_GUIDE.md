@@ -69,7 +69,7 @@ flowchart LR
 
 ## 4. 常见任务怎么做
 
-### 3.1 加一条属性校验
+### 4.1 加一条属性校验
 
 1. 判断它属于哪一层：值类型与字段形状 → `property_core.validate_records`；事件地点 → `event_location.event_location_issues`；图结构 → `graph_service.GraphService.normalize`／`precheck`。
 2. 在那一层用该模块自带的 issue 构造函数追加（`_issue(CODE, 消息, object_id, severity=...)`），消息要能被模型直接改成操作，不写「请检查」。
@@ -77,7 +77,7 @@ flowchart LR
 4. 写测试：优先纯函数直接构造 `records`／`snapshot` 断言 `code` 与 `object_id`；需要持久化时复制会话模板 `project_template`。
 5. `ruff check src tests` + 针对性后台 `pytest -n 0`。
 
-### 3.2 改一个提示词
+### 4.2 改一个提示词
 
 1. 先读[提示词写作风格](PROMPT_STYLE.md)：五段结构、字数上限、「不能」≤5、概念定义必须在前 1/3。
 2. 只改草稿正文 `artifacts/prompt-drafts/<key>.md`：头部 `version`／`label`／`description` + `---` 之后是正文。`system` 没有草稿文件，文本取自 `_recovered.json`。
@@ -85,14 +85,14 @@ flowchart LR
 4. 跑 `.venv/Scripts/python.exe scripts/rebuild_prompt_defaults.py` 重建 `src/narrative/prompt_defaults.py`。脚本以 HEAD 为基线，**不要**手改生成物。
 5. 同步断言（只改要点，不锁长句）→ `pytest -k prompt`；行为类提示词再做真实模型多次对照，记录写进 `docs/`。
 
-### 3.3 加一个诊断码
+### 4.3 加一个诊断码
 
 1. 选层：草稿期在 `extraction_draft`（`DRAFT_SCHEMA`／`EXTRACTION_CONTENT`／`EXTRACTION_INFO`）；入库期在 `property_core`／`graph_service`／`event_location`／`containment_refs`。
 2. 决定级别：`error` 阻止入库，`warning`／`info` 只提示。给「程序替用户做的决定」用 `info`（实例见 `I-09` 的 `CONTAINER_PROPERTY_DEDUP`），不要用 `error`。
 3. 带上可修的位置：`path`（如 `['properties', i]` 这类草稿槽位）、`object_id`、必要时 `related_paths`；`extraction_staging._problems` 会把它们归一成 `targets` 与 `location`。
 4. 测试断言 `code` + `path`，并确认非 error 的码不会让 `valid` 变假；新码同步写进[数据不变量清单](INVARIANTS.md)。
 
-### 3.4 加一个 UI 页面
+### 4.4 加一个 UI 页面
 
 1. 新建 `src/narrative/qml/<Name>Page.qml`；页面自己持有状态、自己订阅桥对象，不在 `Main.qml` 里堆业务逻辑。
 2. `Main.qml` 三处登记：`navItems` 加一项、`Component { id: ... }` 包页面、一个 `Loader` 用 `app.pageVisited(key)` 控制懒创建（第一次进入才实例化）。

@@ -1,0 +1,73 @@
+{
+  "allow_version_only": [],
+  "prompts": {
+    "action_extraction": {
+      "digest": "dfaf3f7baa1e7002",
+      "version": "7"
+    },
+    "conversation_actions": {
+      "digest": "d43a38e77c40094a",
+      "version": "3"
+    },
+    "event_merge_review": {
+      "digest": "6b3a18ccab121208",
+      "version": "3"
+    },
+    "extraction": {
+      "digest": "3732402762e47cb0",
+      "version": "24"
+    },
+    "granularity_fine": {
+      "digest": "d88137d5cf201cbd",
+      "version": "6"
+    },
+    "granularity_standard": {
+      "digest": "21f9ffeb22cad1c9",
+      "version": "6"
+    },
+    "reference_policy": {
+      "digest": "934d3df3fe5f3340",
+      "version": "4"
+    },
+    "review": {
+      "digest": "e8c6ef19b5a6da63",
+      "version": "11"
+    },
+    "scene_policy": {
+      "digest": "a8cdd6b3c376f86d",
+      "version": "6"
+    },
+    "scene_table": {
+      "digest": "8a372313f23a36d0",
+      "version": "6"
+    },
+    "sketch_style": {
+      "digest": "19db946bac3afd03",
+      "version": "3"
+    },
+    "source_extraction": {
+      "digest": "8d1493c074e12bbb",
+      "version": "9"
+    },
+    "storyboard": {
+      "digest": "58c9bf10a100ed18",
+      "version": "6"
+    },
+    "storyboard_assets": {
+      "digest": "503149c53dae0d1c",
+      "version": "3"
+    },
+    "system": {
+      "digest": "88b00042bef9292a",
+      "version": "11"
+    },
+    "writing": {
+      "digest": "9d92ed7497c01916",
+      "version": "8"
+    },
+    "writing_shortcut": {
+      "digest": "d0373c7c6a5bbc5b",
+      "version": "1"
+    }
+  }
+}
