@@ -20,6 +20,7 @@ credentials/
 .ssh/
 .aws/
 secrets.toml
+.streamlit/secrets.toml
 credentials.json
 *.pem
 *.key
