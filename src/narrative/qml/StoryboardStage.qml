@@ -5,13 +5,13 @@ import QtQuick.Layouts
 Rectangle {
  id:stage
  property var desk
- color:"#e6ebe6";border.color:desk.t.line;clip:true
+ color:desk.t.stageAlt;border.color:desk.t.line;clip:true
  ColumnLayout{anchors.fill:parent;anchors.margins:8;spacing:4
   RowLayout{Layout.fillWidth:true;Label{text:"二维调度板";font.bold:true}Label{text:"动作 "+desk.seconds(desk.actionTime);Layout.fillWidth:true}ToolButton{objectName:"storyboardStageMaximize";text:desk.enlargedView==="stage"?"还原":"放大";onClicked:desk.enlargedView=desk.enlargedView==="stage"?"":"stage"}}
   RowLayout{Layout.fillWidth:true;ComboBox{objectName:"storyboardStageObjectChoice";Layout.fillWidth:true;model:desk.board.objects||[];textRole:"name";currentIndex:model.findIndex(o=>o.id===desk.selectedObjectId);displayText:desk.selectedObjectId?currentText:"选择场面对象";onActivated:desk.selectedObjectId=model[currentIndex].id}Button{objectName:"storyboardNewObject";text:"添加对象";enabled:desk.ready&&!desk.busy&&!desk.approved;onClicked:desk.openObjectEditor()}ToolButton{objectName:"storyboardObjectMenu";text:"操作";enabled:!!desk.selectedObjectId&&!desk.busy&&!desk.approved;onClicked:objectMenu.open();Menu{id:objectMenu;MenuItem{objectName:"storyboardEditObject";text:"属性";onTriggered:desk.openObjectEditor(false)}MenuItem{objectName:"storyboardObjectKeys";text:"动作关键点";onTriggered:desk.openActionKeys()}MenuItem{objectName:"storyboardDeleteObject";text:"删除对象";onTriggered:desk.save({op:"delete_object",object_id:desk.selectedObjectId})}}}}
   RowLayout{Layout.fillWidth:true;CheckBox{objectName:"storyboardRecord";text:"记录关键点";checked:desk.recording;enabled:!!desk.selectedObjectId&&!desk.approved&&!desk.busy;onToggled:desk.recording=checked}ComboBox{objectName:"storyboardInterpolation";model:["保持","线性"];currentIndex:desk.interpolation==="linear"?1:0;onActivated:desk.interpolation=currentIndex?"linear":"hold"}}
   RowLayout{Layout.fillWidth:true;Label{text:"朝向"}SpinBox{id:heading;objectName:"storyboardObjectHeading";from:-36000;to:36000;value:Math.round(desk.selectedObject.rotation||0);editable:true;enabled:desk.recording&&!desk.busy}Button{objectName:"storyboardRecordHeading";text:"记录朝向";enabled:desk.recording&&!desk.busy;onClicked:desk.writeObjectPoint(desk.selectedObjectId,desk.actionTime,desk.selectedObject.world_x,desk.selectedObject.world_y,desk.board.revision,heading.value)}}
-  Label{objectName:"storyboardRecordingTarget";text:desk.recording?"记录："+(desk.selectedObject.name||"")+" · 动作 "+desk.seconds(desk.actionTime):"未开启记录：拖动不会修改站位。";wrapMode:Text.Wrap;Layout.fillWidth:true;color:desk.recording?"#9a4429":desk.t.muted}
+  Label{objectName:"storyboardRecordingTarget";text:desk.recording?"记录："+(desk.selectedObject.name||"")+" · 动作 "+desk.seconds(desk.actionTime):"未开启记录：拖动不会修改站位。";wrapMode:Text.Wrap;Layout.fillWidth:true;color:desk.recording?desk.t.record:desk.t.muted}
   Item{id:field;objectName:"storyboardStageField";
    readonly property bool hasCamera:((desk.shot.camera||{}).keys||[]).length>0
    readonly property var camera:desk.cameraView.position||{x:0.5,y:-1}
@@ -30,7 +30,7 @@ Rectangle {
      function restorePose(){actor.x=Qt.binding(function(){return field.wx(actor.modelData.world_x,actor.width)});actor.y=Qt.binding(function(){return field.wy(actor.modelData.world_y,actor.height)})}
      Rectangle{anchors.fill:parent;radius:actor.modelData.kind==="person"?19:4;color:desk.selectedObjectId===actor.objectId?"#e8b77a":"#aac3b8";border.width:2;border.color:"#385849"}
      Rectangle{width:3;height:16;color:"#385849";anchors.centerIn:parent;rotation:actor.modelData.world_rotation;transformOrigin:Item.Bottom}
-     Label{text:actor.modelData.name;anchors.top:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;font.pixelSize:10;color:"#253e32"}
+     Label{text:actor.modelData.name;anchors.top:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;font.pixelSize:10;color:desk.t.stageInk}
      MouseArea{anchors.fill:parent;cursorShape:desk.recording?Qt.SizeAllCursor:Qt.PointingHandCursor;property real px;property real py;property double at;property string target;property int rev;property string owner;property string project
       onPressed:function(mouse){desk.playing=false;desk.selectedObjectId=actor.objectId;px=mouse.x;py=mouse.y;at=desk.actionTime;target=actor.objectId;rev=desk.board.revision;owner=desk.unitId;project=desk.app.project.path}
       onPositionChanged:function(mouse){if(pressed&&desk.recording){var p=mapToItem(field,mouse.x-px,mouse.y-py);actor.x=Math.max(0,Math.min(field.width-actor.width,p.x));actor.y=Math.max(0,Math.min(field.height-actor.height,p.y))}}

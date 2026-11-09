@@ -25,8 +25,9 @@ Item {
     property var timeline: []
     // 当前阅读位置在步骤里的序号（0 = 最新）。
     readonly property int stepIndex: {
+        // 阅读位置可能来自下拉选的步骤（cutId），也可能来自层级里点的事件（cutEventId）。
         for (var i = 0; i < steps.length; ++i)
-            if (steps[i].id === cutEventId) return i + 1
+            if (steps[i].id === cutId || steps[i].id === cutEventId) return i + 1
         return 0
     }
     property var nameIndex: ({})
@@ -981,7 +982,8 @@ Item {
                 text: "‹"
                 flat: true
                 font.pixelSize: 15
-                enabled: page.steps.length > 0 && page.stepIndex > 1
+                // 0 表示停在「最新」；从最新往回走要能落到最后一个步骤。
+                enabled: page.steps.length > 0 && page.stepIndex !== 1
                 onClicked: page.stepCut(-1)
             }
             // 阅读位置：按层级展开——大事件 → 场景 → 事件。点哪一级就停在哪一级。

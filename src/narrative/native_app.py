@@ -18,6 +18,7 @@ from typing import Any, cast
 QML_PATH = Path(__file__).with_name("qml") / "Main.qml"
 
 
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="叙事图原生工作台（Qt Quick）")
     parser.add_argument("--project", help="启动后打开这个工程入口文件（.nproj）")
@@ -78,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.setdefault("QT_LOGGING_RULES", "qt.scenegraph.general=true;qt.rhi.*=true")
     try:
         from PySide6.QtCore import QTimer, QUrl, qInstallMessageHandler
-        from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QPalette
+        from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication
         from PySide6.QtQml import QQmlApplicationEngine
         from PySide6.QtQuick import QQuickWindow, QSGRendererInterface
         from PySide6.QtQuickControls2 import QQuickStyle
@@ -102,25 +103,11 @@ def main(argv: list[str] | None = None) -> int:
                 families = QFontDatabase.applicationFontFamilies(font_id)
                 if families:
                     app.setFont(QFont(families[0]))
-    # Fusion with a fixed light palette: without it the controls follow the OS
-    # theme, and dark buttons show up as black blocks on the light pages.
-    # Qt Quick Controls need their own style switch: importing the Fusion module
-    # in QML does nothing, and the default style leaves controls unthemed.
+    # Fusion 风格：Qt Quick Controls 需要单独切风格，只在 QML 里 import Fusion 没用，
+    # 默认风格会让控件完全没有主题。深浅色不在这里钉死——交给下面的
+    # bridge.load_appearance()，它按用户偏好（或系统偏好）套上同一份令牌；
+    # 在这里先强制一次浅色会把系统的深色偏好盖住，之后「跟随系统」就永远读到浅色。
     QQuickStyle.setStyle("Fusion")
-    palette = app.palette()
-    for role, color in (
-        (QPalette.ColorRole.Window, "#f4f7fb"),
-        (QPalette.ColorRole.Base, "#ffffff"),
-        (QPalette.ColorRole.AlternateBase, "#f4f7fb"),
-        (QPalette.ColorRole.Button, "#ffffff"),
-        (QPalette.ColorRole.Text, "#16233a"),
-        (QPalette.ColorRole.WindowText, "#16233a"),
-        (QPalette.ColorRole.ButtonText, "#16233a"),
-        (QPalette.ColorRole.Highlight, "#2b5cd9"),
-        (QPalette.ColorRole.HighlightedText, "#ffffff"),
-    ):
-        palette.setColor(role, QColor(color))
-    app.setPalette(palette)
     app.setApplicationName("叙事图工作台")
     render_log = _render_log_path(args.render_log)
     render_log.parent.mkdir(parents=True, exist_ok=True)
@@ -143,6 +130,9 @@ def main(argv: list[str] | None = None) -> int:
     record(f"requested_render_loop={os.environ.get('QSG_RENDER_LOOP', '<Qt platform default>')}")
     record(f"requested_backend={os.environ.get('QSG_RHI_BACKEND', '<Qt platform default>')}")
     bridge = NativeBridge()
+    # 外观要在加载 QML 之前定下来：否则第一帧先按浅色画一遍，再跳成深色。
+    bridge.load_appearance()
+    record(f"appearance mode={bridge.themeMode} dark={bridge.darkMode}")
     # 慢操作写进日志：界面卡的时候，能看出是数据慢、界面慢，还是整体都慢。
     bridge.slowOperation.connect(lambda kind, ms: record(f"slow {kind} {ms}ms"))
     app.aboutToQuit.connect(bridge.close)

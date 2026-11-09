@@ -87,6 +87,8 @@ Item {
             if (app.currentPage === "static_check" && app.mode === "workspace") bridge.loadStaticCheckRevision()
         }
     }
+    // 懒创建：创建时 onCurrentPageChanged 早在建它之前就发过了，这里补一次进入时的刷新。
+    Component.onCompleted: if (visible && app.mode === "workspace") bridge.loadStaticCheckRevision()
     Timer {
         interval: 2000
         repeat: true

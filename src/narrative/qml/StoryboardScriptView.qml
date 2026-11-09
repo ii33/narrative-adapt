@@ -201,7 +201,7 @@ SplitView {
                 property string shotId:modelData.id
                 objectName:"storyboardScriptRow"
                 width:rows.width;height:Math.max(150,rowContent.implicitHeight+20)
-                color:index===desk.shotIndex?"#e4ede8":"#f7f8f4";border.color:index===desk.shotIndex?"#587567":"#d5dcd6";radius:4
+                color:index===desk.shotIndex?desk.t.clipActive:desk.t.card;border.color:index===desk.shotIndex?desk.t.accent:desk.t.line;radius:4
                 TapHandler { onTapped:desk.seek(desk.startOf(index)) }
                 ColumnLayout {
                     id:rowContent;anchors.fill:parent;anchors.margins:10

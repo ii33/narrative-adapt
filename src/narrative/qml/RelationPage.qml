@@ -73,6 +73,8 @@ Item {
     readonly property string muted: t && t.muted ? t.muted : "#6b7a90"
     readonly property string line: t && t.line ? t.line : "#dfe6ef"
     readonly property string accent: t && t.accent ? t.accent : "#2b6cb0"
+    readonly property string card: t && t.card ? t.card : "#ffffff"
+    readonly property string paper: t && t.paper ? t.paper : "#f4f7fb"
 
     function load() {
         page.notice = ""
@@ -101,6 +103,9 @@ Item {
 
     // 切到这一页才去问：启动时还没有打开工程，问了只会报错。
     onVisibleChanged: if (visible) load()
+
+    // 懒创建：这一页被创建时已经是当前页，不会触发 onVisibleChanged。
+    Component.onCompleted: if (visible) load()
 
     // -- 画布状态 -------------------------------------------------------
 
@@ -435,7 +440,7 @@ Item {
                     var route = routes[e]
                     ctx.beginPath()
                     ctx.lineWidth = 3.4
-                    ctx.strokeStyle = "#ffffff"
+                    ctx.strokeStyle = page.paper
                     ctx.moveTo(route.start.x, route.start.y)
                     ctx.quadraticCurveTo(route.cx, route.cy, route.end.x, route.end.y)
                     ctx.stroke()
@@ -476,7 +481,7 @@ Item {
                 ctx.textBaseline = "middle"
                 for (e = 0; e < routes.length; ++e) {
                     var box = routes[e].label
-                    ctx.fillStyle = "#ffffff"
+                    ctx.fillStyle = page.card
                     ctx.fillRect(box.x, box.y, box.w, box.h)
                     ctx.strokeStyle = page.hoveredEdgeKey === routes[e].edge_key ? page.accent : page.line
                     ctx.lineWidth = (page.hoveredEdgeKey === routes[e].edge_key ? 1.2 : .5)/viewScale
@@ -495,7 +500,7 @@ Item {
                     var spot = pos[person.id]
                     ctx.beginPath()
                     ctx.arc(spot.x, spot.y, spot.r, 0, 2 * Math.PI)
-                    ctx.fillStyle = "#ffffff"
+                    ctx.fillStyle = page.card
                     ctx.fill()
                     ctx.strokeStyle = page.accent
                     ctx.lineWidth = page.highlightedNode(person.id) ? 2.8 : 1

@@ -14,7 +14,7 @@ Rectangle {
     property int restoreRevision:0
     readonly property var panels: desk.shot ? (desk.shot.panels || []) : []
     readonly property var panel: restoredPanel||panels.find(p => p.id === selectedId) || panels[0] || ({})
-    color: "#eef0eb"
+    color: desk.t.stage
     property var drawing: []
     function point(mouse){return [Math.max(0,Math.min(1,mouse.x/drawArea.width)),Math.max(0,Math.min(1,mouse.y/drawArea.height))]}
     function bindAdopted(){root.save({op:"use_panel_frame",panel_id:panel.id})}

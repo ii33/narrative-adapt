@@ -106,7 +106,7 @@ Item {
     readonly property var taskLabels:({running:"进行中",cancelled:"已停止",failed:"未完成",completed:"已完成"})
 
     property var effectivePrompts: ({})
-    readonly property string sceneTablePrompt: effectivePrompts.scene_table_shortcut || ""
+    readonly property string sceneTablePrompt: effectivePrompts.writing_shortcut || ""
     function diagnosticsText(values){return (values||[]).map(function(value){return value.message || value.code || String(value)}).join("\n")}
     function storageCountsText(){
         var counts=storage.row_counts||{}
@@ -255,6 +255,9 @@ Item {
         structure(actions,isSeries?"single":"series")
     }
     onVisibleChanged:if(visible){load();bridge.loadPromptSettings()}
+
+    // 懒创建：创建时一出生就可见，不会触发 onVisibleChanged。
+    Component.onCompleted:if(visible){load();bridge.loadPromptSettings()}
     Connections {
         target:app
         function onProjectChanged(){page.usageTasks=({});page.usageFinishedTasks=({});page.usagePendingReads=({});page.blockActionBusy=false;page.blockActionScope=({});page.restoringSelection=true;page.workspace=({});page.selectedSegmentId="";page.selectedUnitId="";page.selectedBlockId="";page.restoringSelection=false;page.effectivePrompts=({});if(app.mode==="workspace"){bridge.loadPromptSettings()}}
@@ -355,7 +358,7 @@ Item {
                 if(op==="check_screenplay"){notice=(result.ok?"剧本检查通过":"剧本检查结果")+"\n"+diagnosticsText(result.issues||result.diagnostics||[]);return}
                 if(op==="prepare_script_writing_targets") {
                     writingTarget={kind:"unit",ids:result.unit_ids || [],screenplay_id:screenplay.id,target_manifest:result}
-                    writingPrompt.text=page.effectivePrompts.batch_writing_shortcut || "";writingDialog.open();return
+                    writingPrompt.text=page.effectivePrompts.writing_shortcut || "";writingDialog.open();return
                 }
                 page.load()
             } else if(kind==="screenplay_export_saved")app.toast("已导出到 "+payload.path,false)
@@ -395,7 +398,7 @@ Item {
         Label { visible:!!page.notice;text:page.notice;color:t.warn;wrapMode:Text.Wrap;Layout.fillWidth:true }
         Frame {
             objectName:"screenplayStorageWarning";visible:page.storageNeedsReset;Layout.fillWidth:true
-            background:Rectangle{color:"#fff7e8";border.color:t.warn;radius:6}
+            background:Rectangle{color:t.warnSoft;border.color:t.warn;radius:6}
             contentItem:ColumnLayout{
                 Label{text:"剧本存储需重建";font.bold:true;color:t.ink}
                 Label{objectName:"screenplayStorageCounts";text:page.storageCountsText();color:t.body;wrapMode:Text.Wrap;Layout.fillWidth:true}
@@ -499,7 +502,7 @@ ListView {
                 ScriptWorkbenchColumn {
                     id:bodyColumn;objectName:"scriptBodyColumn";namePrefix:"scriptBodyColumn";title:"正文";t:page.t;expandedWidth:400;minimumExpandedWidth:340
                     RowLayout {Layout.fillWidth:true;spacing:4
-                        Button {objectName:"scriptWriteCurrentUnit";text:(page.unit.blocks||[]).length?"修改当前场":"写当前场";enabled:!!page.unit.id;onClicked:page.openWriting("unit",[page.unit.id],(page.unit.blocks||[]).length?"":page.effectivePrompts.unit_writing_shortcut||"")}
+                        Button {objectName:"scriptWriteCurrentUnit";text:(page.unit.blocks||[]).length?"修改当前场":"写当前场";enabled:!!page.unit.id;onClicked:page.openWriting("unit",[page.unit.id],(page.unit.blocks||[]).length?"":page.effectivePrompts.writing_shortcut||"")}
                         Button {objectName:"scriptAddBlock";text:"添加正文块";enabled:!!page.unit.id;onClicked:blockEditor.openFor(null)}
                     }
 
@@ -515,7 +518,7 @@ ListView {
                     ListView {id:bodyBlocksList;objectName:"scriptBodyBlocks";currentIndex:page.selectedBlockIndex;Layout.fillWidth:true;Layout.fillHeight:true;clip:true;model:page.unit.blocks || []
                         delegate:Frame {id:blockCard;objectName:"scriptBlockCard";required property var modelData;required property int index;property string blockId:modelData.id;readonly property bool selected:page.selectedBlockId===modelData.id;width:ListView.view.width
                             height:bodyCard.implicitHeight+24
-                            background:Rectangle{color:blockCard.selected?"#e5edff":t.card;border.color:blockCard.selected?t.accent:t.line;radius:4}
+                            background:Rectangle{color:blockCard.selected?t.accentSoft:t.card;border.color:blockCard.selected?t.accent:t.line;radius:4}
                             TapHandler{parent:blockCard;gesturePolicy:TapHandler.DragThreshold;acceptedButtons:Qt.LeftButton;onTapped:page.selectedBlockId=blockCard.modelData.id;onDoubleTapped:{page.selectedBlockId=blockCard.modelData.id;if(!blockEditor.visible)blockEditor.openFor(blockCard.modelData)}}
                             ColumnLayout {id:bodyCard;anchors.fill:parent
                                 Label{text:(page.blockLabels[modelData.type]||"正文块")+" "+(index+1);color:t.muted;font.pixelSize:10;HoverHandler{id:blockHover}ToolTip.visible:blockHover.hovered;ToolTip.text:modelData.id}
@@ -628,7 +631,7 @@ ListView {
                 Layout.fillWidth:true;Layout.fillHeight:true;clip:true
                 contentWidth:Math.max(availableWidth,210*96/25.4)
                 contentHeight:previewText.height
-                background:Rectangle{color:"#e6e7e9"}
+                background:Rectangle{color:t.previewBackdrop}
                 Item {
                     width:exportPreviewScroll.contentWidth;height:previewText.height
                     TextArea {
@@ -639,8 +642,8 @@ ListView {
                         topPadding:pageMargins.top*96/25.4;rightPadding:pageMargins.right*96/25.4
                         bottomPadding:pageMargins.bottom*96/25.4;leftPadding:pageMargins.left*96/25.4
                         text:page.exportResult.qt_preview_html||page.exportResult.preview_html||""
-                        textFormat:TextEdit.RichText;readOnly:true;selectByMouse:true;wrapMode:TextEdit.Wrap;color:"#181818"
-                        background:Rectangle{color:"white"}
+                        textFormat:TextEdit.RichText;readOnly:true;selectByMouse:true;wrapMode:TextEdit.Wrap;color:t.previewInk
+                        background:Rectangle{color:t.previewPaper}
                     }
                 }
             }

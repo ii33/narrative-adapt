@@ -42,6 +42,9 @@ Rectangle {
     }
     function imageUrl(path) { return path.indexOf("file:") === 0 ? path : "file:///" + path.replace(/\\/g, "/") }
     onVisibleChanged: if (visible && app.mode === "workspace") reload()
+
+    // 懒创建：创建时一出生就可见，不会触发 onVisibleChanged。
+    Component.onCompleted: if (visible && app.mode === "workspace") reload()
     Connections {
         target: bridge
         function onResultReady(kind, result) {

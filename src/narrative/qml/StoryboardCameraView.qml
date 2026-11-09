@@ -6,5 +6,5 @@ Rectangle{
  Connections{target:desk;function onCameraViewChanged(){canvas.requestPaint()}}
  onWidthChanged:canvas.requestPaint()
  onHeightChanged:canvas.requestPaint()
- Label{anchors.left:parent.left;anchors.top:parent.top;text:"机位视图 · 2.5D近似（对焦高亮非光学景深）";padding:5;background:Rectangle{color:"#dbe4da"}}
+ Label{anchors.left:parent.left;anchors.top:parent.top;text:"机位视图 · 2.5D近似（对焦高亮非光学景深）";padding:5;background:Rectangle{color:view.desk.t.stagePanel}}
 }

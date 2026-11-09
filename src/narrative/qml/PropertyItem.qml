@@ -104,7 +104,7 @@ Column {
                         id: categoryLabel
                         anchors.centerIn: parent
                         text: item.row.category + (item.row.categorySource === "fallback" ? " ?" : "")
-                        color: categoryArea.containsMouse ? "#ffffff" : item.t.accent
+                        color: categoryArea.containsMouse ? item.t.onAccent : item.t.accent
                         font.pixelSize: 10
                     }
                     MouseArea {
@@ -204,7 +204,7 @@ Column {
                         id: recordCategoryLabel
                         anchors.centerIn: parent
                         text: modelData.category
-                        color: recordCategoryArea.containsMouse ? "#ffffff" : item.t.muted
+                        color: recordCategoryArea.containsMouse ? item.t.onAccent : item.t.muted
                         font.pixelSize: 9
                     }
                     MouseArea {

@@ -18,33 +18,21 @@ ApplicationWindow {
     visible: true
     title: mode === "workspace" && project.title
         ? project.title + " · 叙事图工作台" : "叙事图工作台"
-    color: themeTokens.paper
+    color: app.theme.paper
 
     // 显式背景：窗口清屏色不进 scene graph，页面之间的空隙会露出未绘制的底，
     // 截图和离屏渲染都会变成黑块。
-    background: Rectangle { color: themeTokens.paper }
+    background: Rectangle { color: app.theme.paper }
 
     // -- design tokens -------------------------------------------------
-    readonly property QtObject theme: themeTokens
+    // 令牌只有一份：native/theme.py 并列定义浅色与深色两套，bridge.theme 给出当前
+    // 外观解析后的那一套（颜色是十六进制字符串，QML 直接当 color 用）。深浅切换时
+    // 整张表被替换，所有绑定自动重算；页面只认令牌名，不认具体颜色。
+    readonly property var theme: bridge.theme
 
-    QtObject {
-        id: themeTokens
-        readonly property color ink: "#16233a"
-        readonly property color body: "#33445c"
-        readonly property color muted: "#6d7f96"
-        readonly property color line: "#dfe6f0"
-        readonly property color paper: "#f4f7fb"
-        readonly property color card: "#ffffff"
-        readonly property color panel: "#ffffff"
-        readonly property color panelAlt: "#f7f9fd"
-        readonly property color accent: "#2b5cd9"
-        readonly property color accentSoft: "#eaf0ff"
-        readonly property color ok: "#127a5e"
-        readonly property color warn: "#b06a00"
-        readonly property color bad: "#b23b3f"
-        readonly property int radius: 8
-        readonly property int gap: 12
-    }
+    // 懒创建组件的宿主别名：在 Component 里写 `app: app` 会解析成页面自己的 app
+    // 属性（那是 undefined），必须通过只指向窗口的别名传进去。
+    readonly property var windowRoot: app
 
     // -- shared state ---------------------------------------------------
     property var project: ({})
@@ -106,6 +94,21 @@ ApplicationWindow {
         currentPage = key
     }
 
+    // -- 页面按需创建 ---------------------------------------------------
+    // 打开工程只建当前这一页，其余等第一次进入再实例化：原文、分镜这类页面
+    // 自己的初始化代价不小，一开始全建一遍就是「打开工程要等」。
+    property var visitedPages: ({})
+    function pageVisited(key) { return visitedPages[key] === true }
+    function markPageVisited(key) {
+        if (visitedPages[key] === true) return
+        var copy = {}
+        for (var name in visitedPages) copy[name] = visitedPages[name]
+        copy[key] = true
+        visitedPages = copy
+    }
+    onCurrentPageChanged: markPageVisited(currentPage)
+    Component.onCompleted: markPageVisited(currentPage)
+
     // 从节点/属性跳回原文：切到原文页并把引文位置滚到眼前。
     function openSource(sourceId, start) {
         app.openSourceSpan(sourceId, start, -1)
@@ -114,12 +117,17 @@ ApplicationWindow {
     function openSourceSpan(sourceId, start, end) {
         if (!sourceId) return
         currentPage = "source"
-        sourcePage.load(sourceId, start, end)
+        // 页面是懒创建的：等它建好再交给它定位。
+        Qt.callLater(function () {
+            if (sourceLoader.item) sourceLoader.item.load(sourceId, start, end)
+        })
     }
 
     function focusBrowseNode(nodeId, target) {
         currentPage = "browse"
-        browsePage.focusIssue(nodeId, target || ({}))
+        Qt.callLater(function () {
+            if (browseLoader.item) browseLoader.item.focusIssue(nodeId, target || ({}))
+        })
     }
 
     function toast(message, isError) {
@@ -130,6 +138,7 @@ ApplicationWindow {
     function enterWorkspace() {
         mode = "workspace"
         currentPage = "browse"
+        markPageVisited(currentPage)
     }
 
     function backToLauncher() {
@@ -241,7 +250,7 @@ ApplicationWindow {
                         width: 2
                         height: parent.height
                         color: SplitHandle.pressed || SplitHandle.hovered
-                            ? themeTokens.accent : themeTokens.line
+                            ? app.theme.accent : app.theme.line
                     }
                 }
 
@@ -251,8 +260,8 @@ ApplicationWindow {
                     SplitView.minimumWidth:app.navigationCollapsed?56:150
                     SplitView.maximumWidth:app.navigationCollapsed?56:320
                     SplitView.fillHeight: true
-                    color: themeTokens.card
-                    border.color: themeTokens.line
+                    color: app.theme.card
+                    border.color: app.theme.line
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -265,7 +274,7 @@ ApplicationWindow {
                             flat: true
                             text:app.navigationCollapsed?"":"← 工程列表"
                             implicitWidth:app.navigationCollapsed?40:150
-                            NavigationIcon{visible:app.navigationCollapsed;name:"back";ink:themeTokens.ink;anchors.centerIn:parent;width:24;height:24}
+                            NavigationIcon{visible:app.navigationCollapsed;name:"back";ink:app.theme.ink;anchors.centerIn:parent;width:24;height:24}
                             ToolTip.visible:hovered
                             ToolTip.text:"工程列表"
                             onClicked: app.backToLauncher()
@@ -277,7 +286,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.topMargin: 8
                             text: project.title || project.name || "未命名工程"
-                            color: themeTokens.ink
+                            color: app.theme.ink
                             font.pixelSize: 14
                             font.weight: Font.DemiBold
                             wrapMode: Text.Wrap
@@ -286,7 +295,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             visible:!app.navigationCollapsed
                             text: "修订 " + (project.revision !== undefined ? project.revision : "—")
-                            color: themeTokens.muted
+                            color: app.theme.muted
                             font.pixelSize: 11
                         }
 
@@ -295,7 +304,7 @@ ApplicationWindow {
                             Layout.preferredHeight: 1
                             Layout.topMargin: 8
                             Layout.bottomMargin: 8
-                            color: themeTokens.line
+                            color: app.theme.line
                         }
 
                         ScrollView {id:navScroll;contentWidth:availableWidth;Layout.fillWidth:true;Layout.fillHeight:true;clip:true
@@ -312,9 +321,9 @@ ApplicationWindow {
                                     anchors.fill: parent
                                     radius: 6
                                     color: app.currentPage === modelData.key
-                                        ? themeTokens.accentSoft : "transparent"
+                                        ? app.theme.accentSoft : "transparent"
                                 }
-                                NavigationIcon {name:modelData.key;ink:app.currentPage===modelData.key?themeTokens.accent:themeTokens.ink;width:24;height:24;anchors.verticalCenter:parent.verticalCenter;x:app.navigationCollapsed?(parent.width-width)/2:10}
+                                NavigationIcon {name:modelData.key;ink:app.currentPage===modelData.key?app.theme.accent:app.theme.ink;width:24;height:24;anchors.verticalCenter:parent.verticalCenter;x:app.navigationCollapsed?(parent.width-width)/2:10}
                                 Column {
                                     visible:!app.navigationCollapsed
                                     anchors.left: parent.left
@@ -324,14 +333,14 @@ ApplicationWindow {
                                     Label {
                                         text: modelData.label
                                         color: app.currentPage === modelData.key
-                                            ? themeTokens.accent : themeTokens.ink
+                                            ? app.theme.accent : app.theme.ink
                                         font.pixelSize: 14
                                         font.weight: app.currentPage === modelData.key
                                             ? Font.DemiBold : Font.Normal
                                     }
                                     Label {
                                         text: modelData.hint
-                                        color: themeTokens.muted
+                                        color: app.theme.muted
                                         font.pixelSize: 11
                                     }
                                 }
@@ -354,7 +363,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             visible:!app.navigationCollapsed
                             text: project.path || ""
-                            color: themeTokens.muted
+                            color: app.theme.muted
                             font.pixelSize: 10
                             elide: Text.ElideMiddle
                         }
@@ -372,8 +381,8 @@ ApplicationWindow {
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 54
-                        color: themeTokens.card
-                        border.color: themeTokens.line
+                        color: app.theme.card
+                        border.color: app.theme.line
 
                         RowLayout {
                             anchors.fill: parent
@@ -390,11 +399,11 @@ ApplicationWindow {
                                 }
                                 font.pixelSize: 17
                                 font.weight: Font.DemiBold
-                                color: themeTokens.ink
+                                color: app.theme.ink
                             }
                             Label {
                                 text: project.path || ""
-                                color: themeTokens.muted
+                                color: app.theme.muted
                                 font.pixelSize: 11
                                 elide: Text.ElideMiddle
                                 Layout.maximumWidth: 380
@@ -403,7 +412,7 @@ ApplicationWindow {
                             Label {
                                 visible: app.busy
                                 text: "处理中…"
-                                color: themeTokens.accent
+                                color: app.theme.accent
                                 font.pixelSize: 12
                             }
                             Button {
@@ -426,17 +435,18 @@ ApplicationWindow {
                             return 0
                         }
 
-                        BrowsePage { id: browsePage; app: app }
-                        RelationPage { app: app }
-                        SourcePage { id: sourcePage; app: app }
-                        AdaptationPage { app: app }
-                        AssetsPage { app: app }
-                        ScreenplayPage { app: app }
-                        StoryboardPage { app: app }
-                        DirectorDeskPage { app: app }
-                        ScreenplayStructurePage { app: app }
-                        StaticCheckPage { app: app }
-                        ProjectSettingsPage { app: app }
+                        // 每个位置一个 Loader：第一次进入那一页才实例化，之后保留。
+                        Loader { id: browseLoader; active: app.pageVisited("browse") || app.currentPage === "browse"; sourceComponent: browsePageComponent }
+                        Loader { active: app.pageVisited("relations") || app.currentPage === "relations"; sourceComponent: relationsPageComponent }
+                        Loader { id: sourceLoader; active: app.pageVisited("source") || app.currentPage === "source"; sourceComponent: sourcePageComponent }
+                        Loader { active: app.pageVisited("adaptation") || app.currentPage === "adaptation"; sourceComponent: adaptationPageComponent }
+                        Loader { active: app.pageVisited("assets") || app.currentPage === "assets"; sourceComponent: assetsPageComponent }
+                        Loader { active: app.pageVisited("screenplay") || app.currentPage === "screenplay"; sourceComponent: screenplayPageComponent }
+                        Loader { active: app.pageVisited("storyboard") || app.currentPage === "storyboard"; sourceComponent: storyboardPageComponent }
+                        Loader { active: app.pageVisited("director") || app.currentPage === "director"; sourceComponent: directorPageComponent }
+                        Loader { active: app.pageVisited("screenplay_structure") || app.currentPage === "screenplay_structure"; sourceComponent: structurePageComponent }
+                        Loader { active: app.pageVisited("static_check") || app.currentPage === "static_check"; sourceComponent: staticCheckPageComponent }
+                        Loader { active: app.pageVisited("project_settings") || app.currentPage === "project_settings"; sourceComponent: projectSettingsPageComponent }
                     }
                 }
 
@@ -455,8 +465,8 @@ ApplicationWindow {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 30
-            color: themeTokens.card
-            border.color: themeTokens.line
+            color: app.theme.card
+            border.color: app.theme.line
 
             RowLayout {
                 anchors.fill: parent
@@ -472,7 +482,7 @@ ApplicationWindow {
                     text: app.errorText.length > 0 ? app.errorText
                         : app.notice.length > 0 ? app.notice
                         : app.diagnosticLine
-                    color: app.errorText.length > 0 ? themeTokens.bad : themeTokens.muted
+                    color: app.errorText.length > 0 ? app.theme.bad : app.theme.muted
                 }
                 Button {
                     visible: app.errorText.length > 0 || app.notice.length > 0
@@ -483,4 +493,18 @@ ApplicationWindow {
             }
         }
     }
+
+
+    // 懒创建用的组件定义。顺序与 navItems 一致，由上面每个 Loader 按需实例化。
+    Component { id: browsePageComponent; BrowsePage { app: windowRoot } }
+    Component { id: relationsPageComponent; RelationPage { app: windowRoot } }
+    Component { id: sourcePageComponent; SourcePage { app: windowRoot } }
+    Component { id: adaptationPageComponent; AdaptationPage { app: windowRoot } }
+    Component { id: assetsPageComponent; AssetsPage { app: windowRoot } }
+    Component { id: screenplayPageComponent; ScreenplayPage { app: windowRoot } }
+    Component { id: storyboardPageComponent; StoryboardPage { app: windowRoot } }
+    Component { id: directorPageComponent; DirectorDeskPage { app: windowRoot } }
+    Component { id: structurePageComponent; ScreenplayStructurePage { app: windowRoot } }
+    Component { id: staticCheckPageComponent; StaticCheckPage { app: windowRoot } }
+    Component { id: projectSettingsPageComponent; ProjectSettingsPage { app: windowRoot } }
 }

@@ -19,7 +19,37 @@ Item {
     property string notice: ""
     property int pendingStart: -1
     property int pendingEnd: -1
-    readonly property string previewText: selectedSliceId ? (currentSlice.text || "") : (current.text || "")
+    property bool refreshed: false
+    // 窗口化渲染：全文可能有 200 万字，一次交给 TextArea 会卡死界面线程，只给当前一段。
+    readonly property string fullText: selectedSliceId ? (currentSlice.text || "") : (current.text || "")
+    property int chunkStart: 0
+    readonly property int chunkSize: 40000
+    readonly property string previewText: fullText.substr(chunkStart, chunkSize)
+
+    // 仅在页面可见时取数（页面由 Loader 首次进入才创建），同一轮只请求一次。
+    function refresh() {
+        refreshed = true
+        bridge.loadSources()
+        if (selectedId) {
+            bridge.sourceText(selectedId)
+            bridge.loadSourceSlices(selectedId)
+        }
+    }
+
+    function refreshOnce() {
+        if (refreshed) return
+        page.refresh()
+    }
+
+    // 段边界必须落在合法范围内，且不能把窗口推过全文末尾。
+    function clampChunk(start) {
+        return Math.max(0, Math.min(start, Math.max(0, page.fullText.length - 1)))
+    }
+
+    function shiftChunk(delta) {
+        page.chunkStart = page.clampChunk(page.chunkStart + delta * page.chunkSize)
+        if (sourceScroll.contentItem) sourceScroll.contentItem.contentY = 0
+    }
 
     function load(id, start, end) {
         selectedId = id
@@ -29,6 +59,7 @@ Item {
         slices = []
         pendingStart = (start === undefined || start === null) ? -1 : start
         pendingEnd = (end === undefined || end === null) ? -1 : end
+        chunkStart = 0
         notice = ""
         bridge.sourceText(id)
         bridge.loadSourceSlices(id)
@@ -38,10 +69,11 @@ Item {
         selectedSliceId = id
         currentSlice = ({})
         pendingStart = -1
+        chunkStart = 0
         if (id) {
             bridge.sourceSlice(selectedId, id)
         }
-        sourceScroll.contentItem.contentY = 0
+        if (sourceScroll.contentItem) sourceScroll.contentItem.contentY = 0
     }
 
     function runTask(review) {
@@ -52,7 +84,7 @@ Item {
     }
 
     function textPosition(codepointOffset) {
-        var text = current.text || ""
+        var text = page.fullText || ""
         var position = 0
         for (var count = 0; count < codepointOffset && position < text.length; ++count) {
             var first = text.charCodeAt(position++)
@@ -66,15 +98,36 @@ Item {
 
     function reveal(start, end) {
         // Evidence offsets are Unicode code points; QML positions are UTF-16.
-        var text = current.text || ""
+        var text = page.fullText || ""
         var position = page.textPosition(start)
         if (start < 0 || position > text.length) return
-        var last = end >= start ? page.textPosition(end) : position + 80
-        body.select(position, Math.min(text.length, last))
-        var rect = body.positionToRectangle(position)
-        var flick = sourceScroll.contentItem
-        if (flick && flick.contentY !== undefined)
-            flick.contentY = Math.max(0, rect.y - 60)
+        // 选区长度按 code point 算（证据区间通常很短），避免再扫一遍全文。
+        var span = end >= start ? (end - start) : 80
+        // 目标不在当前窗口内时先移动窗口，TextArea 的文本与 select 偏移都要按新窗口算。
+        var windowEnd = page.chunkStart + page.previewText.length
+        if (position < page.chunkStart || position >= windowEnd) {
+            page.chunkStart = Math.max(0, position - 2000)
+            page.pendingStart = -1
+            page.pendingEnd = -1
+        }
+        Qt.callLater(function() {
+            var here = page.fullText || ""
+            var local = position - page.chunkStart
+            if (local < 0 || local > here.length) return
+            var lastLocal = local
+            for (var count = 0; count < span && lastLocal < here.length; ++count) {
+                var first = here.charCodeAt(lastLocal++)
+                if (first >= 0xD800 && first <= 0xDBFF && lastLocal < here.length) {
+                    var second = here.charCodeAt(lastLocal)
+                    if (second >= 0xDC00 && second <= 0xDFFF) ++lastLocal
+                }
+            }
+            body.select(local, Math.min(here.length, lastLocal))
+            var rect = body.positionToRectangle(local)
+            var flick = sourceScroll.contentItem
+            if (flick && flick.contentY !== undefined)
+                flick.contentY = Math.max(0, rect.y - 60)
+        })
     }
 
     function apply(kind, payload) {
@@ -108,10 +161,11 @@ Item {
         }
     }
 
-    Component.onCompleted: if (app.mode === "workspace") bridge.loadSources()
+    Component.onCompleted: if (app.mode === "workspace" && visible) page.refreshOnce()
+    onVisibleChanged: if (visible && app.mode === "workspace") page.refreshOnce()
     Connections {
         target: app
-        function onModeChanged() { if (app.mode === "workspace") bridge.loadSources() }
+        function onModeChanged() { if (app.mode === "workspace" && page.visible) page.refresh() }
     }
     Connections {
         target: bridge
@@ -305,6 +359,31 @@ Item {
                             color: page.t.muted
                             font.pixelSize: 11
                             wrapMode: Text.Wrap
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        visible: page.fullText.length > page.chunkSize
+                        Button {
+                            objectName: "sourceChunkPrev"
+                            text: "上一段"
+                            enabled: page.chunkStart > 0
+                            onClicked: page.shiftChunk(-1)
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            horizontalAlignment: Text.AlignHCenter
+                            text: "第 " + (page.chunkStart + 1) + "–"
+                                  + Math.min(page.fullText.length, page.chunkStart + page.previewText.length)
+                                  + " 字 / 共 " + page.fullText.length + " 字"
+                            color: page.t.muted
+                            font.pixelSize: 11
+                        }
+                        Button {
+                            objectName: "sourceChunkNext"
+                            text: "下一段"
+                            enabled: page.chunkStart + page.previewText.length < page.fullText.length
+                            onClicked: page.shiftChunk(1)
                         }
                     }
                     ScrollView {

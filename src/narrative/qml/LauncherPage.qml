@@ -18,6 +18,19 @@ Item {
 
     readonly property var effortOptions: ["不设置", "off", "minimal", "low", "medium", "high"]
 
+    // 外观三档：跟随系统（默认）、固定浅色、固定深色。选择由 bridge 记住。
+    readonly property var appearanceModes: [
+        {key: "system", label: "跟随系统"},
+        {key: "light", label: "浅色"},
+        {key: "dark", label: "深色"}
+    ]
+
+    function appearanceIndex(mode) {
+        for (var i = 0; i < appearanceModes.length; ++i)
+            if (appearanceModes[i].key === mode) return i
+        return 0
+    }
+
     ListModel { id: projectRows }
     // 没有「工程目录」这回事：列表就是打开过的那些工程包。
     property var recentItems: []
@@ -458,6 +471,45 @@ Item {
                     anchors.fill: parent
                     anchors.margins: 16
                     spacing: 10
+
+                    // -- 外观 -------------------------------------------------
+                    Label {
+                        text: "外观"
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                        color: t.ink
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: "界面深浅色"
+                            color: t.muted
+                            font.pixelSize: 11
+                        }
+                        Item { Layout.fillWidth: true }
+                        ComboBox {
+                            objectName: "appearanceMode"
+                            Layout.preferredWidth: 140
+                            model: page.appearanceModes
+                            textRole: "label"
+                            currentIndex: page.appearanceIndex(bridge.themeMode)
+                            // 立刻生效并记住选择；不需要按「保存全局设置」。
+                            onActivated: bridge.setThemeMode(page.appearanceModes[index].key)
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: "跟随系统时随 Windows 深浅色自动切换；选浅色或深色后固定，不再跟系统。"
+                        color: t.muted
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: t.line
+                    }
 
                     RowLayout {
                         Layout.fillWidth: true

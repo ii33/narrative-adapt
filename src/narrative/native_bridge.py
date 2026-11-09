@@ -18,9 +18,9 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import Property, QObject, Signal, Slot
 
-from . import graph_profile_ops, project_catalog, project_package, providers
+from . import appearance, graph_profile_ops, project_catalog, project_package, providers, theme
 from .browse_view import moment_tree
 from .graph_operations import GraphOperations
 from .harness import HarnessRunner, harness_env
@@ -49,6 +49,24 @@ class NativeBridge(QObject):
     # 一次后台操作花了多久（毫秒）。只在明显偏慢时发，用来定位「界面卡」到底卡在哪一步。
     slowOperation = Signal(str, int)
     _workerDone = Signal(int, object, object)
+
+    themeModeChanged = Signal()
+    darkModeChanged = Signal()
+
+    @Property(str, notify=themeModeChanged)
+    def themeMode(self) -> str:
+        """当前外观模式：system / light / dark。"""
+        return self._appearance_mode
+
+    @Property(bool, notify=darkModeChanged)
+    def darkMode(self) -> bool:
+        """实际是否使用深色；模式为 system 时由系统偏好决定。"""
+        return self._appearance_dark
+
+    @Property("QVariantMap", notify=darkModeChanged)
+    def theme(self) -> dict:
+        """QML 用的设计令牌（颜色是十六进制字符串），与 Qt 控件调色板同源。"""
+        return theme.tokens(self._appearance_dark)
 
     # 一个操作最多等这么久。超过就放弃它并把「处理中」清掉：
     # 结果要是永远不回来，界面就会一直卡在「处理中」，什么都点不动。
@@ -95,6 +113,11 @@ class NativeBridge(QObject):
         self._assistant_chat = ""
         self._assistant_resumed: set[str] = set()
         self._assistant_lock = threading.Lock()
+
+        # 外观偏好在界面起来前读一次；未读取前按浅色渲染，不碰磁盘。
+        self._appearance_mode = appearance.DEFAULT_MODE
+        self._appearance_dark = False
+        self._appearance_watching = False
         self._workerDone.connect(self._on_worker_done)
 
     def close(self) -> None:
@@ -102,6 +125,65 @@ class NativeBridge(QObject):
         self._closed = True
         self._close_assistant()
         self._pool.shutdown(wait=False, cancel_futures=True)
+
+    def load_appearance(self) -> None:
+        """启动时读一次外观偏好并应用；跟随系统时还要跟着系统深浅色变化。"""
+        self._appearance_mode = appearance.load()
+        self._watch_system_scheme()
+        self._apply_appearance()
+
+    @Slot(str)
+    def setThemeMode(self, mode: str) -> None:
+        """切换外观模式：立刻生效，并记住选择。保存失败不拦着切换。"""
+        if mode not in appearance.MODES:
+            self.errorOccurred.emit("appearance", f"未知外观模式：{mode}")
+            return
+        failure = ""
+        try:
+            appearance.save(mode)
+        except (OSError, ValueError) as exc:
+            failure = str(exc)
+        self._appearance_mode = mode
+        self._watch_system_scheme()
+        self._apply_appearance()
+        if failure:
+            self.errorOccurred.emit("appearance", f"外观偏好没有保存：{failure}")
+
+    def _watch_system_scheme(self) -> None:
+        if self._appearance_watching:
+            return
+        from PySide6.QtGui import QGuiApplication
+
+        instance = QGuiApplication.instance()
+        hints = instance.styleHints() if instance is not None else None
+        if hints is None:
+            return
+        hints.colorSchemeChanged.connect(self._on_system_scheme_changed)
+        self._appearance_watching = True
+
+    def _on_system_scheme_changed(self, *_scheme) -> None:
+        # 手动选了浅色或深色时，系统变化不该覆盖用户的选择；关闭后也不再改调色板。
+        if self._appearance_mode == "system" and not self._closed:
+            self._apply_appearance()
+
+    def _apply_appearance(self) -> None:
+        from PySide6.QtGui import QGuiApplication
+
+        instance = QGuiApplication.instance()
+        if instance is not None and self._appearance_mode == "system":
+            # 先把自己的钉值交回系统：否则切回「跟随系统」时读到的是上次强制的那一档。
+            theme.reset_color_scheme(instance)
+        system_dark = theme.system_dark(instance) if instance is not None else False
+        dark = appearance.is_dark(self._appearance_mode, system_dark)
+        if instance is not None:
+            # 跟随系统时必须把窗口框架交回 Unknown：钉成具体一档会把系统偏好盖住，
+            # 之后既读不到系统深色，也收不到系统切换的通知。
+            theme.apply_palette(instance, dark, follow_system=self._appearance_mode == "system")
+        changed = dark != self._appearance_dark
+        self._appearance_dark = dark
+        self.themeModeChanged.emit()
+        if changed:
+            self.darkModeChanged.emit()
 
     def _submit(
         self,

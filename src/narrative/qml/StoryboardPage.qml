@@ -228,6 +228,8 @@ Item {
         focusNew = false
         Qt.callLater(desk.scheduleReview)
     }
+    // 懒创建：创建时一出生就可见，不会触发 onVisibleChanged。
+    Component.onCompleted: if (visible && app) loadScreenplay(app.screenplayId || "")
     onVisibleChanged: {
         if (visible && app) loadScreenplay(app.screenplayId || "")
         else {
@@ -402,12 +404,12 @@ Item {
             StoryboardCompare{anchors.fill:parent;desk:desk;overlay:variant.currentIndex===3;visible:!desk.showCameraView&&(variant.currentIndex===2||variant.currentIndex===3)}
             StoryboardSelectedVideo{id:adoptedVideo;anchors.fill:parent;desk:desk;active:!desk.showCameraView&&variant.currentIndex===4;visible:active&&available}
             StoryboardCameraView{anchors.fill:parent;desk:desk;visible:desk.showCameraView}
-            CheckBox{z:3;anchors.left:parent.left;anchors.bottom:parent.bottom;text:"机位视图";checked:desk.showCameraView;onToggled:desk.showCameraView=checked;background:Rectangle{color:"#e3e8dd"}}
-            Label{anchors.top:parent.top;anchors.horizontalCenter:parent.horizontalCenter;visible:desk.checkReport.revision===desk.board.revision&&(desk.checkReport.affected_frames||[]).some(f=>f.frame_id===desk.frame?.id);text:"本帧需要复查，详见检查。";color:"#f3d2a7";padding:5;background:Rectangle{color:"#5a4133"}}
+            CheckBox{z:3;anchors.left:parent.left;anchors.bottom:parent.bottom;text:"机位视图";checked:desk.showCameraView;onToggled:desk.showCameraView=checked;background:Rectangle{color:desk.t.stagePanel}}
+            Label{anchors.top:parent.top;anchors.horizontalCenter:parent.horizontalCenter;visible:desk.checkReport.revision===desk.board.revision&&(desk.checkReport.affected_frames||[]).some(f=>f.frame_id===desk.frame?.id);text:"本帧需要复查，详见检查。";color:desk.t.warn;padding:5;background:Rectangle{color:desk.t.warnSoft}}
             Label {
                 visible:desk.approved && variant.currentIndex === 1 && !!desk.frame && !desk.frame.style_path
-                text:"此帧沿用草图";anchors.top:parent.top;anchors.left:parent.left;padding:6;color:"white"
-                background:Rectangle {color:"#63422e"}
+                text:"此帧沿用草图";anchors.top:parent.top;anchors.left:parent.left;padding:6;color:desk.t.onAccent
+                background:Rectangle {color:desk.t.accent}
             }
             Label {
                 anchors.centerIn:parent
@@ -480,7 +482,7 @@ Item {
                 x:(desk.trackGeometry[index]||{x:0}).x
                 height:track.height - 10
                 width:(desk.trackGeometry[index]||{width:0}).width
-                color:desk.shotIndex===index ? "#cee3db" : "#e5eae7"
+                color:desk.shotIndex===index ? desk.t.clipActive : desk.t.clip
                 clip:true
                 RowLayout {
                     anchors.left: parent.left;anchors.right:parent.right;anchors.top:parent.top;height:62
@@ -502,18 +504,18 @@ Item {
                         Label { text: desk.seconds(modelData.duration_ms); font.pixelSize: 11 }
                     }
                 }
-                Rectangle { visible:desk.shotIndex===index; width:2; height:parent.height; color:"#a15131"; x:Math.min(parent.width-width, parent.width*desk.localTime/modelData.duration_ms) }
+                Rectangle { visible:desk.shotIndex===index; width:2; height:parent.height; color:desk.t.marker; x:Math.min(parent.width-width, parent.width*desk.localTime/modelData.duration_ms) }
                 MouseArea { anchors.fill:parent; onClicked:function(mouse){desk.seek(desk.startOf(index)+Math.round(mouse.x/width*modelData.duration_ms))} }
                 Repeater{model:shotClip.inViewport?modelData.keyframes||[]:[]
-                    Rectangle{id:frameHandle;required property var modelData;property string frameId:modelData.id;objectName:"storyboardFrameHandle";width:12;height:23;y:desk.expandedTracks?65:parent.height-height;x:Math.min(parent.width-width,modelData.offset_ms/parent.modelData.duration_ms*parent.width);color:"#9a6735";border.color:"white";radius:2
+                    Rectangle{id:frameHandle;required property var modelData;property string frameId:modelData.id;objectName:"storyboardFrameHandle";width:12;height:23;y:desk.expandedTracks?65:parent.height-height;x:Math.min(parent.width-width,modelData.offset_ms/parent.modelData.duration_ms*parent.width);color:desk.t.handle;border.color:"white";radius:2
                         MouseArea{anchors.fill:parent;preventStealing:true;cursorShape:Qt.SizeHorCursor;property real pressX;property int original;property real pressedWidth;property int rev;property string owner;property string project;onPressed:function(mouse){desk.beginTimelineEdit();desk.playing=false;pressedWidth=frameHandle.parent.width;pressX=mapToItem(track.contentItem,mouse.x,0).x;original=frameHandle.modelData.offset_ms;rev=desk.board.revision;owner=desk.unitId;project=desk.app.project.path}onReleased:function(mouse){desk.endTimelineEdit();var delta=mapToItem(track.contentItem,mouse.x,0).x-pressX;var shot=frameHandle.parent.modelData;var offset=Math.max(0,Math.min(shot.duration_ms-1,Math.round(original+delta/pressedWidth*shot.duration_ms)));desk.moveFrame(shot.id,frameHandle.frameId,offset,rev,owner,project)}onCanceled:desk.endTimelineEdit()}
                         ToolTip.visible:frameHover.hovered;ToolTip.text:desk.seconds(modelData.offset_ms);HoverHandler{id:frameHover}
                     }
                 }
                 Column{visible:desk.expandedTracks;y:90;width:parent.width;spacing:2
                     Repeater{model:desk.expandedTracks&&shotClip.inViewport?[{kind:"camera",name:"机位",color:"#739eb7"},{kind:"object",name:"对象",color:"#8baf83"},{kind:"sound",name:"声音",color:"#b98c72"},{kind:"marker",name:"时刻",color:"#a78aba"}]:[]
-                        Rectangle{id:lane;required property var modelData;width:parent.width;height:23;color:"#edf0eb";readonly property var owner:lane.parent.parent.modelData
-                            Text{text:lane.modelData.name;font.pixelSize:9;color:"#65726a";x:3}
+                        Rectangle{id:lane;required property var modelData;width:parent.width;height:23;color:desk.t.lane;readonly property var owner:lane.parent.parent.modelData
+                            Text{text:lane.modelData.name;font.pixelSize:9;color:desk.t.stageInk;x:3}
                             Repeater{model:desk.trackPoints(lane.owner,lane.modelData.kind)
                                 Rectangle{id:point;objectName:"storyboardTrackPoint";required property var modelData;property string pointId:modelData.id;property string shotId:lane.owner.id;property string pointKind:lane.modelData.kind;x:modelData.offset/lane.owner.duration_ms*lane.width;y:8;height:14;width:modelData.duration?modelData.duration/lane.owner.duration_ms*lane.width:7;color:lane.modelData.color;radius:2
                                     ToolTip.visible:pointHover.hovered;ToolTip.text:point.modelData.label;HoverHandler{id:pointHover}
