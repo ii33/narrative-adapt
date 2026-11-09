@@ -3568,7 +3568,7 @@ def test_cardinality_means_collection_not_number_of_scalar_relationship_counterp
 
 
 
-    assert '人物关系是标量还是集合看属性本身' in extraction
+    assert '换个对方还是同一个属性' in extraction
 
 
 
@@ -3584,7 +3584,7 @@ def test_cardinality_means_collection_not_number_of_scalar_relationship_counterp
 
 
 
-    assert '不按关系对象个数改 one/many' in extraction
+    assert '多个对方就是多条记录' in extraction
 
 
 
@@ -3600,7 +3600,7 @@ def test_cardinality_means_collection_not_number_of_scalar_relationship_counterp
 
 
 
-    assert '不按关系对象个数改 one/many' in extraction
+    assert '换个对方还是同一个属性' in extraction
 
 
 

@@ -17,7 +17,7 @@
 
 ## 影响
 
-- 主项目新增 `requirements/` 与生成物 `docs/requirements/`；`.docops-cache.json` 可随时删除。
+- 主项目零新增：需求分片、生成物与缓存都在 `narrative-docops` 仓库（`requirements/`、`out/`、`.docops-cache.json`），主项目只多一步「`git archive` 快照 + `fmt --check` 校验副本」。
 - 现有六项文档检查成为新工具的一部分：等价性达标后切换门禁，旧实现删掉即完成回滚。
 - agent 侧多一个入口：默认只读，写入要 `--allow-agent-write` 且一次一条，`implemented`／`diverged` 必须人工签字。
 - 既有契约版本不动：工具只读取 `GRAPH_SCHEMA_VERSION`、`DRAFT_VERSION` 与提示词 `version`。

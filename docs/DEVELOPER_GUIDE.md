@@ -13,7 +13,7 @@
 | --- | --- | --- | --- |
 | 项目入口 | 创建、打开、列出、复制工程；业务写入的唯一门面 | `operations.py`、`project_catalog.py`、`project_copy.py` | 向下调 `graph_operations.py` |
 | 组合根 | 把各域能力装进一个对象，UI／CLI／工具都从这里拿 | `graph_operations.py`、`graph_facades.py` | 依赖全部服务域 |
-| 存储与原子写 | SQLite 当前对象与属性记录；一次预检、一次提交、失败全回滚 | `graph_store.py`（schema 11）、`batch_write.py`、`temporal_state.py::persist` | 只依赖 `graph_store` |
+| 存储与原子写 | SQLite 当前对象与属性记录；一次预检、一次提交、失败全回滚 | `graph_store.py`（schema 11）、`batch_write.py`、`src/narrative/temporal_state.py::persist` | 只依赖 `graph_store` |
 | 提取 | 草稿解析、预检、暂存、逐层派生、事件合并 | `extraction.py`、`extraction_draft.py`、`extraction_staging.py`、`extraction_refs.py`、`extraction_containers.py`、`container_evidence.py`、`containment_refs.py`、`event_location.py`、`event_merge.py` | 依赖存储与属性合同 |
 | 图与属性 | 结构校验、查询投影、属性定义与事件处变更、状态推导、分类与审计 | `graph_service.py`、`graph_models.py`、`graph_query.py`、`graph_views.py`、`property_core.py`、`property_store.py`、`property_categories.py`、`property_audit.py`、`node_material.py`、`browse_view.py` | 依赖存储 |
 | 改编 | 与正式图独立、显式同步的改编工作区 | `adaptation_operations.py`、`adaptation_views.py`、`adaptation_state.py`、`adaptation_import.py` | 依赖图读取与存储 |

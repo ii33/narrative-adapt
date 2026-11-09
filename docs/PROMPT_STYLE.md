@@ -76,7 +76,7 @@
 
 1. 读当前文本，量指标（字数/段落/「不能」数/定义位置）。
 2. 按五段重写，先写概念骨架，再写原则，最后落字段与流程。
-3. 更新该条 `version`；改完跑 `pytest tests/test_prompt_version_snapshot.py`，更新快照用 `python scripts/update_prompt_snapshot.py --write`（脚本默认只预演，打印 `vN → vM` 与哈希前 8 位）。
+3. 更新该条 `version`；改完跑 `pytest tests/test_prompt_version_snapshot.py`，更新快照用 `python scripts/update_prompt_snapshot.py --write`（脚本默认只预演，打印 `vN → vM` 与哈希前 8 位）。同一 `version` 内的多次文本改动只允许发生在**该版本提交之前**（同一版内部整合）；一旦提交，任何文本变化都必须升版本——否则「两次改同版」就成了绕过快照的通道。
 4. 跑 `pytest -k "prompt"`；把逐字长句断言改成要点断言（合同不变）。
 5. 行为类改动跑真实模型多次对照，写入 `docs/`。
 6. 全量 `pytest` + `ruff` 通过后提交。
@@ -86,7 +86,7 @@
 | 提示词 | 版本 | 字数（旧→新） |
 | --- | --- | --- |
 | `system` | v11 | 1819 → 900 |
-| `extraction` | v24 | 5832 → 3200（五层语义对齐：T＝一卷/一部、B＝部内重要篇章、S＝空间接近且时间连续的连续事件；同一原文三次运行事件数 13/8/10 → 11/11/12，见 [EXTRACTION_PROMPT_REWRITE.md](EXTRACTION_PROMPT_REWRITE.md)） |
+| `extraction` | v25 | 5832 → 3749（五层语义对齐：T＝一卷/一部、B＝部内重要篇章、S＝空间接近且时间连续的连续事件；同一原文三次运行事件数 13/8/10 → 11/11/12，见 [EXTRACTION_PROMPT_REWRITE.md](EXTRACTION_PROMPT_REWRITE.md)） |
 | `source_extraction` | v9 | 1106 → 965 |
 | `review` | v11 | 1810 → 1289 |
 | `action_extraction` | v7 | 1003 → 774 |
