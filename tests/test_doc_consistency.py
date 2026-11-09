@@ -1,17 +1,24 @@
-"""Documentation drift guards: retired phrasings, ID closure, link liveness.
+"""Documentation drift guards: retired phrasings, ID closure, names instead of positions.
 
 Text only: reads ``docs/``, ``AGENTS.md`` and ``src/``; builds no project, touches
 no database, writes nothing — safe in the default parallel suite.
 
-Three things are checked:
+What is checked:
 
 * retired phrasings — wording that the current 五层 semantics replaced must not
   come back into the docs or the prompt defaults;
 * ID closure — ``I-xx`` in ``INVARIANTS.md`` must point at a real ``M-xx``; every
   diagnostic code quoted in a doc must still exist in ``src/``; every glossary
-  term must appear in ``MODEL.md``;
+  term must appear in ``MODEL.md`` or name a schema field that exists;
 * link liveness — relative links between ``docs/*.md`` (and into ``docs/`` from
-  ``AGENTS.md``/``README.md``) must resolve.
+  ``AGENTS.md``/``README.md``) must resolve;
+* literal doc paths — ``docs/....md`` written into ``src/``/``tests/``/``scripts/``
+  must exist, so moving a document cannot silently break code that reads it;
+* no line numbers — docs reference code as ``文件.py::符号``, never ``文件.py:行号``;
+* symbol existence — every ``文件.py::符号`` in ``INVARIANTS.md`` must be a real
+  ``def``/``class`` in that file.
+
+文档绑「合同」（诊断码、工具名、提示词 key、符号名），不绑「位置」（行号、深层路径）。
 """
 from __future__ import annotations
 
@@ -226,3 +233,187 @@ def test_doc_relative_links_alive():
             if not resolved.exists():
                 broken.append(f"{path.relative_to(ROOT)} -> {target}")
     assert not broken, "文档相对链接断了：\n" + "\n".join(broken)
+
+
+# 代码里写死的文档路径（open/read_text/PROJECT_ROOT/"docs/..."）不会被上面的链接检查看到：
+# 文档搬家后这些字面量会静默变成 FileNotFoundError。这里把它们也纳入检查。
+LITERAL_DOC = re.compile(r"docs/[A-Za-z0-9_\-/]+\.md")
+LITERAL_ROOTS = ("src", "tests", "scripts")
+
+# 确实要引用旧路径（例如在注释里说明历史归档位置）的登记在这里，注释写原因。
+ALLOWED_STALE_LITERALS: dict[str, str] = {
+    # tests/test_prune_artifacts.py 在 tmp_path 下构造的合成目录，不是仓库里的真实路径。
+    "docs/archive/old/note.md": "prune 用例的合成受保护目录（tmp_path 下），非仓库路径",
+}
+
+
+def _literal_doc_paths(root: Path, roots: tuple[str, ...] = LITERAL_ROOTS) -> list[tuple[Path, int, str]]:
+    """(文件, 行号, 字面量路径) —— 按代码里出现的顺序，构造临时路径的行不算。"""
+    found = []
+    for name in roots:
+        base = root / name
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*.py")):
+            if path.resolve() == Path(__file__).resolve():
+                continue  # 本文件的字面量是扫描用例自己的夹具
+            for number, line in enumerate(_read(path).splitlines(), 1):
+                if "tmp_path" in line:
+                    continue  # 用例里用 tmp_path 拼出来的假路径，不是仓库路径
+                for match in LITERAL_DOC.finditer(line):
+                    found.append((path, number, match.group(0)))
+    return found
+
+
+def _doc_candidates(relative: str, root: Path) -> list[str]:
+    """同名文档在 docs/ 里的真实位置，用于给出搬家后的候选路径。"""
+    name = relative.rsplit("/", 1)[-1]
+    return sorted(
+        path.relative_to(root).as_posix()
+        for path in (root / "docs").rglob(name)
+        if path.is_file()
+    )
+
+
+def _stale_literal_problems(root: Path, roots: tuple[str, ...] = LITERAL_ROOTS) -> list[str]:
+    problems = []
+    for path, number, relative in _literal_doc_paths(root, roots):
+        if relative in ALLOWED_STALE_LITERALS:
+            continue
+        if (root / relative).is_file():
+            continue
+        candidates = _doc_candidates(relative, root)
+        if len(candidates) == 1:
+            hint = f"搬到 {candidates[0]}？"
+        elif candidates:
+            hint = "候选：" + "、".join(candidates[:5])
+        else:
+            hint = "docs/ 里没有同名文件，可能确实已删除"
+        problems.append(f"{path.relative_to(root)}:{number} 引用 {relative} 但该文件不存在（{hint}）")
+    return problems
+
+
+def test_literal_doc_paths_in_code_exist():
+    """src/、tests/、scripts/ 里写死的 docs/...md 路径必须存在。"""
+    problems = _stale_literal_problems(ROOT)
+    assert not problems, "代码里的文档路径失效：\n" + "\n".join(problems)
+
+
+def test_literal_doc_scanner_flags_missing_path(tmp_path):
+    """注入一条失效路径时必须被捕获，并给出同名的真实候选。"""
+    (tmp_path / "docs" / "features").mkdir(parents=True)
+    (tmp_path / "docs" / "REAL.md").write_text("# 真文档\n", encoding="utf-8")
+    (tmp_path / "docs" / "features" / "FEATURES.md").write_text("# 搬过家\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "broken.py").write_text(
+        'from pathlib import Path\n\nPath("docs/REAL.md").read_text(encoding="utf-8")\n'
+        'Path("docs/GONE.md").read_text(encoding="utf-8")\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "moved.py").write_text(
+        'Path("docs/FEATURES.md").read_text(encoding="utf-8")\n', encoding="utf-8"
+    )
+
+    problems = _stale_literal_problems(tmp_path)
+
+    assert len(problems) == 2, problems
+    assert "broken.py:4 引用 docs/GONE.md" in problems[0]
+    assert "docs/ 里没有同名文件" in problems[0]
+    assert "moved.py:1 引用 docs/FEATURES.md" in problems[1]
+    assert "docs/features/FEATURES.md" in problems[1]
+
+
+def test_literal_doc_scanner_accepts_live_path(tmp_path):
+    """路径存在时通过；tmp_path 拼出来的假路径不算仓库路径。"""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "MODEL.md").write_text("# 模型\n", encoding="utf-8")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "ok.py").write_text(
+        'Path("docs/MODEL.md").read_text(encoding="utf-8")\n'
+        '(tmp_path / "docs/not-there.md").write_text("x")\n',
+        encoding="utf-8",
+    )
+
+    assert _literal_doc_paths(tmp_path) == [(tmp_path / "scripts" / "ok.py", 1, "docs/MODEL.md")]
+    assert _stale_literal_problems(tmp_path) == []
+
+
+# 文档只绑「合同」（码、工具名、提示词 key、符号名），不绑「位置」：行号一改代码就过期。
+LINE_REF = re.compile(r"\.py:\d+")
+# 引用代码一律写成 文件::符号，符号名由下面的存在性检查兜住。
+SYMBOL_REF = re.compile(r"([A-Za-z0-9_./\-]+\.py)::([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _line_number_refs(root: Path) -> list[tuple[Path, int, str]]:
+    found = []
+    for path in sorted((root / "docs").rglob("*.md")):
+        for number, line in enumerate(_read(path).splitlines(), 1):
+            match = LINE_REF.search(line)
+            if match:
+                found.append((path, number, match.group(0)))
+    return found
+
+
+def _symbol_refs(path: Path) -> list[tuple[str, str]]:
+    return sorted(set(SYMBOL_REF.findall(_read(path))))
+
+
+def _stale_symbol_problems(root: Path, invariants: Path) -> list[str]:
+    problems = []
+    for relative, symbol in _symbol_refs(invariants):
+        target = root / relative
+        if not target.is_file():
+            problems.append(f"{relative}::{symbol} 已失效：文件不存在；若函数已改名或搬走，请同步 INVARIANTS")
+            continue
+        body = _read(target)
+        if not re.search(rf"^\s*(def|class)\s+{re.escape(symbol)}\b", body, re.M):
+            problems.append(f"{relative}::{symbol} 已失效：文件里找不到该函数或类；"
+                            f"若函数已改名，请同步 INVARIANTS")
+    return problems
+
+
+def test_docs_avoid_line_number_references():
+    """docs/**/*.md 里不得出现 `文件.py:行号`，改写成 `文件.py::符号`。"""
+    hits = _line_number_refs(ROOT)
+    detail = "\n".join(f"{path.relative_to(ROOT)}:{number} → {text}"
+                       f"（建议改成 文件::符号）" for path, number, text in hits)
+    assert not hits, "文档里出现了行号引用：\n" + detail
+
+
+def test_line_number_guard_flags_injected_reference(tmp_path):
+    """注入一行 `src/a.py:42` 时必须被捕获，并提示改成 文件::符号。"""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "NOTE.md").write_text(
+        "见 src/a.py:42 的校验。\n另见 `docs/x.py:7`。\n", encoding="utf-8")
+
+    hits = _line_number_refs(tmp_path)
+
+    assert [(number, text) for _, number, text in hits] == [(1, ".py:42"), (2, ".py:7")]
+    assert "改成 文件::符号" in "（建议改成 文件::符号）"
+
+
+def test_invariant_symbol_refs_exist():
+    """INVARIANTS.md 里的 `文件.py::符号` 必须文件存在且符号真实定义。"""
+    problems = _stale_symbol_problems(ROOT, INVARIANTS)
+    assert not problems, "INVARIANTS.md 的符号引用失效：\n" + "\n".join(problems)
+
+
+def test_symbol_guard_flags_injected_reference(tmp_path):
+    """注入「符号已改名」与「文件不存在」两种失效引用，都必须被捕获。"""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "src" / "narrative").mkdir(parents=True)
+    (tmp_path / "src" / "narrative" / "guard.py").write_text(
+        "def keep_me():\n    pass\n\n\nclass Still_Here:\n    pass\n", encoding="utf-8")
+    (tmp_path / "docs" / "INVARIANTS.md").write_text(
+        "| I-01 | a | `src/narrative/guard.py::keep_me` | `CODE` | t |\n"
+        "| I-02 | b | `src/narrative/guard.py::Still_Here` | `CODE` | t |\n"
+        "| I-03 | c | `src/narrative/guard.py::gone_away` | `CODE` | t |\n"
+        "| I-04 | d | `src/narrative/missing.py::keep_me` | `CODE` | t |\n",
+        encoding="utf-8")
+
+    problems = _stale_symbol_problems(tmp_path, tmp_path / "docs" / "INVARIANTS.md")
+
+    assert len(problems) == 2, problems
+    assert "guard.py::gone_away 已失效：文件里找不到该函数或类" in problems[0]
+    assert "missing.py::keep_me 已失效：文件不存在" in problems[1]
