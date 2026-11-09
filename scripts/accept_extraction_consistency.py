@@ -222,8 +222,8 @@ def run_once(run_dir: Path, story: str, provider: str, seconds: float) -> dict:
         "errors": "; ".join(errors),
         "event_count": len(dump["events"]),
         "scene_count": len(dump["scenes"]),
-        "scene_starts": [row["starts"][:1] for row in dump["scenes"]],
-        "event_starts": [row["starts"][:1] for row in dump["events"]],
+        "scene_starts": [first_start(row) for row in dump["scenes"]],
+        "event_starts": [first_start(row) for row in dump["events"]],
         "event_names": [row["name"] for row in dump["events"]],
         "counts": dump["counts"],
         "properties": dump["property_records"],
@@ -231,6 +231,59 @@ def run_once(run_dir: Path, story: str, provider: str, seconds: float) -> dict:
         "check": dump["check"],
         "tool_calls": [call["tool"] for call in calls],
         "usage": usage,
+    }
+
+
+def first_start(row: dict):
+    """一个节点最早的代表性证据起点；没有证据就返回 None（不计入边界统计）。"""
+    starts = [start for start in row.get("starts") or [] if isinstance(start, int)]
+    return min(starts) if starts else None
+
+
+def build_summary(runs: list[dict], label: str = "") -> dict:
+    """三次运行的汇总结论；与是否真的调用过模型无关，可离线重算。"""
+    starts = [[start for start in run["event_starts"] if isinstance(start, int)] for run in runs]
+    pairs = [
+        (i, j, jaccard(starts[i], starts[j]))
+        for i in range(len(starts))
+        for j in range(i + 1, len(starts))
+    ]
+    return {
+        "label": label,
+        "runs": runs,
+        "event_counts": [run["event_count"] for run in runs],
+        "scene_counts": [run["scene_count"] for run in runs],
+        "boundary_jaccard": [{"a": i + 1, "b": j + 1, "score": round(score, 3)} for i, j, score in pairs],
+        "mean_jaccard": round(sum(score for _, _, score in pairs) / len(pairs), 3) if pairs else None,
+        "duplicates": [run["duplicate_event_names"] for run in runs],
+        "errors": [run["errors"] for run in runs],
+    }
+
+
+def summarize_run_dir(run_dir: Path) -> dict:
+    """从一个已落盘的 run 目录重建该次运行的摘要（只用 graph.json/results.json）。"""
+    dump = json.loads((run_dir / "graph.json").read_text(encoding="utf-8"))
+    results_path = run_dir / "results.json"
+    results = json.loads(results_path.read_text(encoding="utf-8")) if results_path.is_file() else []
+    calls_path = run_dir / "tool-calls.json"
+    calls = json.loads(calls_path.read_text(encoding="utf-8")) if calls_path.is_file() else []
+    events, scenes = dump.get("events") or [], dump.get("scenes") or []
+    return {
+        "seconds": None,
+        "timed_out": False,
+        "errors": "",
+        "event_count": len(events),
+        "scene_count": len(scenes),
+        "scene_starts": [first_start(row) for row in scenes],
+        "event_starts": [first_start(row) for row in events],
+        "event_names": [row.get("name", "") for row in events],
+        "counts": dump.get("counts") or {},
+        "properties": dump.get("property_records"),
+        "duplicate_event_names": dump.get("duplicate_event_names") or {},
+        "check": dump.get("check") or {},
+        "tool_calls": [call.get("tool") for call in calls],
+        "usage": {},
+        "results_count": len(results) if isinstance(results, list) else 1,
     }
 
 
@@ -252,13 +305,21 @@ def main() -> int:
     parser.add_argument("--provider", default="opencode-go", choices=sorted(PROVIDERS))
     parser.add_argument("--story", type=Path, default=STORY)
     parser.add_argument("--label", default="")
+    parser.add_argument("--summarize-only", action="store_true",
+                        help="不调用模型，只对 output 目录里已有的 run 目录重算 summary.json")
     args = parser.parse_args()
 
     directory = args.output.resolve()
-    if directory.exists():
-        print(f"输出目录已存在，请换一个：{directory}", file=sys.stderr)
-        return 2
-    directory.mkdir(parents=True)
+    # --summarize-only 是对已有产物重算，目录必须已经存在；真跑才要求新目录。
+    if args.summarize_only:
+        if not directory.is_dir():
+            print(f"待重算的目录不存在：{directory}", file=sys.stderr)
+            return 2
+    else:
+        if directory.exists():
+            print(f"输出目录已存在，请换一个：{directory}", file=sys.stderr)
+            return 2
+        directory.mkdir(parents=True)
     story = args.story.read_text(encoding="utf-8")
     preset = PROVIDERS[args.provider]
     if not os.environ.get(preset["key_env"]):
@@ -289,32 +350,30 @@ def main() -> int:
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
+    if args.summarize_only:
+        run_dirs = sorted(path for path in directory.iterdir()
+                          if path.is_dir() and (path / "graph.json").is_file())
+        if not run_dirs:
+            print(f"{directory} 里没有可重算的 run 目录（需要 graph.json）", file=sys.stderr)
+            return 2
+        summary = build_summary([summarize_run_dir(path) for path in run_dirs], args.label)
+        (directory / "summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"事件数 {summary['event_counts']}  平均边界重合 {summary['mean_jaccard']}")
+        print(f"证据目录 {directory}")
+        return 0
+
     runs = []
     for index in range(1, args.runs + 1):
         run_dir = directory / f"run{index}"
         summary = run_once(run_dir, story, args.provider, args.seconds)
         runs.append(summary)
         print(f"run{index}: 事件 {summary['event_count']} 个, {summary['seconds']}s, "
-              f"tokens={summary['usage'].get('total_tokens')}, errors={summary['errors'] or '-'}")
-
-    starts = [run["event_starts"] for run in runs]
-    pairs = [
-        (i, j, jaccard(starts[i], starts[j]))
-        for i in range(len(starts))
-        for j in range(i + 1, len(starts))
-    ]
-    summary = {
-        "label": args.label,
-        "runs": runs,
-        "event_counts": [run["event_count"] for run in runs],
-        "scene_counts": [run["scene_count"] for run in runs],
-        "boundary_jaccard": [{"a": i + 1, "b": j + 1, "score": round(score, 3)} for i, j, score in pairs],
-        "mean_jaccard": round(sum(score for _, _, score in pairs) / len(pairs), 3) if pairs else None,
-        "duplicates": [run["duplicate_event_names"] for run in runs],
-        "errors": [run["errors"] for run in runs],
-    }
-    (directory / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"事件数 {summary['event_counts']}  平均边界重合 {summary['mean_jaccard']}")
+              f"tokens={summary['usage'].get('total_tokens')}")
+    combined = build_summary(runs, args.label)
+    (directory / "summary.json").write_text(
+        json.dumps(combined, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"事件数 {combined['event_counts']}  平均边界重合 {combined['mean_jaccard']}")
     print(f"证据目录 {directory}")
     return 0
 
