@@ -5,10 +5,9 @@ from narrative.prompt_defaults import DEFAULT_PROMPTS
 
 def test_shared_extraction_guide_requires_each_events_own_world_location():
     text = DEFAULT_PROMPTS['extraction']['text']
-    for expected in ['每个事件都必须', 'world', '地点', 'either', 'location', '“无”', '“未知”',
-                     'at_event必须指向该事件自身', '不能省略、臆造地点']:
+    for expected in ['每个事件都必须在自身事件处记录world', '地点', 'either', '“无”', '“未知”',
+                     'at_event必须指向该事件自身', '场景不记地点', '只有事件自身的 world 地点有效']:
         assert expected in text
-    assert '场景地点、participants或人物认知' in text
 
 
 def test_draft_value_contract_carries_location_reference_and_sentinel_choices():

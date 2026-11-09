@@ -16,7 +16,7 @@ def test_reference_prompt_is_concise_and_does_not_require_repeating_existing_nod
         initial=assistant._first_prompt("请补充已知人物的属性。", extraction_granularity=detail)
         prompt='\n'.join(row['text'] for row in tool_guidance(project, ['submit_extraction'])['guides'])
         assert "@1" in prompt and "@2" in prompt and "nodes数组从1开始" in prompt
-        assert "P1人物" in prompt and "E2事件" in prompt
+        assert "P1" in prompt and "E2" in prompt and "已有正式ID" in prompt
         assert "已有节点不必重列nodes或引文" in prompt
         assert "nodes:[]" in prompt and "properties直接引用P1/E2" in prompt
         assert "唯一名称可用" in prompt and "同名必须明确ID" in prompt

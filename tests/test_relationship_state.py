@@ -18,7 +18,7 @@ def draft():
     ]
     nodes += [
         {
-            "type": "event",
+            "type": "event", "location": "未知",
             "name": name,
             "scene": "朋友往来",
             "participants": ["甲", "乙", "丙"],
