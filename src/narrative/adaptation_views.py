@@ -11,6 +11,7 @@ import sqlite3
 from collections import Counter
 from contextlib import closing
 
+from . import property_categories
 from .browse_view import GRANULARITIES, LABELS, MOMENT_LEVELS, matches
 from .property_labels import label_for
 from .state_anchors import anchor_nodes
@@ -19,6 +20,8 @@ MOMENTS = set(LABELS)
 
 
 class _View:
+    state_time_includes_suppressed = False
+
     def __init__(self, snapshot):
         self.snapshot = snapshot
         self.nodes = {node["id"]: node for node in snapshot["nodes"]}
@@ -136,7 +139,9 @@ class _View:
         if cutoff not in self._state_cache:
             records = [row for row in self.snapshot["properties"] if row.get("kind") == "property_definition" or
                        (self.visible(row.get("node_id"), cutoff) and all(self.visible(target, cutoff) for target in self.targets(row)))]
-            self._state_cache[cutoff] = current_rows(self.snapshot | {"properties": records}, cutoff)
+            self._state_cache[cutoff] = current_rows(
+                self.snapshot | {"properties": records}, cutoff,
+                include_suppressed_events=self.state_time_includes_suppressed)
         return self._state_cache[cutoff]
 
     def record_visible(self, row, cutoff=None):
@@ -277,8 +282,9 @@ class _View:
             "is_current": True, "is_latest": False, "value_node": value_node,
             "event_name": self.nodes.get(row.get("event_id"), {}).get("name", ""),
             "holder_name": self.nodes.get(row.get("holder_id"), {}).get("name", ""),
-            "scope": row.get("scope", "world"), "category": row.get("category") or "其他",
-            "category_source": "explicit", "property_label": label_for(row["property_id"]),
+            "scope": row.get("scope", "world"), "category": row.get("category") or property_categories.UNCLASSIFIED,
+            "category_source": "explicit" if row.get("category") else "default_unclassified",
+            "property_label": label_for(row["property_id"]),
             "related": [ref for target in self.targets(row) if (ref := self.ref(target, cutoff, context))],
         }
 
@@ -311,7 +317,9 @@ class _View:
                 values.append(decorated)
             value = state.get("value")
             item = {"property_id": key[1], "property_ids": [key[1]], "aspect": key[1], "label": label_for(key[1]),
-                    "category": latest.get("category") or "其他", "category_source": "explicit", "other_categories": [],
+                    "category": latest.get("category") or property_categories.UNCLASSIFIED,
+                    "category_source": "explicit" if latest.get("category") else "default_unclassified",
+                    "other_categories": [],
                     "scope": key[3], "scopes": [key[3]], "context_id": key[2], "holder_id": key[4], "holder_name": self.nodes.get(key[4], {}).get("name", ""),
                     "value_type": definition.get("value_type", "any"), "cardinality": definition.get("cardinality", "one"),
                     "value": value, "value_node": self.ref(value, cutoff) if isinstance(value, str) and value in self.nodes else None,
@@ -327,7 +335,7 @@ class _View:
             if candidates:
                 source = max(candidates, key=self.record_key)
                 items.append({"property_id": progress[1], "property_ids": [progress[1]], "label": label_for(progress[1]),
-                              "category": "其他", "records": [], "value": source["value"], "derived": True,
+                              "category": property_categories.UNCLASSIFIED, "records": [], "value": source["value"], "derived": True,
                               "from_scene": self.ref(source["node_id"], cutoff), "is_current": True, "scope": "world"})
         categories = list(dict.fromkeys(item["category"] for item in items))
         inbound, claims, heard = [], [], []

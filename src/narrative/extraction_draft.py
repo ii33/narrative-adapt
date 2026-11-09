@@ -34,7 +34,7 @@ RESULT_SCHEMA = {
                 "big_event": {"type": "string", "description": "scene所属阶段性大事件的B编号或本批@序号"},
                 "storyline": {"type": "string", "description": "big_event所属已结束主要故事的T编号或本批@序号；未总结篇章可省略"},
             }, "additionalProperties": False}},
-        "properties": {"type": "array", "items": {"type": "object", "required": ["node", "property", "at_event", "op", "quotes"],
+        "properties": {"type": "array", "items": {"type": "object", "required": ["node", "property", "category", "at_event", "op", "quotes"],
             "properties": {
                 "node": {"type": "string", "description": "属性主体；身份、关系或作用角色中为参照方A"}, "property": {"type": "string", "description": "关系描述对方相对node的身份、关系或作用中的角色；node=A,property=父亲,value=B表示B是A的父亲；事件地点使用属性名‘地点’并引用地点节点"},
                 "op": {"type": "string", "enum": ["set", "add", "remove", "clear", "unknown"], "description": "在at_event处建立/设置、增添、移除、明确清空或变为未知；不填写有效期"},
@@ -42,7 +42,7 @@ RESULT_SCHEMA = {
                 "quotes": {"type": "array", "items": {"type": "string"}},
                 "cardinality": {"type": "string", "enum": ["one", "many"], "description": "新定义默认one；多值状态显式many且value为数组。已有定义省略沿用，显式冲突拒绝，须显式修改定义"},
                 "symmetric": {"type": "boolean", "description": "该关系性质对称时显式true；单向false，不按名称猜测"},
-                "category": {"type": "string"}, "scope": {"type": "string", "enum": ["world", "cognition", "claim"], "description": "world为原文支持的客观事实；事件地点为world；cognition为某人物所知所信/主观判断，claim为人物言说主张，二者须给holder；对白可有客观事实依据，不机械全记claim"},
+                "category": {"type": "string", "description": "必填：填该节点类型分类表里的一个大类；原文看不出归类时显式填「未分类」，程序不会按属性名或取值猜分类"}, "scope": {"type": "string", "enum": ["world", "cognition", "claim"], "description": "world为原文支持的客观事实；事件地点为world；cognition为某人物所知所信/主观判断，claim为人物言说主张，二者须给holder；对白可有客观事实依据，不机械全记claim"},
                 "holder": {"type": ["string", "null"], "description": "cognition的认知者或claim的说话人ID/@引用；node仍是被认知/被谈论的主体，可与holder不同；例如甲以为乙是教师：node乙、scope=cognition、holder甲；world不填"}, "source": {"type": "string"},
                 "related_nodes": {"type": "array", "items": {"type": "string"}},
                 "at_event": {"type": "string", "description": "必须给本次建立/变更/失效所在事件ID或@引用；程序按事件顺序推状态，sequence由已定位引文生成"},
@@ -158,6 +158,8 @@ def _draft_input_diagnostics(result):
         quotes = row.get('quotes')
         if not isinstance(quotes, list) or not quotes:
             issue(path + ['quotes'], '缺少非空quotes原文引文数组')
+        if not isinstance(row.get('category'), str) or not row['category'].strip():
+            issue(path + ['category'], '必须明确category：填该节点类型分类表里的一个大类，或显式填「未分类」；程序不猜分类')
     return issues
 
 

@@ -8,6 +8,62 @@ from datetime import UTC, datetime
 from . import property_categories, property_core
 from .property_audit import audit_properties
 
+# 静态检查的每条问题都要能"点得动"：target.kind 说明它该跳到哪一类对象上。
+# 前缀优先于码表，所以 EVENT_LOCATION_*、STORYLINE_* 这类族不需要逐个登记。
+_TARGET_KINDS_BY_PREFIX = (
+    ("EVENT_LOCATION_", "event_location"),
+    ("STORYLINE_", "storyline_range"),
+    ("BIG_EVENT_", "storyline_range"),
+)
+_TARGET_KINDS_BY_CODE = {
+    "PARTICIPANTS": "participants",
+    # 定义级：问题针对属性定义本身，没有节点或原文坐标。
+    "definition_unused": "property_definition",
+    "definition_missing": "property_definition",
+    "category_unknown": "property_definition",
+    # 引用级：问题在于某个引用指向不存在、歧义或不合法的对象。
+    "REF": "reference",
+    "NODE_REF": "reference",
+    "EVENT_REF": "reference",
+    "TARGET": "reference",
+    "COMPOSITE": "reference",
+    "EVENT_CHAIN": "reference",
+    "CONTAINMENT_CYCLE": "reference",
+    "EVENT_SCENE": "reference",
+    "ACTION_EVENT": "reference",
+    "ACTION_LEAF": "reference",
+    "TIME_REF": "reference",
+    "self_reference": "reference",
+    "name_variant": "reference",
+    "duplicate_value": "reference",
+    "repeated_value": "reference",
+    "relation_not_a_person": "reference",
+    "relation_pair_name": "reference",
+    "relation_untyped_reference": "reference",
+    "relation_same_both_ways": "reference",
+}
+
+
+def _target_kind(code: str, record: dict, node_id, property_id, records: dict, source_id=None) -> str:
+    # 判据只有一条：有定位对象才给具体 kind。项目级汇总（例如「27 条属性归入其他，
+    # 分布在 14 个节点」）身上没有任何 property_id/node_id/记录/来源，就不该伪装成
+    # 某一个定义或节点——否则界面会以为可以跳，实际无处可跳。
+    if not (node_id or property_id or record.get("id") or source_id):
+        return "project"
+    for prefix, kind in _TARGET_KINDS_BY_PREFIX:
+        if code.startswith(prefix):
+            return kind
+    kind = _TARGET_KINDS_BY_CODE.get(code)
+    if kind:
+        return kind
+    if record.get("kind") in {"property_change", "property_definition"}:
+        return record["kind"]
+    if node_id:
+        return "node"
+    if property_id and records.get(property_id, {}).get("kind") == "property_definition":
+        return "property_definition"
+    return "project"
+
 
 def _locate(issue: dict, objects: dict, records: dict, sources: dict) -> dict:
     result = dict(issue)
@@ -35,9 +91,11 @@ def _locate(issue: dict, objects: dict, records: dict, sources: dict) -> dict:
                               or (record.get("id") if record.get("kind") == "property_definition" else None),
                   record_ids=record_ids, record_id=record_ids[0] if record_ids else None,
                   source_id=source_id, start=start, end=end, quote=quote)
-    result["target"] = {"kind": "node" if node_id else "source" if source_id else "project",
+    result["target"] = {"kind": _target_kind(str(issue.get("code") or ""), record, node_id,
+                                             result["property_id"], records, source_id),
+                        "property_id": result["property_id"],
                         "node_id": node_id, "record_id": result["record_id"],
-                        "source_id": source_id, "start": start, "end": end}
+                        "source_id": source_id, "start": start, "end": end, "quote": quote}
     if 'path' not in result:
         if result['record_id']:
             result['path'] = ['property_records', result['record_id']]

@@ -3,6 +3,7 @@ import copy
 import sqlite3
 
 import pytest
+from agent_fixtures import LOCATION_DEFINITION, location_record
 
 from narrative.graph_models import Node
 from narrative.graph_store import GraphStore
@@ -28,7 +29,11 @@ def facts(tmp_path, monkeypatch):
     nodes = [obj(f'P{i}', 'person', name, QUOTES[0]) for i, name in enumerate(['甲', '乙', '丙'], 1)]
     nodes.append(obj('S1', 'scene', '会面后的变化', QUOTES[0], events=EVENTS))
     nodes += [obj(identifier, 'event', quote, quote, participants=['P1', 'P2', 'P3']) for identifier, quote in zip(EVENTS, QUOTES, strict=True)]
-    assert ops.apply_changes(nodes, [], ops.graph_project_info()['revision'], '事件事实fixture')['status'] == 'accepted'
+    locations = [LOCATION_DEFINITION] + [
+        location_record(identifier, sid, TEXT.index(quote), quote)
+        for identifier, quote in zip(EVENTS, QUOTES, strict=True)
+    ]
+    assert ops.apply_changes(nodes, locations, ops.graph_project_info()['revision'], '事件事实fixture')['status'] == 'accepted'
     return ops, sid
 
 
@@ -84,7 +89,7 @@ def test_many_collection_fold_and_unknown_baseline(facts):
     assert commit(ops, [definition('同行者', cardinality='many', value_type='node'), *rows])['status'] == 'accepted'
     result = ops.property_state('P1', '同行者')
     assert result['state'] == {'kind': 'known', 'value': ['P3']}
-    projection = projected_changes(ops.graph_snapshot(), ops.property_records())
+    projection = [r for r in projected_changes(ops.graph_snapshot(), ops.property_records()) if r['property_id'] == '同行者']
     assert projection[0]['value'] == ['P3'] and len(projection[0]['active_change_ids']) == 3
     nodes = {n['id']: n for n in ops.graph_snapshot()['nodes']}
     partial = reduce_changes([dict(rows[1], sequence=1)], definition('同行者', cardinality='many', value_type='node'), nodes, event_order=event_order(ops.graph_snapshot()))
@@ -118,7 +123,10 @@ def test_local_axis_and_scope_are_independent(facts):
 
 @pytest.mark.parametrize('bad', [
     {'kind': 'property_value', 'value': 'A'}, {'valid_to': None}, {'sequence': -1}, {'sequence': True},
-    {'event_id': 'missing'}, {'op': 'clear', 'value': 'forbidden'}, {'op': 'set', 'value': 'A', 'disclosure': {'source_id': 'missing', 'start': 0}}])
+    {'event_id': 'missing'}, {'op': 'clear', 'value': 'forbidden'}, {'op': 'set', 'value': 'A', 'disclosure': {'source_id': 'missing', 'start': 0}},
+    {'node_id': []}, {'property_id': []}, {'event_id': []}, {'op': {}},
+    {'context_id': []}, {'scope': []}, {'holder_id': [], 'scope': 'claim'},
+    {'evidence_spans': [{'source_id': 'missing', 'start': 0, 'end': 1, 'quote': 'x'}]}])
 def test_invalid_or_old_shapes_reject_atomically(facts, bad):
     ops, sid = facts
     before = ops.graph_snapshot(), ops.property_records()
@@ -147,11 +155,11 @@ def test_old_database_version_rejected_without_mutation(tmp_path):
 def test_direct_correction_delete_and_suffix_rollback_recompute_state(facts):
     ops, sid = facts
     assert commit(ops, [definition(), change(sid, 0, 'set', 'A'), change(sid, 1, 'set', 'B'), change(sid, 3, 'set', 'C')])['status'] == 'accepted'
-    record = next(r for r in ops.property_records() if r.get('event_id') == 'E1')
+    record = next(r for r in ops.property_records() if r.get('event_id') == 'E1' and r.get('property_id') == '称呼')
     ops.correct_property(record['id'], {'value': '修正B'}, '录入勘误', expected_revision=ops.graph_project_info()['revision'])
     corrected = next(r for r in ops.property_records() if r['id'] == record['id'])
     assert corrected['sequence'] == record['sequence'] and corrected['value'] == '修正B'
-    ops.delete_property_records([next(r['id'] for r in ops.property_records() if r.get('event_id') == 'E3')], '删错误事实', expected_revision=ops.graph_project_info()['revision'])
+    ops.delete_property_records([next(r['id'] for r in ops.property_records() if r.get('event_id') == 'E3' and r.get('property_id') == '称呼')], '删错误事实', expected_revision=ops.graph_project_info()['revision'])
     assert ops.property_state('P1', '称呼')['state']['value'] == '修正B'
     result = ops.rollback_to(sid, TEXT.index(QUOTES[0]), ops.graph_project_info()['revision'], '删除后续披露')
     assert result['valid'] and ops.property_state('P1', '称呼')['state']['value'] == 'A'
@@ -168,22 +176,6 @@ def test_node_cards_show_change_history_and_derived_state(facts):
     assert len(item['records']) == 2 and [r['is_current'] for r in item['records']] == [False, True]
     assert [r['op'] for r in item['records']] == ['set', 'set']
     assert all('valid_to' not in r for r in item['records'])
-
-
-@pytest.mark.parametrize('bad', [{'node_id': []}, {'property_id': []}, {'event_id': []}, {'op': {}},
-                                  {'context_id': []}, {'scope': []}, {'holder_id': [], 'scope': 'claim'},
-                                  {'evidence_spans': [{'source_id': 'missing', 'start': 0, 'end': 1, 'quote': 'x'}]}])
-def test_malformed_typed_references_are_diagnostics_not_partial_writes(facts, bad):
-    ops, sid = facts
-    before = ops.graph_snapshot(), ops.property_records()
-    if 'node_id' in bad or 'event_id' in bad:
-        from narrative.content_errors import ContentGuardError
-        with pytest.raises(ContentGuardError):
-            commit(ops, [definition(), change(sid, 0, 'set', 'A') | bad])
-    else:
-        result = commit(ops, [definition(), change(sid, 0, 'set', 'A') | bad])
-        assert result['status'] == 'staged'
-    assert (ops.graph_snapshot(), ops.property_records()) == before
 
 
 def test_same_position_commuting_collection_edits_do_not_require_arbitrary_order(facts):
@@ -206,3 +198,41 @@ def test_missing_id_on_non_allocated_or_obsolete_record_is_rejected_without_cras
     result = commit(ops, [record])
     assert result['status'] == 'staged' and result['diagnostics']
     assert (ops.graph_snapshot(), ops.property_records()) == before
+
+
+def _world_identity(sid, index, value):
+    return change(sid, index, 'set', value, '身份')
+
+
+def test_cognition_is_never_filled_from_world_facts(facts):
+    """防的是「派生时把 world 事实当成某人的认知」——没有记录就该是未记录。"""
+    ops, sid = facts
+    assert commit(ops, [definition('身份'), _world_identity(sid, 0, '掌门')])['status'] == 'accepted'
+    assert ops.property_state('P1', '身份')['state'] == {'kind': 'known', 'value': '掌门'}
+    # 乙从没被交代过这件事：既不是掌门，也不是「未知」这种否定事实，而是「未记录」。
+    state = ops.property_state('P1', '身份', scope='cognition', holder_id='P2')['state']
+    assert state == {'kind': 'unrecorded'}
+
+
+def test_cognition_does_not_follow_later_world_changes(facts):
+    """防的是「跟随 world 变化自动改写认知」——世界事实变了，认知仍应保持未记录。"""
+    ops, sid = facts
+    assert commit(ops, [definition('身份'), _world_identity(sid, 0, '掌门')])['status'] == 'accepted'
+    assert ops.property_state('P1', '身份', scope='cognition', holder_id='P2')['state'] == {'kind': 'unrecorded'}
+    assert commit(ops, [_world_identity(sid, 1, '客卿')])['status'] == 'accepted'
+    assert ops.property_state('P1', '身份')['state'] == {'kind': 'known', 'value': '客卿'}
+    assert ops.property_state('P1', '身份', scope='cognition', holder_id='P2')['state'] == {'kind': 'unrecorded'}
+
+
+def test_cognition_appears_only_with_an_explicit_record_and_is_not_corrected(facts):
+    """防的是「拿 world 值校正角色认知」——显式认知照原样返回，即使与事实不同。"""
+    ops, sid = facts
+    rows = [definition('身份'), _world_identity(sid, 0, '掌门'),
+            change(sid, 1, 'set', '散修', '身份', id='cognition-p2', scope='cognition', holder_id='P2')]
+    assert commit(ops, rows)['status'] == 'accepted'
+    assert ops.property_state('P1', '身份')['state'] == {'kind': 'known', 'value': '掌门'}
+    # 乙在 E1 处知道的「身份」是他听说的散修，不因事实是掌门被覆盖或校正。
+    assert ops.property_state('P1', '身份', 'E1', scope='cognition', holder_id='P2')['state'] == {
+        'kind': 'known', 'value': '散修'}
+    # 别人（P3）没有这条认知，依旧是未记录。
+    assert ops.property_state('P1', '身份', 'E1', scope='cognition', holder_id='P3')['state'] == {'kind': 'unrecorded'}

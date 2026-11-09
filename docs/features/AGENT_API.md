@@ -71,7 +71,7 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 `Operations.check_project()` 与 `check_project` 工具在一个只读事务内采样固定修订，统一检查结构、证据、引用、活动属性定义、事件归属及物品持有者等约束。已失效的历史记录仅作为引用背景，不误当成当前违规；运行不创建候选、不提升修订号。
 返回 `checked_revision`、`current_revision`、严重级别计数和问题列表。问题携带可用的节点、属性记录及原文范围定位；无法唯一定位的引文不伪造高亮。左侧静态检查页可手动运行、筛选、查看详情和跳转，工程发生新修订时标明结果过期。
 
-检查错误统一保留 `message/reason`（具体原因）、`path`（原始字段路径数组）、`location`（可读路径）、`location_scope` 和可用的 `target`。提取路径相对原始 `result`，例如 `["nodes",2,"quotes"]`；通用内容路径相对操作参数，不混入模型类型标签。引用问题用 `related_paths` 指向被引用条目的根因，不能用后续引用错误盖住原始缺失引文等问题。路径索引沿用原始输入，不按解析或排序后的结果重编号。全局约束明确标为整体提交并说明范围，不伪造具体修补字段；工程静态检查用对象或属性记录ID定位，保留原文来源和坐标。
+检查错误统一保留 `message/reason`（具体原因）、`path`（原始字段路径数组）、`location`（可读路径）、`location_scope` 和可用的 `target`。`target.kind` 说明这条问题该跳到哪一类对象：`property_definition`、`property_change`、`node`、`event_location`、`participants`、`reference`、`storyline_range`；确实没有可定位对象时为 `project`，界面按工程级显示。判据是「有定位对象才给具体 kind」——只有身上带节点、属性记录、属性定义或原文来源时才落到具体类型；像「有 27 条属性暂时归入其他，分布在 14 个节点」这类全工程汇总没有任何定位字段，一律 `project`，不得沿用码名的前缀或默认值猜成某个定义或节点。`target` 同时带上 `property_id`／`node_id`／`record_id`／`source_id`／`start`／`end`／`quote`，与顶层的同名字段一致，只取既有证据、不新算坐标。提取路径相对原始 `result`，例如 `["nodes",2,"quotes"]`；通用内容路径相对操作参数，不混入模型类型标签。引用问题用 `related_paths` 指向被引用条目的根因，不能用后续引用错误盖住原始缺失引文等问题。路径索引沿用原始输入，不按解析或排序后的结果重编号。全局约束明确标为整体提交并说明范围，不伪造具体修补字段；工程静态检查用对象或属性记录ID定位，保留原文来源和坐标。
 
 ## 通用工程读写
 

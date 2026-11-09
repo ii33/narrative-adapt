@@ -190,7 +190,7 @@ def relation_project(tmp_path, monkeypatch):
 
 
 
-        'properties': [{'node': '林岚', 'property': '朋友', 'value': other, 'value_type': 'node', 'cardinality': 'many', 'at_event': '三人见面', 'op': 'set', 'quotes': [text]} for other in ['许禾', '周宁']]}
+        'properties': [{'node': '林岚', 'property': '朋友'  , "category": "未分类", 'value': other, 'value_type': 'node', 'cardinality': 'many', 'at_event': '三人见面', 'op': 'set', 'quotes': [text]} for other in ['许禾', '周宁']]}
 
 
 
@@ -414,7 +414,7 @@ def test_extraction_explicit_many_keeps_two_friends_and_omission_keeps_definitio
 
 
 
-    inherited = {'nodes': [], 'properties': [{'node': names['周宁'], 'property': '朋友', 'value': [names['林岚']],
+    inherited = {'nodes': [], 'properties': [{'node': names['周宁'], 'property': '朋友', "category": "未分类"  , 'value': [names['林岚']],
 
 
 

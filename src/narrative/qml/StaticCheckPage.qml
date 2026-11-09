@@ -40,6 +40,83 @@ Item {
     function severityText(value) {
         return ({error: "错误", warning: "警告", info: "提示"})[value] || value
     }
+    function severityColor(value) {
+        return value === "error" ? page.t.bad : value === "warning" ? page.t.warn : page.t.muted
+    }
+    readonly property var targetKindLabels: ({
+        property_definition: "属性定义", property_change: "属性取值", node: "节点",
+        event_location: "事件地点", participants: "参与者", reference: "引用",
+        storyline_range: "故事线区间", project: "工程"
+    })
+    // 定位字段可能在新的 target 块里，也可能还只写在顶层；两边都读，缺哪个就降级到下一个。
+    function issueTarget(issue) {
+        var row = issue || ({})
+        var target = row.target || ({})
+        function pick(key) {
+            var value = target[key]
+            return value === undefined || value === null || value === "" ? row[key] : value
+        }
+        return {
+            kind: String(target.kind || ""),
+            propertyId: String(pick("property_id") || ""),
+            nodeId: String(pick("node_id") || ""),
+            sourceId: String(pick("source_id") || ""),
+            recordId: String(pick("record_id") || ""),
+            quote: String(pick("quote") || ""),
+            start: pick("start"),
+            end: pick("end")
+        }
+    }
+    function issueNodeName(issue) {
+        var row = issue || ({})
+        return String(row.node_name || row.object_name || row.name || "")
+    }
+    // 每条问题的来源标签：属性 → 节点 → 原文坐标 → 工程，越具体的越优先。
+    function issueSourceText(issue) {
+        var target = page.issueTarget(issue)
+        var kindLabel = page.targetKindLabels[target.kind] || ""
+        var nodeName = page.issueNodeName(issue)
+        if (target.propertyId) {
+            var named = (kindLabel || "属性") + "「" + target.propertyId + "」"
+            return target.nodeId ? named + " · 节点 " + (nodeName || target.nodeId) : named
+        }
+        if (target.nodeId)
+            return "节点 " + (nodeName || target.nodeId) + (nodeName ? "（" + target.nodeId + "）" : "")
+        if (target.sourceId) {
+            var offset = target.start === undefined || target.start === null ? "" : " · 偏移 " + target.start
+            if (offset && target.end !== undefined && target.end !== null) offset += "–" + target.end
+            return "原文 " + target.sourceId + offset
+        }
+        return "工程"
+    }
+    function issueJumpable(issue) {
+        var target = page.issueTarget(issue)
+        if (target.kind === "project") return false
+        return !!target.nodeId || !!target.sourceId || !!target.propertyId
+    }
+    // 定位接口读顶层字段，这里把 target 里的字段摊回顶层，老格式（字段直接在顶层）原样通过。
+    function issueForJump(issue) {
+        var merged = ({})
+        var row = issue || ({})
+        for (var key in row) merged[key] = row[key]
+        var target = page.issueTarget(issue)
+        if (target.nodeId) merged.node_id = target.nodeId
+        if (target.sourceId) merged.source_id = target.sourceId
+        if (target.propertyId) merged.property_id = target.propertyId
+        if (target.quote) merged.quote = target.quote
+        if (target.start !== undefined && target.start !== null) merged.start = target.start
+        if (target.end !== undefined && target.end !== null) merged.end = target.end
+        return merged
+    }
+    // 有节点跳节点、有原文坐标跳原文；只有属性时按属性定义记录聚焦（浏览页没有按属性筛的入口）。
+    function jumpIssue(issue) {
+        if (!page.issueJumpable(issue)) return
+        var target = page.issueTarget(issue)
+        var merged = page.issueForJump(issue)
+        if (target.nodeId) { bridge.resolveStaticIssue(merged, "node", ""); return }
+        if (target.sourceId) { bridge.resolveStaticIssue(merged, "source", ""); return }
+        bridge.resolveStaticIssue(merged, "record", target.propertyId || target.recordId)
+    }
 
     Connections {
         target: bridge
@@ -206,6 +283,8 @@ Item {
                 objectName: "staticCheckIssue"
                 required property var modelData
                 readonly property var issue: modelData
+                readonly property bool jumpable: page.issueJumpable(issue)
+                readonly property var jumpTarget: page.issueTarget(issue)
                 width: ListView.view.width
                 height: content.implicitHeight + 20
                 radius: 6
@@ -215,15 +294,43 @@ Item {
                     anchors.left: parent.left; anchors.right: parent.right
                     anchors.top: parent.top; anchors.margins: 10
                     spacing: 6
-                    Label {
+                    Rectangle {
+                        id: issueHeader
                         Layout.fillWidth: true
-                        text: page.severityText(issueRow.issue.severity) + " · " + issueRow.issue.code
-                            + " · " + (issueRow.issue.object_name || issueRow.issue.node_name
-                                       || issueRow.issue.node_id || issueRow.issue.object_id || "工程")
-                        color: issueRow.issue.severity === "error" ? page.t.bad
-                            : issueRow.issue.severity === "warning" ? page.t.warn : page.t.muted
-                        wrapMode: Text.Wrap
-                        font.weight: Font.DemiBold
+                        implicitHeight: headerRow.implicitHeight + 6
+                        radius: 4
+                        color: headerHover.hovered && issueRow.jumpable ? page.t.hover : "transparent"
+                        RowLayout {
+                            id: headerRow
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.leftMargin: 2; anchors.rightMargin: 2
+                            spacing: 8
+                            Label {
+                                objectName: "staticCheckIssueSource"
+                                Layout.fillWidth: true
+                                text: page.severityText(issueRow.issue.severity) + " · " + page.issueSourceText(issueRow.issue)
+                                color: page.severityColor(issueRow.issue.severity)
+                                wrapMode: Text.Wrap
+                                font.weight: Font.DemiBold
+                            }
+                            Label {
+                                objectName: "staticCheckIssueCode"
+                                text: issueRow.issue.code || ""
+                                font.pixelSize: 11
+                                color: page.t.muted
+                                topPadding: 3; bottomPadding: 3; leftPadding: 6; rightPadding: 6
+                                background: Rectangle { radius: 4; color: page.t.panelAlt; border.color: page.t.line }
+                            }
+                        }
+                        HoverHandler {
+                            id: headerHover
+                            cursorShape: issueRow.jumpable ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        }
+                        TapHandler {
+                            enabled: issueRow.jumpable
+                            onTapped: page.jumpIssue(issueRow.issue)
+                        }
                     }
                     Label { Layout.fillWidth: true; text: issueRow.issue.message || ""; wrapMode: Text.Wrap; color: page.t.body }
                     Flow {
@@ -232,9 +339,17 @@ Item {
                         spacing: 6
                         Button {
                             objectName: "staticCheckNode"
-                            visible: !!issueRow.issue.node_id
+                            visible: !!issueRow.jumpTarget.nodeId
                             text: "查看节点"
-                            onClicked: bridge.resolveStaticIssue(issueRow.issue, "node", "")
+                            onClicked: bridge.resolveStaticIssue(page.issueForJump(issueRow.issue), "node", "")
+                        }
+                        Button {
+                            objectName: "staticCheckProperty"
+                            visible: !!issueRow.jumpTarget.propertyId && !issueRow.jumpTarget.nodeId
+                                && !issueRow.jumpTarget.sourceId
+                            text: "查看属性定义"
+                            onClicked: bridge.resolveStaticIssue(page.issueForJump(issueRow.issue), "record",
+                                issueRow.jumpTarget.propertyId || issueRow.jumpTarget.recordId)
                         }
                         Repeater {
                             model: issueRow.issue.record_ids || []
@@ -242,14 +357,14 @@ Item {
                                 objectName: "staticCheckRecord"
                                 required property string modelData
                                 text: "属性记录 " + modelData
-                                onClicked: bridge.resolveStaticIssue(issueRow.issue, "record", modelData)
+                                onClicked: bridge.resolveStaticIssue(page.issueForJump(issueRow.issue), "record", modelData)
                             }
                         }
                         Button {
                             objectName: "staticCheckSource"
-                            visible: !!issueRow.issue.source_id
+                            visible: !!issueRow.jumpTarget.sourceId
                             text: "查看原文引文"
-                            onClicked: bridge.resolveStaticIssue(issueRow.issue, "source", "")
+                            onClicked: bridge.resolveStaticIssue(page.issueForJump(issueRow.issue), "source", "")
                         }
                     }
                 }

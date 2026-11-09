@@ -938,8 +938,8 @@ def build_extraction(ops, data: dict) -> dict:
         # the event; it still only locates the disclosure, not the story change.
         if prop.get("source"):
             record["source"] = str(prop["source"])
-        # The category the model chose. It is a suggestion: a human can move the
-        # record later, and an absent one simply resolves to 其他.
+        # The category the model chose. 草稿层已要求必填（含显式「未分类」）：
+        # 程序不猜分类，人可以在浏览页之后把记录移到大类。
         if prop.get("category"):
             record["category"] = prop["category"]
         # Who else the sentence involves. Resolved to ids; unknown names drop out

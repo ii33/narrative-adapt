@@ -184,7 +184,7 @@ def audit_properties(
         category, category_source = property_categories.resolve(
             record, node_type, categories, overrides
         )
-        if category_source == "fallback":
+        if category_source == "default_unclassified":
             unclassified[node_id] += 1
         elif category not in property_categories.vocabulary_for(node_type, categories):
             issues.append(_issue(
@@ -198,9 +198,9 @@ def audit_properties(
         total = sum(unclassified.values())
         issues.append(_issue(
             "category_unassigned", INFO,
-            f"有 {total} 条属性暂时归入「其他」，分布在 {len(unclassified)} 个节点",
+            f"有 {total} 条属性未分类，分布在 {len(unclassified)} 个节点",
             records=None,
-            suggestion="在浏览页把它们移到合适的大类；拿不准就留在「其他」，不影响取值",
+            suggestion="在浏览页选一个大类，或显式保留未分类；分类不影响取值",
         ))
 
     for record in values_all:
