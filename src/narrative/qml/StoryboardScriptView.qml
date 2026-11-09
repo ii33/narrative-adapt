@@ -273,7 +273,7 @@ SplitView {
                     required property int index
                     Layout.fillWidth:true
                     RowLayout {
-                        ComboBox { model:["人物","道具","场景"];currentIndex:["person","prop","set"].indexOf(modelData.kind);enabled:description.enabled;onActivated:script.elements[index].kind=["person","prop","set"][currentIndex] }
+                        ComboBox { model:["人物","道具","布景"];currentIndex:["person","prop","set"].indexOf(modelData.kind);enabled:description.enabled;onActivated:script.elements[index].kind=["person","prop","set"][currentIndex] }
                         TextField { text:modelData.name||"";placeholderText:"名称";Layout.fillWidth:true;enabled:description.enabled;onTextEdited:script.elements[index].name=text }
                         Button { text:"移除";enabled:description.enabled;onClicked:script.elements=script.elements.filter((e,i)=>i!==index) }
                     }

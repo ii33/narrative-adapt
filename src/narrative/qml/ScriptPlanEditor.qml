@@ -27,7 +27,7 @@ Dialog {
         plan=Object.assign({},plan,{source_event_ids:selected});
     }
     modal: true; width: Math.min(820, host.width-40); height: Math.min(740,host.height-30); anchors.centerIn: parent
-    title: creating ? "新增场次 / 画面段" : "编辑场表 · " + (unit.plan.title || "未命名场次")
+    title: creating ? "新增场次 / 画面段" : "编辑场表 · " + ((unit.plan || {}).title || "未命名场次")
     function openFor(value) {
         if(visible&&!contentSubmission.restoring)contentSubmission.begin();
         unit=value || ({}); creating=!unit.id; plan=Object.assign({},unit.plan || {})
@@ -58,7 +58,7 @@ Dialog {
             width: parent.width; spacing: 8
             Label { visible: !!editor.errorText; text: editor.errorText; color: t.bad; wrapMode: Text.Wrap; Layout.fillWidth:true }
             Label {objectName:"scriptSceneTableGuide";text:"按创作需要编写或修改内容。对话使用工程设置中的提示词，已有内容可反复编辑。场表所有字段都会供写作参考，请与当前事件线核对。";color:t.muted;wrapMode:Text.Wrap;Layout.fillWidth:true}
-            RowLayout { ComboBox { id: kind; model:["普通场景","独立画面段"] } TextField { id:number; placeholderText:"场号"; Layout.preferredWidth:100 } CheckBox { id:enabledBox; text:"纳入输出与批量" } }
+            RowLayout { ComboBox { id: kind; model:["普通场次","独立画面段"] } TextField { id:number; placeholderText:"场号"; Layout.preferredWidth:100 } CheckBox { id:enabledBox; text:"纳入输出与批量" } }
             TextField { id:titleField; objectName:"scriptPlanTitle"; placeholderText:"场表标题"; Layout.fillWidth:true }
             TextArea { id:summary; objectName:"scriptPlanSummary"; placeholderText:"剧情概要（必填）"; wrapMode:TextEdit.Wrap; Layout.fillWidth:true; Layout.preferredHeight:90 }
             RowLayout { ComboBox { id:interior; model:["UNSPECIFIED","INT","EXT","INT_EXT"] } TextField { id:location; placeholderText:"地点文字"; Layout.fillWidth:true } TextField { id:time; placeholderText:"时间，如夜 / 连续"; Layout.fillWidth:true } }

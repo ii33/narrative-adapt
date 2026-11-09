@@ -120,6 +120,22 @@ Item {
     property var pickedPath: []
     property string pickedId: ""
     property var vocabulary: []        // 当前节点类型的分类表
+    property var categoryVocabulary: ({})   // 后端分类词表：节点类型 -> 分类名列表，末项固定是未分类
+    // 未分类的名字只认后端词表（property_categories.UNCLASSIFIED 是每种类型的末项）；
+    // 词表还没到手时回落到字面量「未分类」——后端词表兜底值，见 property_categories.UNCLASSIFIED。
+    readonly property string unclassifiedLabel: {
+        var nodeType = page.detail.node ? page.detail.node.node_type : "other"
+        var words = (page.categoryVocabulary || ({}) )[nodeType] || []
+        if (words.length > 0) return String(words[words.length - 1])
+        // 还没取到词表时，当前节点上未分类的记录也知道自己属于哪一组。
+        var groups = page.categoryGroups || []
+        for (var g = 0; g < groups.length; ++g) {
+            var items = groups[g].items || []
+            for (var i = 0; i < items.length; ++i)
+                if (items[i].categorySource === "default_unclassified") return String(groups[g].label)
+        }
+        return "未分类"
+    }
     property bool groupByCategory: true
     // 属性区回答哪个问题：latest = 这一刻的状态；all = 到这里为止说过的全部，
     // 失效的也列出来并逐条标注。两者在能失效之后就不是一回事了。
@@ -144,9 +160,18 @@ Item {
     property string appliedCut: ""
     property string pendingFocus: ""
 
+    // 分类词表只取一次：它决定「未分类」在界面上的名字，也决定大类下拉里有哪些可选项。
+    property bool categoryVocabularyLoaded: false
+    function loadCategoryVocabulary() {
+        if (page.categoryVocabularyLoaded || app.mode !== "workspace") return
+        page.categoryVocabularyLoaded = true
+        bridge.loadPropertyCategories()
+    }
+
     // 查询、过滤、计数、切点解析都在后端：界面只提交条件并渲染结果。
     function load() {
         if (adaptationMode && !visible) return
+        page.loadCategoryVocabulary()
         var spec = {
             granularity: page.granularity,
             cut_id: page.cutId,
@@ -605,7 +630,8 @@ Item {
             label: item.label || page.propertyLabels[item.property_id] || item.property_id || "",
             names: (item.property_ids || []).length > 1 ? item.property_ids.join(" / ") : "",
             nameIds: item.property_ids || [],
-            category: item.category || "其他",
+            // 后端没给分类的记录一律算未分类：名字取后端词表，不在界面里写死旧词。
+            category: item.category || page.unclassifiedLabel,
             categorySource: item.category_source || "",
             otherCategories: item.other_categories || [],
             recordIds: ids,
@@ -725,7 +751,8 @@ Item {
         addValueType.currentIndex = 0
         addOperation.currentIndex=0
         addQuoteField.text = ""
-        addCategoryField.currentIndex = Math.max(0, page.vocabulary.indexOf("其他"))
+        // 找不到未分类就保持 -1（下拉空着，让用户自己选），不静默落到第一项。
+        addCategoryField.currentIndex = page.vocabulary.indexOf(page.unclassifiedLabel)
         // 停在某个阅读位置时，补的就是「此刻」：默认披露在这个事件，而不是第一个事件。
         var here = page.cutEventId.length > 0 ? page.eventIndex(page.cutEventId) : -1
         addEventField.currentIndex = here >= 0 ? here : 0
@@ -764,7 +791,8 @@ Item {
         var names = []
         for (var i = 0; i < lines.length; ++i) {
             var name = lines[i].trim()
-            if (name.length > 0 && name !== "其他" && names.indexOf(name) < 0) names.push(name)
+            // 未分类是后端词表的固定末项，不写进配置。
+            if (name.length > 0 && name !== page.unclassifiedLabel && names.indexOf(name) < 0) names.push(name)
         }
         if (names.length === 0) {
             app.toast("至少要保留一个大类", true)
@@ -910,7 +938,8 @@ Item {
                 }
             } else if (kind === "property_categories") {
                 var nodeType = page.detail.node ? page.detail.node.node_type : "other"
-                page.vocabulary = (payload.vocabulary || ({}) )[nodeType] || page.vocabulary
+                page.categoryVocabulary = payload.vocabulary || ({})
+                page.vocabulary = page.categoryVocabulary[nodeType] || page.vocabulary
                 if (payload.saved) {
                     app.toast("分类表已保存", false)
                     if (page.selectedId.length > 0) page.io.loadNodeProperties(page.selectedId)
@@ -1642,7 +1671,8 @@ Item {
                                         spacing: 6
 
                                         Label {
-                                            text: modelData.category
+                                            // 反向记录的行也带分类；后端没给就是未分类。
+                                            text: modelData.category || page.unclassifiedLabel
                                             color: t.muted
                                             font.pixelSize: 10
                                             Layout.preferredWidth: 76
@@ -2596,7 +2626,7 @@ Item {
         }
     }
 
-    // 分类表：每行一个大类，顺序即显示顺序；「其他」固定在最后。
+    // 分类表：每行一个大类，顺序即显示顺序；未分类固定在最后。
     Dialog {
         id: categoryDialog
         objectName: "categoryDialog"
@@ -2611,7 +2641,7 @@ Item {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: "每行一个大类，顺序即显示顺序。「其他」始终在最后，不用写。"
+                text: "每行一个大类，顺序即显示顺序。「" + page.unclassifiedLabel + "」始终在最后，不用写。"
                 color: t.muted
                 font.pixelSize: 11
             }

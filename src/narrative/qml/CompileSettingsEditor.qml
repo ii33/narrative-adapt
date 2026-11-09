@@ -19,7 +19,7 @@ Dialog {
     property bool loaded: false
     property string message: ""
     readonly property var kinds: ["scene", "speaker", "dialogue", "action", "scene_description"]
-    readonly property var labels: ["场景标题", "说话人", "对白", "动作", "场景描写"]
+    readonly property var labels: ["场次标题", "说话人", "对白", "动作", "场景描写"]
     readonly property var alignments: ["left", "center", "right", "justify"]
     title: "剧本编译排版设置"
     modal: true

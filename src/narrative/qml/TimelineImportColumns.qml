@@ -35,7 +35,6 @@ Item {
         return index
     }
     readonly property int includedCount: candidates.filter(function(row) { return selectedIds[row.id] || inherited(row) }).length
-    onCandidatesChanged: focused = ({})
     function diagnosticText(rows) {
         return (rows || []).map(function(row) {
             return (row.code === "source_interval_conflict" ? "来源已有属性区间冲突，请核对：" : "") + (row.message || row.code || "")
@@ -63,6 +62,16 @@ Item {
             return row.node_type === types[level] && (!parent || descendant(row, parent))
         })
     }
+    // 每级行只在数据真的变化时重算一次，不让绑定在无关刷新（弹层第一次布局等）时
+    // 重新求值：ListView 的 model 换成新数组就会销毁并重建全部 delegate，外部刚拿到
+    // 的行项会变成悬空对象，勾选状态与点击也会落在被换掉的那一批上。
+    property var rowsByLevel: [[], [], [], [], []]
+    function refreshRows() {
+        rowsByLevel = types.map(function(value, level) { return rowsFor(level) })
+    }
+    onFocusedChanged: if (candidates.length) refreshRows()
+    onCandidatesChanged: { focused = ({}); refreshRows() }
+    Component.onCompleted: refreshRows()
     function focusLevel(level, id) {
         var next = Object.assign({}, focused)
         for (var i = level; i < types.length; ++i) delete next[i]
@@ -126,7 +135,9 @@ Item {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 clip: true
-                                model: picker.rowsFor(level)
+                                // 高度还没确定时不建 delegate：否则首批行会以 0 高度建出来，
+                                // 下一帧拿到真实高度再整批销毁重建，外部持有的行项就成了悬空对象。
+                                model: height > 0 ? picker.rowsByLevel[level] : []
                                 spacing: 2
                                 Label { anchors.centerIn: parent; width: parent.width - 12; visible: parent.count === 0; text: Object.keys(picker.focused).length ? "当前范围无匹配" + picker.labels[level] : "暂无" + picker.labels[level]; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; color: picker.t.muted; font.pixelSize: 11 }
                                 ScrollBar.vertical: ScrollBar {}

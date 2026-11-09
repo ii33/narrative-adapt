@@ -602,7 +602,7 @@ ListView {
             CheckBox{id:showTargetIds;text:"显示目标定位编号";checked:false}
             Label{objectName:"scriptWritingTargetIds";visible:showTargetIds.checked;text:(page.writingTarget.ids||[]).join("\n");wrapMode:Text.Wrap;Layout.fillWidth:true;color:t.muted;font.pixelSize:11}
             Label{text:"仅修改本次固定目标；后续页面选择不会改变已发出的任务。";color:t.muted;wrapMode:Text.Wrap;Layout.fillWidth:true}
-            CheckBox {text:page.writingTarget.target_manifest?"固定批量：仅正文为空的启用普通场景":"允许修改目标范围内已有正文";checked:page.writingTarget.include_existing===true;enabled:!page.writingTarget.target_manifest;onToggled:{var target=Object.assign({},page.writingTarget);target.include_existing=checked;page.writingTarget=target}}
+            CheckBox {text:page.writingTarget.target_manifest?"固定批量：仅正文为空的启用普通场次":"允许修改目标范围内已有正文";checked:page.writingTarget.include_existing===true;enabled:!page.writingTarget.target_manifest;onToggled:{var target=Object.assign({},page.writingTarget);target.include_existing=checked;page.writingTarget=target}}
             RowLayout {
                 Layout.fillWidth:true
                 Label {objectName:"scriptWritingAgreementSummary";Layout.fillWidth:true;wrapMode:Text.Wrap;color:t.muted;text:"本次写作使用目标剧本的有效创作约定；本次具体要求可进一步说明。"}
