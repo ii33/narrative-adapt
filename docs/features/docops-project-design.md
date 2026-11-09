@@ -62,6 +62,8 @@ narrative-docops/
 | `render/*` | 只把数据渲染成 Markdown／HTML，不判断对错 |
 | `i18n` | 固定键位的文案，供 `render` 与 `cli` 取用 |
 
+**运行依赖**：只有 `PyYAML` 与 `jsonschema` 两个，不做框架级依赖；**不自行实现通用解析与校验**（不写 YAML 子集解析器、不写 schema 校验器），避免两套实现并存。配置读 `tomllib`（标准库），不引入 TOML 第三方包。
+
 **分层铁律**：
 
 - `checks/` 不得 import `render/` 与 `cli/`——检查只回答「有没有问题」，怎么展示是下游的事。

@@ -31,16 +31,18 @@ REQ-<域>-<序号>  →  M-xx  →  I-xx  →  code(file::symbol)  →  test(fil
 
 ## 3 数据模型
 
-条目按功能域分片存放：`requirements/<domain>.yaml`，每片 ≤200 条（见 §10 的拆分规则）。条目字段固定 17 个：
+条目按功能域分片存放：`requirements/<domain>.yaml`，每片 ≤200 条（见 §10 的拆分规则）。条目字段固定 19 个：
 
 | 字段 | 含义 | 必填 |
 | --- | --- | --- |
 | `id` | `REQ-<域>-<序号>`，命令行分配 | 是 |
+| `domain` | 功能域，与分片文件名一致；跨分片唯一性检查用 | 否（写了就必须一致） |
 | `title` / `title_en` | 中文标题；英文标题可选（`--lang en` 用） | 中文必填 |
 | `intent` | 为什么需要这条能力，一到两句；不含实现细节 | 是 |
 | `acceptance` | 可判定的验收标准，数组，每条一句 | 见 §14 |
 | `examples` | `positive` / `negative` 两组，各 0–2 条短例 | 否 |
 | `status` | 六态之一（§4） | 是 |
+| `version` | 验收语义版本；`acceptance`／`intent` 变化才 +1，与 `verified.req_version` 比对（§5／§6 的版本通道） | 是 |
 | `origin` | `review`（逐条核对过）/ `backfill`（反补录）/ `user`（用户直提）/ `agent`（agent 起草待核） | 是 |
 | `reviewed` | `by`／`at`／`notes`，人工复核记录 | implemented 必填 |
 | `docs` | 相关文档路径数组（相对仓库根） | 否 |
@@ -53,10 +55,13 @@ REQ-<域>-<序号>  →  M-xx  →  I-xx  →  code(file::symbol)  →  test(fil
 | `acknowledges` | 豁免登记：`gate`／`reason`／`expires`（§13） | 否 |
 | `verified` | 上次人工核对通过的签名快照：`signature`／`impl_version`／`test_version`／`req_version`／`at`／`by` | implemented 必填 |
 
+`version` 与 `domain` 是实现阶段在设计稿原先的字段之外新增的两个字段：前者让「验收语义版本」成为条目自己的数据（原先只隐含在 `verified.req_version` 里），后者使分片归属可被程序校验而不是靠文件名约定。两者已并入上表；docops 仓库的 `schemas/requirement.schema.json` 以本表为准。
+
 示例条目（字段值取自当前实现，工具每次运行现读，不手填）：
 
 ```yaml
 id: REQ-PROP-003
+domain: PROP
 title: 容器属性让位下属事件
 title_en: Container property yields to descendant events
 intent: 场景/大事件/主要故事与下属事件常表达同一事实，两层各留一条会把同一事实算两次。
@@ -68,6 +73,7 @@ examples:
   positive: ["场景写了「甲在场」，事件记了「甲在场」→ 场景那条被丢弃，duplicate_of 指向事件记录"]
   negative: ["场景写「甲在场」、事件写「乙在场」→ 两条都保留（不同主体）"]
 status: implemented
+version: 1
 origin: review
 reviewed: {by: human, at: "2026-11-09", notes: "与 M-16 一致"}
 docs: ["docs/MODEL.md"]
@@ -216,7 +222,7 @@ docops report --md|--html [--lang zh|en] [--changed [base]]
 | 历史回放 | 对近 10 次提交回放，命中已知漂移，误报 ≤2% |
 | 稳定性 | 同一输入连续 10 次运行，产物逐字节一致 |
 | 性能 | 全量 ≤5s；`--changed` ≤1s |
-| 可移植 | 零第三方依赖，Windows 与 Linux 均通过；在第二个仓库跑通 |
+| 可移植 | 运行时依赖只有 `PyYAML` 与 `jsonschema`（不做框架级依赖），Windows 与 Linux 均通过；在第二个仓库跑通 |
 | 可替换 | 薄包装 + 一次 revert 即可摘除，不留残留配置 |
 
 三阶段推进：**影子模式**（只出报告，不进 CI）→ **门禁切换**（`check` 成为 required）→ **清理**（删除被替代的重复检查，docops 成唯一入口）。**不设时间计划**：门槛达标才进下一阶段。
