@@ -1,7 +1,7 @@
-"""Version 5 graph project contracts.
+"""Schema 11 graph project contracts.
 
-Ordinary attribute/relation/participation assertions are retired in v5; current
-node state is expressed by append-only property records. Temporal and containment
+Ordinary attribute/relation/participation assertions are retired; current node
+state is expressed by event-bound property records. Temporal and containment
 assertions remain the reviewed graph claim records.
 """
 

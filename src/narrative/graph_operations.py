@@ -1,4 +1,4 @@
-"""Public schema-10 project boundary for UI, CLI and model agents.
+"""Public schema-11 project boundary for UI, CLI and model agents.
 
 This class is a composition root: every method
 delegates to a narrow facade in :mod:`graph_facades`. New code should depend on a

@@ -1,4 +1,4 @@
-"""Evidence-bound graph proposals and human review for v5 projects."""
+"""Evidence-bound graph proposals and human review for schema-11 projects."""
 
 from __future__ import annotations
 
