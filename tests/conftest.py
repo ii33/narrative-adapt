@@ -43,7 +43,6 @@ INTEGRATION_MODULES = {
     "test_gateway_tool_arguments",
     "test_project_prompt_settings",
     "test_staging_acceptance_script",
-    "test_tool_parameter_transport_acceptance",
     "test_assistant_access_runtime",
     "test_browse_detail_sync",
     "test_storyboard_review",
