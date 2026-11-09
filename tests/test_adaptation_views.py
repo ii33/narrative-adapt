@@ -22,6 +22,8 @@ def project(tmp_path, monkeypatch):
     raw = json.dumps(draft_result(ended=False), ensure_ascii=False)
     draft = json.loads(raw.replace(TEXT, text).replace("甲约好接乙。", "甲在门口约好接乙。"))
     draft["nodes"].append({"type": "location", "name": "门口", "quotes": ["甲在门口约好接乙。"]})
+    # The first event's location is expressed explicitly below, never twice.
+    next(node for node in draft["nodes"] if node["name"] == "甲约好接乙").pop("location", None)
     draft["properties"].append({"node": "甲约好接乙", "property": "发生地点", "value": "门口",
         "value_type": "node", "scope": "world", "category": "空间与位置", "quotes": ["甲在门口约好接乙。"],
         "at_event": "甲约好接乙", "op": "set"})
@@ -71,11 +73,14 @@ def test_point_introduction_structured_refs_and_participants_obey_current_cut(pr
     assert {row["name"] for row in project.adaptation_node_properties(scene, cut=first)["involvement"]["people"]} == {"甲", "乙"}
     props = project.adaptation_node_properties(first, cut=first)
     location = next(row for row in props["properties"] if row["property_id"] == "发生地点")
-    assert location["value_node"]["id"] == gate
+    assert location["state"]["values"] == [gate]
     assert any(row["node_id"] == first for row in project.adaptation_node_properties(gate, cut=first)["inbound"])
-    project.suppress_adaptation_node(gate)
-    assert not project.adaptation_node_properties(scene, cut=first)["involvement"]["locations"]
-    assert not any(row["property_id"] == "发生地点" for row in project.adaptation_node_properties(first, cut=first)["properties"])
+    # A location anchoring an active event cannot be suppressed into an invalid event.
+    with pytest.raises(ValueError, match="地点"):
+        project.suppress_adaptation_node(gate)
+    other = named(state, "乙")["id"]
+    project.suppress_adaptation_node(other)
+    assert {row["name"] for row in project.adaptation_node_properties(scene, cut=first)["involvement"]["people"]} == {"甲"}
 
 
 def test_property_intervals_false_zero_and_editor_shape(project):
@@ -86,9 +91,9 @@ def test_property_intervals_false_zero_and_editor_shape(project):
     state = project.set_adaptation_property(person, "开关", first, "set", value=False)
     state = project.set_adaptation_property(person, "开关", last, "set", value=0)
     old = next(row for row in project.adaptation_node_properties(person, cut=first)["properties"] if row["property_id"] == "开关")
-    assert old["value"] is False
+    assert old["state"]["values"] == [False]
     new = next(row for row in project.adaptation_node_properties(person, cut=last)["properties"] if row["property_id"] == "开关")
-    assert type(new["value"]) is int and new["value"] == 0
+    assert new["state"]["values"] == [0] and type(new["state"]["values"][0]) is int
     assert len(new["records"]) == 2
     editor = project.adaptation_node_editor(person, cut=first)
     assert editor["at_cut"] and editor["cut_name"] == "甲约好接乙"

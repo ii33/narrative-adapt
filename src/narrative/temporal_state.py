@@ -249,7 +249,14 @@ def rename(ops, source_id, target_id, reason, expected_revision, *, merge=False)
                 definitions[identifier]['semantic'] = 'item_holder'
         if merge:
             fields = ('value_type', 'cardinality', 'symmetric', 'semantic', 'target_node_types')
-            if any(definitions[source_id].get(k, False if k == 'symmetric' else None) != definitions[target_id].get(k, False if k == 'symmetric' else None) for k in fields):
+
+            def merge_field(definition, field):
+                value = definition.get(field, False if field == 'symmetric' else None)
+                if field == 'target_node_types' and value is not None:
+                    return frozenset(value)
+                return value
+
+            if any(merge_field(definitions[source_id], key) != merge_field(definitions[target_id], key) for key in fields):
                 raise ValueError('属性定义不兼容，不能合并')
         result = []
         for row in records:
@@ -336,16 +343,18 @@ def projected_changes(graph, records, cut=None):
                     provenance=deepcopy(active), history_change_ids=[r['id'] for r in history])
         base.pop('value', None)
         if state['state']['kind'] == 'known':
-            value = state['state']['value']
+            # 查询状态是列表；投影出来的是**记录**，形状仍按记录来：
+            # 人物关系逐条投影，其余单值还原成标量、集合保持列表。
+            values = state['state']['values']
             relation = definition.get('cardinality', 'one') == 'one' and any(relation_target(r, nodes, definitions) is not None for r in changes)
             if relation:
-                for target in value:
+                for target in values:
                     contributor = next((r for r in reversed(active) if r.get('value') == target), base)
                     result.append(deepcopy(contributor) | {'derived': True, 'state_kind': 'known', 'op': 'set',
                                           'value': target, 'active_change_ids': [contributor['id']], 'provenance': [deepcopy(contributor)],
                                           'history_change_ids': base['history_change_ids']})
                 continue
-            base['value'] = value
+            base['value'] = list(values) if definition.get('cardinality') == 'many' else values[0]
             base['op'] = 'set'
         result.append(base)
     return result

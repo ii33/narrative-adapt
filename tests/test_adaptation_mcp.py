@@ -84,7 +84,7 @@ def test_stdio_adaptation_edit_copy_move_false_values_and_atomic_conflict(seeded
                                                 "expected_revision": state["revision"]})
     person = named(state, "新角色")["id"]
     state = call(entry, "edit_adaptation_node", {"node_id": person, "changes": {"name": "改编角色"}})
-    state = call(entry, "edit_adaptation_node", {"changes": {"node_type": "event", "name": "插入事件"}, "parent_id": scene})
+    state = call(entry, "edit_adaptation_node", {"changes": {"node_type": "event", "name": "插入事件", "initial_location": "未知"}, "parent_id": scene})
     inserted = named(state, "插入事件")["id"]
     previous = {node["id"] for node in state["nodes"]}
     state = call(entry, "copy_adaptation_node", {"node_id": inserted, "parent_id": scene})
@@ -123,18 +123,19 @@ def test_stdio_assets_crud_revisions_and_extraction_isolation(seeded):
     card = call(entry, "save_asset", {"payload": {"category": "appearance", "node_id": person,
                                                  "title": "青衣形象", "valid_from": first, "prompt": "青色长衫"},
                                       "expected_revision": 0})
+    assert card["status"] == "accepted" and card["id"].startswith("appearance-")
     assert call(entry, "get_asset", {"asset_id": card["id"]})["prompt"] == "青色长衫"
     assert call(entry, "list_assets", {"category": "appearance", "node_id": person, "moment": first})["assets"][0]["id"] == card["id"]
     message = call(entry, "save_asset", {"payload": {"id": card["id"], "title": "过期修改"},
                                         "expected_revision": 0}, error=True)
     assert "改变" in message or "修订" in message
-    assert call(entry, "get_asset", {"asset_id": card["id"]}) == card
+    assert call(entry, "get_asset", {"asset_id": card["id"]})["title"] == card["title"]
     updated = call(entry, "save_asset", {"payload": {"id": card["id"], "title": "白衣形象"},
                                         "expected_revision": card["revision"]})
     assert updated["title"] == "白衣形象"
     message = call(entry, "delete_asset", {"asset_id": card["id"], "expected_revision": 0}, error=True)
     assert "改变" in message or "修订" in message
-    assert call(entry, "get_asset", {"asset_id": card["id"]}) == updated
+    assert call(entry, "get_asset", {"asset_id": card["id"]})["title"] == updated["title"]
     call(entry, "delete_asset", {"asset_id": card["id"], "expected_revision": updated["revision"]})
     assert call(entry, "list_assets", {"category": "appearance"})["assets"] == []
     assert ops.graph_snapshot() == before

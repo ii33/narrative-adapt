@@ -273,6 +273,8 @@ class _View:
         return {child for child in found if self.visible(child, cutoff, context)}
 
     def decorate_record(self, row, cutoff=None):
+        # 记录侧的 ``value`` 是「这一步把值设成了什么」，与查询态的 ``values`` 不是一回事：
+        # 反向/声称/认知这些「引用一行记录」的视图都用记录形状，别去统一成列表。
         owner = self.nodes[row["node_id"]]
         context = owner.get("context_id", "canon")
         definition = self.definitions.get(row["property_id"], {})
@@ -315,14 +317,14 @@ class _View:
                 decorated = self.decorate_record(row, cutoff)
                 decorated.update(is_current=row["id"] in active, is_latest=row is latest)
                 values.append(decorated)
-            value = state.get("value")
+            # 分层同 property_store：**查询态**只给 ``{kind, values}``，不再附单值；
+            # **变更记录**（records/decorate_record）仍保留单值 ``value``。
             item = {"property_id": key[1], "property_ids": [key[1]], "aspect": key[1], "label": label_for(key[1]),
                     "category": latest.get("category") or property_categories.UNCLASSIFIED,
                     "category_source": "explicit" if latest.get("category") else "default_unclassified",
                     "other_categories": [],
                     "scope": key[3], "scopes": [key[3]], "context_id": key[2], "holder_id": key[4], "holder_name": self.nodes.get(key[4], {}).get("name", ""),
                     "value_type": definition.get("value_type", "any"), "cardinality": definition.get("cardinality", "one"),
-                    "value": value, "value_node": self.ref(value, cutoff) if isinstance(value, str) and value in self.nodes else None,
                     "event_id": latest["event_id"], "disclosed_at": self.nodes.get(latest["event_id"], {}).get("name", "前置状态"),
                     "is_current": state["kind"] != "unrecorded", "state": state, "state_kind": state["kind"], "active_change_ids": list(active),
                     "history_changes": history, "diagnostics": reduction.get("diagnostics", []),
@@ -334,8 +336,10 @@ class _View:
                           and self.nodes[row["node_id"]]["node_type"] == progress[0] and row.get("property_id") == progress[1]]
             if candidates:
                 source = max(candidates, key=self.record_key)
+                # 派生行也是"查询态"载荷：只给 state.values，不给单值 value。
                 items.append({"property_id": progress[1], "property_ids": [progress[1]], "label": label_for(progress[1]),
-                              "category": property_categories.UNCLASSIFIED, "records": [], "value": source["value"], "derived": True,
+                              "category": property_categories.UNCLASSIFIED, "records": [], "derived": True,
+                              "state": {"kind": "known", "values": [source["value"]]}, "state_kind": "known",
                               "from_scene": self.ref(source["node_id"], cutoff), "is_current": True, "scope": "world"})
         categories = list(dict.fromkeys(item["category"] for item in items))
         inbound, claims, heard = [], [], []

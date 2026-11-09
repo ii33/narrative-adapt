@@ -34,31 +34,33 @@ def test_allocator_bootstraps_existing_numbers_retains_high_water_and_rolls_back
 def test_adaptation_ids_preserve_type_identity_references_and_original_ids(project):
     ids = seed(project)
     source = project.graph_snapshot()
-    with pytest.raises(ValueError):
-        project.edit_adaptation_node(changes={"node_type": "event", "name": "非法归属"}, parent_id="missing")
+    staged = project.edit_adaptation_node(changes={"node_type": "event", "name": "非法归属"}, parent_id="missing")
+    assert staged["status"] == "staged" and staged["problems"]
+    assert any(row["code"] in {"CONTENT_VALIDATION", "EVENT_SCENE"} for row in staged["problems"])
     state = project.edit_adaptation_node(changes={"node_type": "scene", "name": "新场景"})
     scene = next(n for n in state["nodes"] if n["name"] == "新场景")
     assert scene["id"] == "adapt-scene-1"
-    state = project.edit_adaptation_node(changes={"node_type": "event", "name": "新事件", "participants": [ids["甲"]]}, parent_id=scene["id"])
+    state = project.edit_adaptation_node(changes={"node_type": "event", "name": "新事件", "initial_location": "未知", "participants": [ids["甲"]]}, parent_id=scene["id"])
     event = next(n for n in state["nodes"] if n["name"] == "新事件")
     assert event["id"] == "adapt-event-1"  # failed transaction did not consume it
     state = project.set_adaptation_property(event["id"], "说明", event["id"], "set", value="第一段")
     value = next(row for row in state["properties"] if row.get("property_id") == "说明")
-    assert value["id"] == "adapt-change-1"
+    # The event's explicit initial location consumed adapt-change-1.
+    assert value["id"] == "adapt-change-2"
     state = project.copy_adaptation_node(scene["id"])
     cloned_scene = next(n for n in state["nodes"] if n["id"] == "adapt-scene-2")
     cloned_event = next(n for n in state["nodes"] if n["id"] == "adapt-event-2")
     assert cloned_scene["events"] == [cloned_event["id"]]
     assert cloned_event["participants"] == [ids["甲"]]
-    copied_value = next(row for row in state["properties"] if row.get("node_id") == cloned_event["id"])
-    assert copied_value["id"] == "adapt-change-2" and copied_value["event_id"] == cloned_event["id"]
+    copied_value = next(row for row in state["properties"] if row.get("node_id") == cloned_event["id"] and row.get("property_id") == "说明")
+    assert copied_value["id"] == "adapt-change-4" and copied_value["event_id"] == cloned_event["id"]
     project.move_adaptation_node(cloned_event["id"], after_id=ids["甲坐下"])
     assert any(n["id"] == cloned_event["id"] for n in project.adaptation_snapshot()["nodes"])
     project.delete_adaptation_node(event["id"], project.adaptation_snapshot()["revision"], "显式删除")
-    state = project.edit_adaptation_node(changes={"node_type": "event", "name": "后续事件"}, parent_id=scene["id"])
+    state = project.edit_adaptation_node(changes={"node_type": "event", "name": "后续事件", "initial_location": "未知"}, parent_id=scene["id"])
     assert next(n for n in state["nodes"] if n["name"] == "后续事件")["id"] == "adapt-event-3"
     state = project.set_adaptation_property(cloned_event["id"], "新增说明", cloned_event["id"], "set", value="第二段")
-    assert next(row for row in state["properties"] if row.get("property_id") == "新增说明")["id"] == "adapt-change-3"
+    assert next(row for row in state["properties"] if row.get("property_id") == "新增说明")["id"] == "adapt-change-6"
     assert project.check_adaptation()["ok"]
     assert project.graph_snapshot() == source
     assert ids["甲"] == "P1" and ids["甲敲门"] in {n["id"] for n in state["nodes"]}
@@ -76,8 +78,10 @@ def test_asset_category_and_image_ids_are_readable_stable_and_never_reused(proje
     appearance = project.save_asset({"category": "appearance", "node_id": ids["甲"], "title": "角色形象", "reference_images": [{"path": str(image)}]})
     item_card = project.save_asset({"category": "item", "node_id": item["id"], "title": "道具视觉", "images": [{"path": str(image)}]})
     location_card = project.save_asset({"category": "location", "node_id": location["id"], "title": "地点视觉"})
-    with pytest.raises(ValueError, match="标题不能为空"):
-        project.save_asset({"category": "material", "title": ""})
+    staged = project.save_asset({"category": "material", "title": ""})
+    assert staged["status"] == "staged" and staged["problems"]
+    assert any(row.get("path") == ["payload", "title"] for row in staged["problems"])
+    assert not [asset for asset in project.list_assets("material")["assets"] if not asset["title"]]
     material = project.save_asset({"category": "material", "title": "铜材"})
     assert [appearance["id"], item_card["id"], location_card["id"], material["id"]] == ["appearance-1", "item-design-1", "location-design-1", "material-1"]
     assert appearance["reference_images"][0]["id"] == "asset-image-1"

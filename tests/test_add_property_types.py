@@ -4,7 +4,7 @@ from agent_fixtures import project as project
 from test_relationship_state import setup_relations
 
 from narrative.project_package import layout
-from narrative.tool_api import ToolError, call
+from narrative.tool_api import call
 
 
 def setup(project):
@@ -22,19 +22,22 @@ def test_explicit_node_new_role_is_drawn_and_any_same_id_remains_literal(project
     assert call("record_property_change", args | {"op": "set", "expected_revision": project.graph_project_info()["revision"], "reason": "定向补录"} | {"property_id": "诈骗对象"}, project=entry)["status"] in {"accepted", "unchanged"}
 
 
-@pytest.mark.parametrize("changes", [{}, {"value_type": "node", "symmetric": "false"}, {"value_type": []}])
-def test_new_definition_requires_strict_explicit_type_and_symmetry_without_write(project, changes):
+@pytest.mark.parametrize("changes,path", [({}, "value_type"), ({"value_type": "node", "symmetric": "false"}, "symmetric"), ({"value_type": []}, "value_type")])
+def test_new_definition_requires_strict_explicit_type_and_symmetry_without_write(project, changes, path):
     entry, args = setup(project)
     before = project.graph_snapshot(), project.property_records()
-    with pytest.raises(ToolError):
-        call("record_property_change", args | {"op": "set", "expected_revision": project.graph_project_info()["revision"], "reason": "定向补录"} | {"property_id": "新定义"} | changes, project=entry)
+    result = call("record_property_change", args | {"op": "set", "expected_revision": project.graph_project_info()["revision"], "reason": "定向补录"} | {"property_id": "新定义"} | changes, project=entry)
+    assert result["status"] == "staged", result
+    assert any(p["code"] == "CONTENT_VALIDATION" and p["path"] == [path] for p in result["problems"]), result["problems"]
     assert (project.graph_snapshot(), project.property_records()) == before
 
 
-@pytest.mark.parametrize("changes", [{"value_type": "string"}, {"symmetric": True}])
-def test_existing_definition_conflicts_do_not_change_definition_or_values(project, changes):
+@pytest.mark.parametrize("changes,path", [({"value_type": "string"}, "value_type"), ({"symmetric": True}, "symmetric")])
+def test_existing_definition_conflicts_do_not_change_definition_or_values(project, changes, path):
     entry, args = setup(project)
     before = project.graph_snapshot(), project.property_records()
-    with pytest.raises(ToolError, match="不一致"):
-        call("record_property_change", args | {"op": "set", "expected_revision": project.graph_project_info()["revision"], "reason": "定向补录"} | {"property_id": "朋友"} | changes, project=entry)
+    result = call("record_property_change", args | {"op": "set", "expected_revision": project.graph_project_info()["revision"], "reason": "定向补录"} | {"property_id": "朋友"} | changes, project=entry)
+    assert result["status"] == "staged", result
+    problem = next(p for p in result["problems"] if p["path"] == [path])
+    assert problem["code"] == "CONTENT_VALIDATION" and "不一致" in problem["message"]
     assert (project.graph_snapshot(), project.property_records()) == before

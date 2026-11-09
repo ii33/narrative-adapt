@@ -200,9 +200,9 @@ def test_static_problem_targets_exact_original_property_row_not_same_name_other_
     sid = project.import_source('同属性不同主体', TEXT)
     draft = draft_result(ended=False)
     draft['properties'] = [
-        {'node': '甲', 'property': '计数', 'value_type': 'number', 'value': 7,
+        {'node': '甲', 'property': '计数', "category": "未分类" , 'value_type': 'number', 'value': 7,
          'op': 'set', 'at_event': '甲约好接乙', 'quotes': ['甲约好接乙。']},
-        {'node': '乙', 'property': '计数', 'value_type': 'number', 'value': '不是数值',
+        {'node': '乙', 'property': '计数', "category": "未分类" , 'value_type': 'number', 'value': '不是数值',
          'op': 'set', 'at_event': '甲接到乙后离开', 'quotes': ['甲接到乙后离开。']},
     ]
     staged = project.submit_extraction(sid, draft)
@@ -215,6 +215,6 @@ def test_static_problem_targets_exact_original_property_row_not_same_name_other_
         [{'op': 'set', 'section': 'properties', 'index': 1, 'field': 'value', 'value': 8}], '仅修错误主体的计数')
     assert fixed['status'] == 'accepted'
     names = {n['name']: n['id'] for n in project.graph_snapshot()['nodes']}
-    assert project.property_state(names['甲'], '计数')['state']['value'] == 7
-    assert project.property_state(names['乙'], '计数')['state']['value'] == 8
+    assert project.property_state(names['甲'], '计数')['state']['values'] == [7]
+    assert project.property_state(names['乙'], '计数')['state']['values'] == [8]
     assert all('_draft_index' not in r and 'property_origins' not in r for r in project.property_records())

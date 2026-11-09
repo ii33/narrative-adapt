@@ -786,7 +786,7 @@ _register(Tool(
         "value": {"type": ["string", "number", "boolean", "array"], "items": {"type": ["string", "number", "boolean"]},
                   "description": "one为单值；many为数组。节点引用为被指向的对方，普通字面值不改写"},
         "value_type": {"type": "string", "enum": ["string", "number", "boolean", "node", "either", "any"], "description": "新定义必填，已知定义省略沿用；node/either为节点引用，string/any不能因P样字符串视为关系"},
-        "cardinality": {"type": "string", "enum": ["one", "many"], "description": "one保存标量，人物关系按对方分别维护可并存；many是集合数组，各元素符合value_type；已知定义省略沿用，显式冲突拒绝"},
+        "cardinality": {"type": "string", "enum": ["one", "many"], "description": "录入规则，不约束读取形状：one表示同一事件点只允许一个当前值（改就set覆盖，两个不同值报冲突），人物关系按对方分别维护可并存；many表示同一事件点允许多项并存，各元素符合value_type。读取一律返回当前有效的全部值列表。已知定义省略沿用，显式冲突拒绝"},
         "symmetric": {"type": "boolean", "description": "新关系定义是否对称，默认false；已有定义省略沿用，冲突拒绝"},
         "event_id": {"type": "string", "required": True, "description": "披露事件编号"},
         "op": {"type": "string", "enum": ["set", "add", "remove", "clear", "unknown"], "required": True, "description": "set/add/remove须value；clear/unknown禁止value"},

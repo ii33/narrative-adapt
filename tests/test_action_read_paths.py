@@ -22,10 +22,10 @@ def install(project):
 
 def test_summary_event_api_and_action_order_do_not_compare_type_number_sequences(project):
     install(project)
-    assert project.property_event_state('P1', '状态', 'A99')['state']['value'] == '进入'
-    assert project.property_event_state('P1', '状态', 'A1')['state']['value'] == '停止'
-    assert project.property_node_summary('P1', cut='A99')['properties'][0]['value'] == '进入'
-    assert project.property_node_summary('P1', cut='A1')['properties'][0]['value'] == '停止'
+    assert project.property_event_state('P1', '状态', 'A99')['state']['values'] == ['进入']
+    assert project.property_event_state('P1', '状态', 'A1')['state']['values'] == ['停止']
+    assert project.property_node_summary('P1', cut='A99')['properties'][0]['state']['values'] == ['进入']
+    assert project.property_node_summary('P1', cut='A1')['properties'][0]['state']['values'] == ['停止']
     assert project.graph_event_compare('A99', 'A1')['relation'] == 'before'
     view = project.browse_view(granularity='action', cut_id='A99')
     assert [row['id'] for row in view['steps']] == ['A99', 'A1']

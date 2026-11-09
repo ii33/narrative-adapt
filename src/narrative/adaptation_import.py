@@ -8,6 +8,8 @@ from __future__ import annotations
 import copy
 import json
 
+from .event_location import LOCATION_PROPERTIES, LOCATION_SEMANTICS
+
 MOMENTS = {"storyline", "big_event", "scene", "event", "action"}
 _TYPE_ORDER = {"storyline": 0, "big_event": 1, "scene": 2, "event": 3, "action": 4}
 
@@ -125,6 +127,13 @@ def select(nodes, records, orders, moment_ids, state):
             for target in value if isinstance(value, list) else [value]:
                 add(target)
 
+    def event_owned_location(row):
+        definition = definitions.get(row.get("property_id"), {})
+        return (row.get("event_id") == row.get("node_id") and row.get("node_id") in included
+                and (row.get("scope") or "world") == "world" and not row.get("holder_id")
+                and (row.get("property_id") in LOCATION_PROPERTIES
+                     or definition.get("semantic") in LOCATION_SEMANTICS))
+
     # A finite closure: only entity state at selected cuts and explicit references
     # can add data. Merely neighboring an event never expands the selection.
     while True:
@@ -147,7 +156,8 @@ def select(nodes, records, orders, moment_ids, state):
             owner_node = by_id.get(owner, {})
             if (row.get("event_id") in primary or
                 (owner in included and (owner in primary or owner_node.get("node_type") not in MOMENTS)
-                 and relevant(row))):
+                 and relevant(row)) or
+                (event_owned_location(row) and relevant(row))):
                 include_value(row)
         if previous == (len(included), len(wanted_records)):
             break

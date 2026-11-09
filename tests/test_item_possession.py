@@ -184,8 +184,8 @@ def test_atomic_transfer_and_explicit_unowned_keep_reading_cuts_historical(proje
         )
     for i, value in [(0, "无"), (1, ids["甲"]), (2, ids["乙"]), (3, "无")]:
         state = project.property_state("I1", "持有者", at=ids[SENTENCES[i]])
-        assert state["state"]["value"] == value
-    assert project.property_state("I1", "持有者")["state"]["value"] == "无"
+        assert state["state"]["values"] == [value]
+    assert project.property_state("I1", "持有者")["state"]["values"] == ["无"]
 
 
 def test_legacy_non_person_participant_reads_but_the_next_write_is_rejected(project):
@@ -204,7 +204,7 @@ def test_legacy_non_person_participant_reads_but_the_next_write_is_rejected(proj
     # 读：节点快照、当前状态、改编视图都照旧工作。
     assert next(row for row in project.graph_snapshot()["nodes"]
                 if row["id"] == event["id"])["participants"] == [ids["甲"], item["id"]]
-    assert project.property_state(item["id"], "持有者")["state"] == {"kind": "known", "value": ids["甲"]}
+    assert project.property_state(item["id"], "持有者")["state"] == {"kind": "known", "values": [ids["甲"]]}
     assert any(node["id"] == event["id"] for node in project.sync_adaptation()["nodes"])
     # 检查器只报告，不改写：存量参与者被诊断为 PARTICIPANTS，资料一个字节不动。
     assert any(issue["code"] == "PARTICIPANTS" for issue in project.check_project()["issues"])
@@ -249,7 +249,7 @@ def test_legacy_missing_holder_is_diagnosed_without_synthesizing_a_record(projec
         reason="合成原子写入",
     )
     assert result["status"] == "accepted"
-    assert project.property_state("I1", "持有者")["state"]["value"] == "未知"
+    assert project.property_state("I1", "持有者")["state"]["values"] == ["未知"]
 
 
 def test_latest_invalid_holder_cannot_be_hidden_by_a_valid_historical_value(project):
@@ -319,7 +319,7 @@ def test_node_only_holder_definition_can_be_renamed_and_updated_physically(proje
         )["status"]
         == "accepted"
     )
-    assert project.property_state("I1", "物品持有状态")["state"]["value"] == "无"
+    assert project.property_state("I1", "物品持有状态")["state"]["values"] == ["无"]
     rows = project.property_records()
     assert not any(r["id"] == "持有者" or r["kind"] == "property_merge" for r in rows)
     assert next(r for r in rows if r["id"] == "物品持有状态")["value_type"] == "either"
@@ -395,7 +395,7 @@ def test_early_cut_before_real_holder_disclosure_does_not_leak_future_person(pro
     assert not any(r['property_id'] == '持有者' and r['value_node'] for r in summary['properties'])
     assert project.property_state('I1', '持有者', ids[SENTENCES[0]])['state'] == {'kind': 'unrecorded'}
     assert '乙' not in json.dumps(summary['properties'], ensure_ascii=False)
-    assert project.property_state("I1", "持有者")["state"]["value"] == ids["乙"]
+    assert project.property_state("I1", "持有者")["state"]["values"] == [ids["乙"]]
 
 
 def test_atomic_current_definition_update_and_unknown_holder_for_another_item(project):
@@ -429,8 +429,8 @@ def test_atomic_current_definition_update_and_unknown_holder_for_another_item(pr
         == "accepted"
     )
     assert next(r for r in project.property_records() if r["id"] == "holder0") == old_value
-    assert project.property_state("I1", "持有者")["state"]["value"] == ids["甲"]
-    assert project.property_state("I2", "持有者")["state"]["value"] == "未知"
+    assert project.property_state("I1", "持有者")["state"]["values"] == [ids["甲"]]
+    assert project.property_state("I2", "持有者")["state"]["values"] == ["未知"]
     assert not any(
         r["kind"] in {"property_merge", "property_rename", "property_retraction"}
         for r in project.property_records()

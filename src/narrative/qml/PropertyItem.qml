@@ -21,7 +21,8 @@ Column {
     Rectangle {
         id: head
         width: parent.width
-        height: 46
+        // 取值列表逐项一行时这一行会变高；46 只是一行时的最小高度。
+        height: Math.max(46, headContent.implicitHeight + 8)
         radius: 4
         color: headHover.hovered ? item.t.accentSoft : "transparent"
 
@@ -35,6 +36,7 @@ Column {
         }
 
         ColumnLayout {
+            id: headContent
             anchors.fill: parent
             anchors.leftMargin: 8
             anchors.rightMargin: 8
@@ -54,11 +56,12 @@ Column {
                     Layout.minimumWidth: 0
                 }
                 Label {
+                    // 取值是列表，逐项一行：这里换行显示，不再按单行省略。
                     text: item.row.valueText
                     color: item.row.valueNodeId.length > 0 ? item.t.accent : item.t.body
                     font.pixelSize: 12
                     font.underline: item.row.valueNodeId.length > 0
-                    elide: Text.ElideRight
+                    wrapMode: Text.Wrap
                     Layout.minimumWidth: 0
                     Layout.fillWidth: true
 

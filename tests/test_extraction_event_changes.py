@@ -17,13 +17,13 @@ def project(tmp_path, monkeypatch):
         {'type': 'person', 'name': name, 'quotes': [text]} for name in ['甲', '乙']
     ] + [
         {'type': 'scene', 'name': '大厅会面', 'quotes': [text]},
-        {'type': 'event', 'name': '结交', 'scene': '大厅会面', 'participants': ['甲', '乙'], 'quotes': ['甲与乙成为朋友。']},
-        {'type': 'event', 'name': '绝交', 'scene': '大厅会面', 'participants': ['甲', '乙'], 'quotes': ['后来甲明确结束友谊。']},
+        {'type': 'event', "location": "未知", 'name': '结交', 'scene': '大厅会面', 'participants': ['甲', '乙'], 'quotes': ['甲与乙成为朋友。']},
+        {'type': 'event', "location": "未知", 'name': '绝交', 'scene': '大厅会面', 'participants': ['甲', '乙'], 'quotes': ['后来甲明确结束友谊。']},
     ]
     draft = {'nodes': nodes, 'properties': [
-        {'node': '甲', 'property': '朋友', 'at_event': '结交', 'op': 'set', 'value': '乙',
+        {'node': '甲', 'property': '朋友'  , "category": "未分类", 'at_event': '结交', 'op': 'set', 'value': '乙',
          'value_type': 'node', 'quotes': ['甲与乙成为朋友。']},
-        {'node': '甲', 'property': '朋友', 'at_event': '绝交', 'op': 'remove', 'value': '乙',
+        {'node': '甲', 'property': '朋友' , "category": "未分类", 'at_event': '绝交', 'op': 'remove', 'value': '乙',
          'value_type': 'node', 'quotes': ['后来甲明确结束友谊。']},
     ]}
     return ops, sid, text, draft
@@ -33,7 +33,7 @@ def test_extraction_sequences_quotes_identity_and_current_relationship(project):
     ops, sid, text, draft = project
     result = ops.submit_extraction(sid, draft)
     assert result['status'] == 'accepted', result
-    changes = [r for r in ops.property_records() if r['kind'] == 'property_change']
+    changes = [r for r in ops.property_records() if r['kind'] == 'property_change' and r['property_id'] == '朋友']
     assert len(changes) == 2
     assert {r['sequence'] for r in changes} == {text.index('甲与乙成为朋友。'), text.index('后来甲明确结束友谊。')}
     assert not any({'valid_from', 'valid_to'} & r.keys() for r in changes)
@@ -46,7 +46,7 @@ def test_extraction_sequences_quotes_identity_and_current_relationship(project):
         node['existing_id'] = ids[node['name']]
     before = {r['id'] for r in changes}
     assert ops.submit_extraction(sid, again)['status'] == 'unchanged'
-    assert {r['id'] for r in ops.property_records() if r['kind'] == 'property_change'} == before
+    assert {r['id'] for r in ops.property_records() if r['kind'] == 'property_change' and r['property_id'] == '朋友'} == before
 
 
 @pytest.mark.parametrize('mutation', [
@@ -107,10 +107,10 @@ def test_false_zero_unknown_and_exact_schema_contract(project):
                            base | {'property': '开启', 'value_type': 'boolean', 'value': False}]
     assert ops.submit_extraction(sid, draft)['status'] == 'accepted'
     names = {n['name']: n['id'] for n in ops.graph_snapshot()['nodes']}
-    assert ops.property_state(names['甲'], '计数')['state']['value'] == 0
-    assert ops.property_state(names['甲'], '开启')['state']['value'] is False
+    assert ops.property_state(names['甲'], '计数')['state']['values'] == [0]
+    assert ops.property_state(names['甲'], '开启')['state']['values'] == [False]
     unknown = {'nodes': [], 'properties': [{
-        'node': names['甲'], 'property': '计数', 'at_event': names['绝交'], 'op': 'unknown',
+        'node': names['甲'], 'property': '计数'  , "category": "未分类", 'at_event': names['绝交'], 'op': 'unknown',
         'quotes': ['后来甲明确结束友谊。']}]}
     assert ops.submit_extraction(sid, unknown)['status'] == 'accepted'
     assert ops.property_state(names['甲'], '计数')['state'] == {'kind': 'unknown'}

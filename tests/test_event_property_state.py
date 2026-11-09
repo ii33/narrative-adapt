@@ -60,8 +60,8 @@ def test_event_order_set_clear_unknown_and_no_stored_validity(facts):
     rows = [change(sid, 3, 'unknown'), change(sid, 1, 'set', '乙称呼'), change(sid, 0, 'set', '甲称呼'), change(sid, 2, 'clear')]
     result = commit(ops, [definition(), *rows])
     assert result['status'] == 'accepted', result
-    assert ops.property_state('P1', '称呼', 'E9')['state'] == {'kind': 'known', 'value': '甲称呼'}
-    assert ops.property_state('P1', '称呼', 'E1')['state'] == {'kind': 'known', 'value': '乙称呼'}
+    assert ops.property_state('P1', '称呼', 'E9')['state'] == {'kind': 'known', 'values': ['甲称呼']}
+    assert ops.property_state('P1', '称呼', 'E1')['state'] == {'kind': 'known', 'values': ['乙称呼']}
     assert ops.property_state('P1', '称呼', 'E6')['state'] == {'kind': 'absent'}
     assert ops.property_state('P1', '称呼')['state'] == {'kind': 'unknown'}
     stored = ops.property_records()
@@ -75,9 +75,9 @@ def test_relation_counterparts_independent_and_projection_excludes_removed(facts
             change(sid, 0, 'set', 'P3', '朋友', sequence=2, id='friend-c'),
             change(sid, 2, 'remove', 'P2', '朋友')]
     assert commit(ops, [definition('朋友', value_type='node'), *rows])['status'] == 'accepted'
-    assert set(ops.property_state('P1', '朋友', 'E9')['state']['value']) == {'P2', 'P3'}
+    assert set(ops.property_state('P1', '朋友', 'E9')['state']['values']) == {'P2', 'P3'}
     state = ops.property_state('P1', '朋友')
-    assert state['state'] == {'kind': 'known', 'value': ['P3']}
+    assert state['state'] == {'kind': 'known', 'values': ['P3']}
     projection = projected_changes(ops.graph_snapshot(), ops.property_records())
     assert [r['value'] for r in projection if r['property_id'] == '朋友'] == ['P3']
     assert all(r['derived'] for r in projection)
@@ -88,7 +88,7 @@ def test_many_collection_fold_and_unknown_baseline(facts):
     rows = [change(sid, 0, 'set', ['P2'], '同行者'), change(sid, 1, 'add', ['P3'], '同行者'), change(sid, 2, 'remove', ['P2'], '同行者')]
     assert commit(ops, [definition('同行者', cardinality='many', value_type='node'), *rows])['status'] == 'accepted'
     result = ops.property_state('P1', '同行者')
-    assert result['state'] == {'kind': 'known', 'value': ['P3']}
+    assert result['state'] == {'kind': 'known', 'values': ['P3']}
     projection = [r for r in projected_changes(ops.graph_snapshot(), ops.property_records()) if r['property_id'] == '同行者']
     assert projection[0]['value'] == ['P3'] and len(projection[0]['active_change_ids']) == 3
     nodes = {n['id']: n for n in ops.graph_snapshot()['nodes']}
@@ -100,8 +100,8 @@ def test_same_event_sequence_conflict_and_precise_cut(facts):
     ops, sid = facts
     rows = [change(sid, 0, 'set', 'A', sequence=1), change(sid, 0, 'set', 'B', sequence=2, id='second')]
     assert commit(ops, [definition(), *rows])['status'] == 'accepted'
-    assert ops.property_state('P1', '称呼', {'event_id': 'E9', 'sequence': 1})['state']['value'] == 'A'
-    assert ops.property_state('P1', '称呼', 'E9')['state']['value'] == 'B'
+    assert ops.property_state('P1', '称呼', {'event_id': 'E9', 'sequence': 1})['state']['values'] == ['A']
+    assert ops.property_state('P1', '称呼', 'E9')['state']['values'] == ['B']
     before = copy.deepcopy(ops.property_records())
     conflict = change(sid, 0, 'set', 'C', sequence=2, id='conflicting')
     result = commit(ops, [conflict])
@@ -113,12 +113,12 @@ def test_local_axis_and_scope_are_independent(facts):
     ops, sid = facts
     rows = [change(sid, 0, 'set', '事实'), change(sid, 1, 'set', '认知', id='claim', scope='claim', holder_id='P2')]
     assert commit(ops, [definition(), *rows])['status'] == 'accepted'
-    assert ops.property_state('P1', '称呼')['state']['value'] == '事实'
-    assert ops.property_state('P1', '称呼', scope='claim', holder_id='P2')['state']['value'] == '认知'
+    assert ops.property_state('P1', '称呼')['state']['values'] == ['事实']
+    assert ops.property_state('P1', '称呼', scope='claim', holder_id='P2')['state']['values'] == ['认知']
     nodes = {n['id']: n for n in ops.graph_snapshot()['nodes']}
     world = [dict(rows[0], sequence=0), change(sid, 1, 'set', '本地后值', sequence=0)]
     result = reduce_changes(world, definition(), nodes, event_order={'E9': 20, 'E1': 10})
-    assert result['state']['value'] == '事实'
+    assert result['state']['values'] == ['事实']
 
 
 @pytest.mark.parametrize('bad', [
@@ -160,9 +160,9 @@ def test_direct_correction_delete_and_suffix_rollback_recompute_state(facts):
     corrected = next(r for r in ops.property_records() if r['id'] == record['id'])
     assert corrected['sequence'] == record['sequence'] and corrected['value'] == '修正B'
     ops.delete_property_records([next(r['id'] for r in ops.property_records() if r.get('event_id') == 'E3' and r.get('property_id') == '称呼')], '删错误事实', expected_revision=ops.graph_project_info()['revision'])
-    assert ops.property_state('P1', '称呼')['state']['value'] == '修正B'
+    assert ops.property_state('P1', '称呼')['state']['values'] == ['修正B']
     result = ops.rollback_to(sid, TEXT.index(QUOTES[0]), ops.graph_project_info()['revision'], '删除后续披露')
-    assert result['valid'] and ops.property_state('P1', '称呼')['state']['value'] == 'A'
+    assert result['valid'] and ops.property_state('P1', '称呼')['state']['values'] == ['A']
     assert not any(r.get('event_id') in {'E1', 'E6', 'E3'} for r in ops.property_records())
     assert 'reopened_record_ids' not in result
 
@@ -172,7 +172,7 @@ def test_node_cards_show_change_history_and_derived_state(facts):
     assert commit(ops, [definition(), change(sid, 0, 'set', 'A'), change(sid, 1, 'set', 'B')])['status'] == 'accepted'
     card = ops.properties.node_properties('P1')
     item = next(i for i in card['properties'] if i['property_id'] == '称呼')
-    assert item['state'] == {'kind': 'known', 'value': 'B'}
+    assert item['state'] == {'kind': 'known', 'values': ['B']}
     assert len(item['records']) == 2 and [r['is_current'] for r in item['records']] == [False, True]
     assert [r['op'] for r in item['records']] == ['set', 'set']
     assert all('valid_to' not in r for r in item['records'])
@@ -184,7 +184,7 @@ def test_same_position_commuting_collection_edits_do_not_require_arbitrary_order
             change(sid, 1, 'add', ['P3'], '同行者', sequence=7),
             change(sid, 1, 'remove', ['P2'], '同行者', sequence=7, id='parallel-remove')]
     assert commit(ops, [definition('同行者', cardinality='many', value_type='node'), *rows])['status'] == 'accepted'
-    assert ops.property_state('P1', '同行者')['state'] == {'kind': 'known', 'value': ['P3']}
+    assert ops.property_state('P1', '同行者')['state'] == {'kind': 'known', 'values': ['P3']}
     before = copy.deepcopy(ops.property_records())
     result = commit(ops, [change(sid, 1, 'remove', ['P3'], '同行者', sequence=7, id='incompatible-remove')])
     assert result['status'] == 'staged'
@@ -208,7 +208,7 @@ def test_cognition_is_never_filled_from_world_facts(facts):
     """防的是「派生时把 world 事实当成某人的认知」——没有记录就该是未记录。"""
     ops, sid = facts
     assert commit(ops, [definition('身份'), _world_identity(sid, 0, '掌门')])['status'] == 'accepted'
-    assert ops.property_state('P1', '身份')['state'] == {'kind': 'known', 'value': '掌门'}
+    assert ops.property_state('P1', '身份')['state'] == {'kind': 'known', 'values': ['掌门']}
     # 乙从没被交代过这件事：既不是掌门，也不是「未知」这种否定事实，而是「未记录」。
     state = ops.property_state('P1', '身份', scope='cognition', holder_id='P2')['state']
     assert state == {'kind': 'unrecorded'}
@@ -220,7 +220,7 @@ def test_cognition_does_not_follow_later_world_changes(facts):
     assert commit(ops, [definition('身份'), _world_identity(sid, 0, '掌门')])['status'] == 'accepted'
     assert ops.property_state('P1', '身份', scope='cognition', holder_id='P2')['state'] == {'kind': 'unrecorded'}
     assert commit(ops, [_world_identity(sid, 1, '客卿')])['status'] == 'accepted'
-    assert ops.property_state('P1', '身份')['state'] == {'kind': 'known', 'value': '客卿'}
+    assert ops.property_state('P1', '身份')['state'] == {'kind': 'known', 'values': ['客卿']}
     assert ops.property_state('P1', '身份', scope='cognition', holder_id='P2')['state'] == {'kind': 'unrecorded'}
 
 
@@ -230,9 +230,9 @@ def test_cognition_appears_only_with_an_explicit_record_and_is_not_corrected(fac
     rows = [definition('身份'), _world_identity(sid, 0, '掌门'),
             change(sid, 1, 'set', '散修', '身份', id='cognition-p2', scope='cognition', holder_id='P2')]
     assert commit(ops, rows)['status'] == 'accepted'
-    assert ops.property_state('P1', '身份')['state'] == {'kind': 'known', 'value': '掌门'}
+    assert ops.property_state('P1', '身份')['state'] == {'kind': 'known', 'values': ['掌门']}
     # 乙在 E1 处知道的「身份」是他听说的散修，不因事实是掌门被覆盖或校正。
     assert ops.property_state('P1', '身份', 'E1', scope='cognition', holder_id='P2')['state'] == {
-        'kind': 'known', 'value': '散修'}
+        'kind': 'known', 'values': ['散修']}
     # 别人（P3）没有这条认知，依旧是未记录。
     assert ops.property_state('P1', '身份', 'E1', scope='cognition', holder_id='P3')['state'] == {'kind': 'unrecorded'}

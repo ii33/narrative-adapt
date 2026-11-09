@@ -32,8 +32,8 @@ def test_item_holder_transfer_unknown_and_clear_rejection_are_atomic(facts):
     result = ops.apply_changes([node(sid, 'I1', 'item', '旅行袋')], [holder, establish], ops.graph_project_info()['revision'], '物品明确持有')
     assert result['status'] == 'accepted', result
     assert commit(ops, [change(sid, 1, 'set', 'P2', '持有者', node_id='I1')])['status'] == 'accepted'
-    assert ops.property_state('I1', '持有者', 'E9')['state']['value'] == 'P1'
-    assert ops.property_state('I1', '持有者')['state']['value'] == 'P2'
+    assert ops.property_state('I1', '持有者', 'E9')['state']['values'] == ['P1']
+    assert ops.property_state('I1', '持有者')['state']['values'] == ['P2']
     assert commit(ops, [change(sid, 2, 'unknown', property_id='持有者', node_id='I1')])['status'] == 'accepted'
     assert ops.property_state('I1', '持有者')['state'] == {'kind': 'unknown'}
     assert ops.check_project()['counts']['error'] == 0
@@ -45,9 +45,9 @@ def test_item_holder_transfer_unknown_and_clear_rejection_are_atomic(facts):
 
 def test_location_collection_remove_is_obeyed_by_browse_and_involvement(facts):
     ops, sid = facts
-    rows = [definition('地点', value_type='node', cardinality='many'),
-            change(sid, 0, 'set', ['L1', 'L2'], '地点', node_id='E9'),
-            change(sid, 1, 'remove', ['L1'], '地点', node_id='E9')]
+    rows = [definition('途经地点', value_type='node', cardinality='many'),
+            change(sid, 0, 'set', ['L1', 'L2'], '途经地点', node_id='E9'),
+            change(sid, 1, 'remove', ['L1'], '途经地点', node_id='E9')]
     result = ops.apply_changes([node(sid, 'L1', 'location', '前厅'), node(sid, 'L2', 'location', '后厅')], rows, ops.graph_project_info()['revision'], '地点集合变更')
     assert result['status'] == 'accepted', result
     snapshot, records = ops.graph_snapshot(), ops.property_records()

@@ -255,8 +255,9 @@ Dialog {
     // 单项记录移除对应值；整行失效明确清除整组。
     function startExpireRecord(item, record) {
         expireTargets = [record.id]
-        var value=item.state?item.state.value:item.value;
-        var collection=value&&typeof value!=="string"&&value.length!==undefined;
+        // 状态取值一律是列表：多项（集合/关系）用 remove，单值用 clear。
+        var values=(item.state&&item.state.values)||[];
+        var collection=values.length>1;
         expireChange={node_id:nodeId,property_id:item.property_id,op:collection?"remove":"clear",value:record.value,scope:item.scope||"world",holder_id:item.holder_id,context_id:item.context_id||"canon"};
         expireEventIndex = Math.max(0,eventIndex(host.cutEventId)>=0?eventIndex(host.cutEventId):events.length-1)
         expireKey = rowKey(item)

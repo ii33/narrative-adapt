@@ -54,7 +54,7 @@ def main():
     nodes = [{"type": "person", "name": "人物", "quotes": [selected[0]]},
              {"type": "scene", "name": "查阅记录", "quotes": [selected[0]]}]
     nodes += [{"type": "event", "name": f"记录{i}", "scene": "查阅记录", "participants": ["人物"], "quotes": [quote]} for i, quote in enumerate(selected)]
-    properties = [{"node": "人物", "property": "当前记录", "value": f"第{i}次", "value_type": "string", "at_event": f"记录{i}", "quotes": [quote]} for i, quote in enumerate(selected)]
+    properties = [{"node": "人物", "property": "当前记录", "category": "未分类", "value": f"第{i}次", "value_type": "string", "at_event": f"记录{i}", "quotes": [quote]} for i, quote in enumerate(selected)]
     start = perf_counter()
     result = ops.submit_extraction(sid, {"nodes": nodes, "properties": properties})
     duration = (perf_counter() - start) * 1000

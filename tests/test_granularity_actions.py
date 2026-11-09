@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 
 import pytest
+from agent_fixtures import LOCATION_DEFINITION, location_record
 from agent_fixtures import project as project
 
 TEXT = "甲进屋。甲停下。"
@@ -39,9 +40,11 @@ def base(project):
         obj("S1", "scene", "进屋停步", TEXT, events=["E9"]),
         obj("E9", "event", "甲进屋并停下", TEXT, participants=["P1"]),
     ]
+    records = [LOCATION_DEFINITION, location_record("E9", sid, 0, TEXT)]
     assert (
         project.apply_changes(
-            objects, [], project.graph_project_info()["revision"], reason="仅事件无动作的正常初始图"
+            objects, records, project.graph_project_info()["revision"],
+            reason="仅事件无动作的正常初始图",
         )["status"]
         == "accepted"
     )
@@ -76,12 +79,14 @@ def test_explicit_actions_parent_reading_anchor_and_value_intervals_follow_sourc
     ]
     records += [
         {
-            "kind": "property_value",
+            "kind": "property_change",
+            "op": "set",
             "id": f"action_state_{i}",
             "node_id": "P1",
             "property_id": "动作状态",
             "value": value,
             "event_id": anchor,
+            "sequence": TEXT.index(quote),
             "disclosure": {"source_id": sid, "start": TEXT.index(quote)},
             "evidence": {"source_id": sid, "quote": quote},
         }
@@ -91,13 +96,15 @@ def test_explicit_actions_parent_reading_anchor_and_value_intervals_follow_sourc
         objects, records, project.graph_project_info()["revision"], reason="用户明确请求的动作细化"
     )
     assert result["status"] == "accepted", result
-    assert project.property_state("P1", "动作状态", at="A99")["state"]["value"] == "行走"
-    assert project.property_state("P1", "动作状态", at="E9")["state"]["value"] == "站定"
+    assert project.property_state("P1", "动作状态", at="A99")["state"]["values"] == ["行走"]
+    # The event's own reading point precedes its later action; the action carries the later state.
+    assert project.property_state("P1", "动作状态", at="A1")["state"]["values"] == ["站定"]
     view = project.browse_view(granularity="event", cut_id="E9")
     assert view["cut"]["event_id"] == "A1"
     assert any(level["key"] == "action" for level in view["moments"]["levels"])
     raw = next(r for r in project.property_records() if r["id"] == "action_state_0")
-    assert raw["valid_to"]["start"] == TEXT.index(SECOND)
+    assert raw["sequence"] == TEXT.index(FIRST)
+    assert not {"valid_from", "valid_to"} & set(raw)
     assert not [r for r in project.check_project()["issues"] if r["severity"] == "error"]
 
 
@@ -148,8 +155,8 @@ def test_invalid_action_containment_is_rejected_without_writing(project, problem
     result = project.apply_changes(
         objects, [], project.graph_project_info()["revision"], reason="错误包含关系应原子拒绝"
     )
-    assert result["status"] == "rejected" and any(
-        r["code"].startswith("ACTION_") for r in result["diagnostics"]
+    assert result["status"] == "staged" and any(
+        r["code"].startswith("ACTION_") for r in result["problems"]
     )
     assert project.graph_snapshot() == before
 

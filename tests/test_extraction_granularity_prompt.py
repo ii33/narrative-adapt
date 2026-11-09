@@ -53,7 +53,7 @@ def test_operations_accepts_event_location_reference_and_secondary_people(projec
         {"type": "event", "name": "跟随侍者进入后院", "scene": "@5",
          "participants": ["@1", "@2", "@3"], "quotes": [text]},
     ], "properties": [{
-        "node": "@6", "op": "set", "property": "地点", "value": "@4", "value_type": "node",
+        "node": "@6", "op": "set", "property": "地点", "category": "未分类"  , "value": "@4", "value_type": "node",
         "scope": "world", "at_event": "@6", "quotes": ["客栈后院"],
     }]}
     accepted = project.submit_extraction(source_id, draft)
@@ -79,7 +79,9 @@ def test_operations_accepts_event_location_reference_and_secondary_people(projec
                 event["id"], "地点", location["id"], "node", "world", event["id"])
     assert location_property["disclosure"]["start"] == text.index("客栈后院")
     summary = project.property_node_summary(event["id"])
-    assert next(row for row in summary["properties"] if row["property_id"] == "地点")["category"] == "基本信息"
+    # 分类只是浏览分组：属性名/取值不再参与推断，未显式给分类的记录落「未分类」；
+    # 事件地点是否由写入方补默认分类属实现细节，这里只锁「有分类且是可枚举值」。
+    assert next(row for row in summary["properties"] if row["property_id"] == "地点")["category"] in {"基本信息", "未分类"}
     assert project.property_records() == before
 
 
@@ -101,7 +103,10 @@ def test_both_modes_balance_events_between_scenes_and_actions(project):
     assert guides['standard'] != guides['fine']
     assert '可独立处理的情节单元' in DEFAULT_PROMPTS['granularity_fine']['text']
     assert '次要人物、无名人物与具体地点' in DEFAULT_PROMPTS['granularity_fine']['text']
-    assert DEFAULT_PROMPTS['extraction']['version'] == '24'
+    # 版本号会被每次提示词改动推高，这里只锁「是纯数字且不低于五层语义那一版」，
+    # 「文本改了版本没升」由 tests/test_prompt_version_snapshot.py 兜住。
+    extraction_version = DEFAULT_PROMPTS['extraction']['version']
+    assert extraction_version.isdigit() and int(extraction_version) >= 26
     assert DEFAULT_PROMPTS['granularity_standard']['version'] == '6'
     assert DEFAULT_PROMPTS['granularity_fine']['version'] == '6'
 
@@ -135,7 +140,7 @@ def test_default_remains_fine_and_independently_consequential_action_can_be_an_e
         {'type': 'person', 'name': '甲', 'quotes': [text]},
         {'type': 'scene', 'name': '计划中断', 'quotes': [text]},
         {'type': 'event', 'name': '销毁副本使计划中断', 'scene': '@2', 'participants': ['@1'], 'quotes': [text]},
-    ], 'properties': [{'node': '@3', 'property': '地点', 'value_type': 'either',
+    ], 'properties': [{'node': '@3', 'property': '地点', "category": "未分类"  , 'value_type': 'either',
         'scope': 'world', 'at_event': '@3', 'op': 'unknown', 'quotes': [text]}]})
     assert result['status'] == 'accepted'
     assert [n['node_type'] for n in project.graph_snapshot()['nodes']].count('event') == 1

@@ -6,6 +6,7 @@ import copy
 import sqlite3
 
 import pytest
+from agent_fixtures import LOCATION_DEFINITION, location_record
 from agent_fixtures import project as project
 
 from narrative.graph_store import GRAPH_SCHEMA_VERSION
@@ -49,9 +50,13 @@ def setup(project):
         "value_type": "string",
         "cardinality": "one",
     }
+    locations = [LOCATION_DEFINITION] + [
+        location_record(f"E{index + 1}", sid, TEXT.index(quote), quote)
+        for index, quote in enumerate(QUOTES)
+    ]
     result = project.apply_changes(
         nodes,
-        [definition],
+        [definition, *locations],
         project.graph_project_info()["revision"],
         reason="合成当前对象与时间区间定义",
     )
@@ -94,7 +99,7 @@ def test_a_b_c_are_event_changes_without_validity_or_retraction_objects(project)
         row = rows[f'v{i}']
         assert row['sequence'] == TEXT.index(QUOTES[i]) and row['op'] == 'set'
         assert not {'valid_from', 'valid_to'} & set(row)
-        assert project.property_state(ids['甲'], '称呼', at=ids[QUOTES[i][:-1]])['state']['value'] == 'ABC'[i]
+        assert project.property_state(ids['甲'], '称呼', at=ids[QUOTES[i][:-1]])['state']['values'] == ['ABC'[i]]
     assert {r['kind'] for r in project.property_records()} == {'property_change', 'property_definition'}
 
 
@@ -138,9 +143,9 @@ def test_suffix_rollback_deletes_later_changes_and_recomputes_from_retained_fact
     assert preview
     project.rollback_to(sid, cut, revision, reason="隔离回退到B披露点")
     values = raw_values(project)
-    assert set(values) == {"v0", "v1"}
+    assert {key for key in values if key.startswith("v")} == {"v0", "v1"}
     assert all(not {"valid_from", "valid_to"} & set(row) for row in values.values())
-    assert project.property_state(ids["甲"], "称呼")["state"]["value"] == "B"
+    assert project.property_state(ids["甲"], "称呼")["state"]["values"] == ["B"]
     snapshot = project.graph_snapshot()
     assert ids[QUOTES[2][:-1]] not in {n["id"] for n in snapshot["nodes"]}
     assert all(
@@ -200,7 +205,7 @@ def test_physical_event_merge_deletes_source_and_rewrites_references_without_ali
     assert (
         project.apply_changes(
             [duplicate, scene],
-            [prop, value],
+            [prop, value, location_record("E99", sid, TEXT.index(QUOTES[0]), QUOTES[0])],
             project.graph_project_info()["revision"],
             reason="隔离重复种子",
         )["status"]
@@ -244,12 +249,14 @@ def test_source_order_precedes_unicode_offset_for_changes_and_suffix_rollback(pr
         "nodes": [
             {"type": "person", "name": "甲", "existing_id": ids["甲"], "quotes": [later_text]},
             {"type": "scene", "name": "后来称呼", "quotes": [later_text]},
-            {"type": "event", "name": "改称D", "scene": "后来称呼", "quotes": [later_text]},
+            # 事件参与者必填：这里改称的当事人就是甲（原文「甲改称D」）。
+            {"type": "event", "location": "未知", "name": "改称D", "scene": "后来称呼",
+             "participants": ["甲"], "quotes": [later_text]},
         ],
         "properties": [
             {
                 "node": "甲",
-                "property": "称呼", "op": "set",
+                "property": "称呼", "category": "未分类"  , "op": "set",
                 "value": "D",
                 "value_type": "string",
                 "at_event": "改称D",
@@ -259,23 +266,23 @@ def test_source_order_precedes_unicode_offset_for_changes_and_suffix_rollback(pr
     }
     result = project.submit_extraction(later, payload)
     assert result["status"] == "accepted", str(result.get("diagnostics"))
-    assert project.property_state(ids["甲"], "称呼")["state"]["value"] == "D"
+    assert project.property_state(ids["甲"], "称呼")["state"]["values"] == ["D"]
     assert (
         project.property_state(ids["甲"], "称呼", at={"source_id": sid, "start": len(TEXT)})[
             "state"
-        ]["value"]
-        == "C"
+        ]["values"]
+        == ["C"]
     )
     assert (
         project.property_state(ids["甲"], "称呼", at={"source_id": later, "start": 0})["state"][
-            "value"
+            "values"
         ]
-        == "D"
+        == ["D"]
     )
     project.rollback_to(
         sid, len(TEXT), project.graph_project_info()["revision"], reason="源顺序优先于第二源偏移0"
     )
-    assert project.property_state(ids["甲"], "称呼")["state"]["value"] == "C"
+    assert project.property_state(ids["甲"], "称呼")["state"]["values"] == ["C"]
     assert "valid_to" not in raw_values(project)["v2"]
     assert not any(n["name"] == "改称D" for n in project.graph_snapshot()["nodes"])
 
@@ -309,8 +316,8 @@ def test_property_rename_and_merge_physically_rewrite_names_without_alias_rows(p
     assert not any(
         row["kind"] == "property_definition" and row["id"] in {"称呼", "临时称呼"} for row in rows
     )
-    assert {row["property_id"] for row in rows if row["kind"] == "property_change"} == {"正式称呼"}
-    assert project.property_state(ids["甲"], "正式称呼")["state"]["value"] == "C"
+    assert {row["property_id"] for row in rows if row["kind"] == "property_change" and row["property_id"] != "地点"} == {"正式称呼"}
+    assert project.property_state(ids["甲"], "正式称呼")["state"]["values"] == ["C"]
 
 
 def test_default_world_and_explicit_world_share_the_same_change_group(project):
@@ -331,7 +338,7 @@ def test_default_world_and_explicit_world_share_the_same_change_group(project):
         )["status"]
         == "accepted"
     )
-    assert project.property_state(ids["甲"], "称呼")["state"]["value"] == "B"
+    assert project.property_state(ids["甲"], "称呼")["state"]["values"] == ["B"]
     assert "valid_to" not in raw_values(project)["v0"]
 
 
@@ -365,6 +372,7 @@ def test_same_batch_updated_definition_controls_reducer_value_shape(project, sha
             == "accepted"
         )
         definition = initial | {"cardinality": "many"}
+        # 查询一律返回列表：many 是多项，one 也是长度 1 的列表。
         expected_value = ["B"]
     else:
         definition = {
@@ -390,7 +398,7 @@ def test_same_batch_updated_definition_controls_reducer_value_shape(project, sha
             == "accepted"
         )
         definition = definition | {"value_type": "either"}
-        expected_value = "无"
+        expected_value = ["无"]
     quote = QUOTES[1]
     new = old | {
         "id": "new_shape_value",
@@ -408,7 +416,7 @@ def test_same_batch_updated_definition_controls_reducer_value_shape(project, sha
     assert result["status"] == "accepted", result
     rows = raw_values(project)
     assert not any({'valid_from', 'valid_to'} & set(row) for row in rows.values())
-    assert project.property_state(old['node_id'], old['property_id'])['state']['value'] == expected_value
+    assert project.property_state(old['node_id'], old['property_id'])['state']['values'] == expected_value
 
 
 def test_clear_is_a_new_event_fact_and_preserves_previous_state_reads(project):
@@ -417,7 +425,7 @@ def test_clear_is_a_new_event_fact_and_preserves_previous_state_reads(project):
     project.record_property_change(ids['甲'], '称呼', ids[QUOTES[1][:-1]], 'clear',
         expected_revision=project.graph_project_info()['revision'], reason='本事件明确终止')
     assert project.property_state(ids['甲'], '称呼', at=ids[QUOTES[1][:-1]])['state'] == {'kind': 'absent'}
-    assert project.property_state(ids['甲'], '称呼', at=ids[QUOTES[0][:-1]])['state']['value'] == 'A'
+    assert project.property_state(ids['甲'], '称呼', at=ids[QUOTES[0][:-1]])['state']['values'] == ['A']
     assert raw_values(project)['v0']['op'] == 'set' and 'valid_to' not in raw_values(project)['v0']
 
 
@@ -476,9 +484,13 @@ def item_transfer(project, *, missing_early_holder=False):
                 "evidence": {"source_id": sid, "quote": quote},
             }
         )
+    locations = [LOCATION_DEFINITION] + [
+        location_record(f"E{i + 1}", sid, text.index(quote), quote)
+        for i, quote in enumerate([first, second])
+    ]
     result = project.apply_changes(
         nodes,
-        [definition, *values],
+        [definition, *locations, *values],
         project.graph_project_info()["revision"],
         reason="合法当前物体流转",
     )
@@ -488,13 +500,13 @@ def item_transfer(project, *, missing_early_holder=False):
 
 def test_rollback_recomputes_prior_holder_and_retains_scene_consistency(project):
     sid, cut = item_transfer(project)
-    assert project.property_state("I1", "持有者")["state"]["value"] == "P2"
+    assert project.property_state("I1", "持有者")["state"]["values"] == ["P2"]
     result = project.rollback_to(
         sid, cut, project.graph_project_info()["revision"], reason="回到甲持有的句末"
     )
     assert result["status"] == "accepted"
-    assert project.property_state("I1", "持有者")["state"]["value"] == "P1"
-    assert set(raw_values(project)) == {"holder0"}
+    assert project.property_state("I1", "持有者")["state"]["values"] == ["P1"]
+    assert {key for key in raw_values(project) if key.startswith("holder")} == {"holder0"}
     assert "valid_to" not in raw_values(project)["holder0"]
     nodes = {n["id"]: n for n in project.graph_snapshot()["nodes"]}
     assert "P2" not in nodes and "E2" not in nodes and nodes["S1"]["events"] == ["E1"]

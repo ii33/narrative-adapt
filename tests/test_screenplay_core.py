@@ -17,7 +17,8 @@ def seed(project):
     nodes = [{"type": "person", "name": "甲", "quotes": [QUOTES[0]]},
              {"type": "big_event", "name": "入屋", "quotes": [TEXT]},
              {"type": "scene", "name": "门口与屋内", "big_event": "入屋", "quotes": [TEXT]}]
-    nodes += [{"type": "event", "name": quote[:-1], "scene": "门口与屋内", "participants": ["甲"], "quotes": [quote]} for quote in QUOTES]
+    nodes += [{"type": "event", "name": quote[:-1], "scene": "门口与屋内", "location": "未知",
+               "participants": ["甲"], "quotes": [quote]} for quote in QUOTES]
     result = project.submit_extraction(sid, {"nodes": nodes, "properties": []})
     assert result["status"] == "accepted", result
     state = project.sync_adaptation()
@@ -97,8 +98,10 @@ def test_read_and_preview_do_not_initialize_any_script_table(project):
 def test_explicit_creation_initializes_current_tables_atomically_and_preserves_source(project):
     ids = seed(project)
     source = copy.deepcopy(project.graph_snapshot())
-    with pytest.raises(ValueError):
-        project.create_screenplay("错误", format="episode", reason="合成错误")
+    refused = project.create_screenplay("错误", format="episode", reason="合成错误")
+    assert refused["status"] == "staged", refused
+    assert refused["problems"][0]["code"] == "CONTENT_VALIDATION"
+    assert refused["problems"][0]["path"] == ["format"]
     assert not set(TABLES) & tables(project)
     created = span(project, ids)
     assert set(TABLES) <= tables(project)
@@ -115,7 +118,7 @@ def test_span_dynamic_membership_ignores_outside_changes_and_uniform_translation
     initial = current["span_fingerprint"]
     edit(project, ids, ids["甲坐下"], {"name": "甲静坐"})
     assert project.read_adaptation_span(span_id)["span_fingerprint"] == initial
-    state = edit(project, ids, changes={"node_type": "event", "name": "整理衣襟"},
+    state = edit(project, ids, changes={"node_type": "event", "name": "整理衣襟", "initial_location": "未知"},
                                          parent_id=ids["门口与屋内"], after_id=ids["甲开门"])
     inserted = next(n["id"] for n in state["nodes"] if n["name"] == "整理衣襟")
     assert inserted in project.read_adaptation_span(span_id)["member_node_ids"]
@@ -124,7 +127,7 @@ def test_span_dynamic_membership_ignores_outside_changes_and_uniform_translation
     assert project.read_adaptation_span(span_id)["span_fingerprint"] == initial
     state = edit(project, ids, changes={"node_type": "scene", "name": "远处"})
     outside_scene = next(n["id"] for n in state["nodes"] if n["name"] == "远处")
-    state = edit(project, ids, changes={"node_type": "event", "name": "风吹过"}, parent_id=outside_scene)
+    state = edit(project, ids, changes={"node_type": "event", "name": "风吹过", "initial_location": "未知"}, parent_id=outside_scene)
     outside = next(n["id"] for n in state["nodes"] if n["name"] == "风吹过")
     move(project, ids, ids["门口与屋内"], after_id=outside)
     assert project.read_adaptation_span(span_id)["span_fingerprint"] == initial
@@ -216,7 +219,7 @@ def test_five_level_selection_deduplicates_and_reports_interleaving_overlap(proj
     assert preview["member_node_ids"] == [ids["甲敲门"], action_id, ids["甲开门"], ids["甲进屋"], ids["甲坐下"]]
     state = edit(project, ids, changes={"node_type": "scene", "name": "交错场景"})
     other_scene = next(n["id"] for n in state["nodes"] if n["name"] == "交错场景")
-    state = edit(project, ids, changes={"node_type": "event", "name": "交错事件"}, parent_id=other_scene, after_id=ids["甲开门"])
+    state = edit(project, ids, changes={"node_type": "event", "name": "交错事件", "initial_location": "未知"}, parent_id=other_scene, after_id=ids["甲开门"])
     outside = next(n["id"] for n in state["nodes"] if n["name"] == "交错事件")
     preview = project.preview_adaptation_span(ids["_script"], selection_ids=[ids["门口与屋内"]])
     assert outside in preview["member_node_ids"]
@@ -232,19 +235,21 @@ def test_writing_span_input_obeys_existing_adaptation_visibility(suppressed):
     adaptation = {"timeline_id": "test-axis", "nodes": [
         {"id": "start", "name": "起点", "node_type": "event", "sort_id": 100, "participants": ["owner", "holder"]},
         {"id": "end", "name": "终点", "node_type": "event", "sort_id": 200, "participants": ["owner", "holder"]},
-        {"id": "owner", "name": "甲", "node_type": "person", "sort_id": 1000},
-        {"id": "holder", "name": "乙", "node_type": "person", "sort_id": 1001},
-        {"id": "location", "name": "桥边", "node_type": "location", "sort_id": 1002}],
+        {"id": "owner", "name": "甲", "node_type": "person", "sort_id": 50},
+        {"id": "holder", "name": "乙", "node_type": "person", "sort_id": 51},
+        {"id": "location", "name": "桥边", "node_type": "location", "sort_id": 52}],
         "properties": [{"id": "地点", "kind": "property_definition", "value_type": "node", "cardinality": "one"},
-                       {"id": "v1", "kind": "property_value", "node_id": "owner", "property_id": "地点", "value": "location",
-                        "holder_id": "holder", "scope": "cognition", "event_id": "start", "end_event_id": "end"}]}
+                       {"id": "v1", "kind": "property_change", "node_id": "owner", "property_id": "地点", "value": "location",
+                        "op": "set", "sequence": 0, "holder_id": "holder", "scope": "cognition", "event_id": "start", "end_event_id": "end"}]}
     definition = {"id": "span", "timeline_id": "test-axis", "start_node_id": "start", "end_node_id": "end"}
     initial = resolve_span(adaptation, definition)
     assert initial["input"]["states"][0]["values"][0]["id"] == "v1"
     next(n for n in adaptation["nodes"] if n["id"] == suppressed)["suppressed"] = True
     current = resolve_span(adaptation, definition)
-    if suppressed == "end":
-        assert any(s["values"] for s in current["input"]["states"])  # hidden end still bounds future validity
+    if suppressed in {"start", "end"}:
+        # State time survives narrative suppression: hiding the event that
+        # introduced a fact does not retract the fact for later effective points.
+        assert any(s["values"] for s in current["input"]["states"])
     else:
         assert not any(s["values"] for s in current["input"]["states"])
     assert suppressed not in {n["id"] for n in current["input"]["entities"]}

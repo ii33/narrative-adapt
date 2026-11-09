@@ -48,7 +48,7 @@ def validate(ops, fixture, screenplay, calls, report):
         "no_duplicate_key_or_default_action": sum(node["name"] == "铜钥匙" for node in nodes) == 1 and not any(node["node_type"] == "action" for node in nodes),
         "coordinates_program_located_exactly": bool(nodes) and len(spans) >= len(nodes) and all(span.get("source_id") == fixture["source_id"] and TEXT[span["start"]:span["end"]] == span["quote"] for span in spans),
         "historical_holder_preserved": any(row.get("value") == named.get("周宁", {}).get("id") for row in holders),
-        "current_holder_correct": bool(key) and ops.property_state(key, "持有者")["state"] == {"kind": "known", "value": named.get("林岚", {}).get("id")},
+        "current_holder_correct": bool(key) and ops.property_state(key, "持有者")["state"] == {"kind": "known", "values": [named.get("林岚", {}).get("id")]},
         "event_location_supported": any(row.get("kind") == "property_change" and row.get("node_id") in {node["id"] for node in nodes if node["node_type"] == "event"} and row.get("value") == named.get("资料室", {}).get("id") for row in records),
         "static_precheck_no_errors": check["counts"].get("error", 0) == 0,
         "source_text_unchanged": ops.source(fixture["source_id"]) == fixture["source_before"]}

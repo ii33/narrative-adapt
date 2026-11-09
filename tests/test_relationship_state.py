@@ -54,14 +54,14 @@ def setup_relations(project):
 
 def values(project, node, cut=None):
     state = project.property_state(node, '朋友', cut)['state']
-    return set(state['value']) if state['kind'] == 'known' else set()
+    return set(state['values']) if state['kind'] == 'known' else set()
 
 
 def test_multiple_counterparts_survive_submit_state_and_browse(project):
     ids = setup_relations(project)
     assert values(project, ids["甲"]) == {ids["乙"], ids["丙"]}
     state = project.property_state(ids["甲"], "朋友")
-    assert set(state["state"]["value"]) == {ids["乙"], ids["丙"]}
+    assert set(state["state"]["values"]) == {ids["乙"], ids["丙"]}
     assert len(state["active_change_ids"]) == 2
     assert values(project, ids["甲"], ids["甲认识朋友乙"]) == {ids["乙"]}
     assert not any(r["kind"] == "property_retraction" for r in project.property_records())
@@ -88,8 +88,8 @@ def test_nonrelationship_node_values_close_previous_holder_interval(project):
     sid, ids, _ = install(project, value='无')
     rows = record(sid, ids, ids['甲'], identifier='holder1', event_index=1)
     assert project.apply_changes([], rows, project.graph_project_info()['revision'], '换手')['status'] == 'accepted'
-    assert project.property_state('I1', '持有者', ids['一块石头在地上'])['state']['value'] == '无'
-    assert project.property_state('I1', '持有者')['state']['value'] == ids['甲']
+    assert project.property_state('I1', '持有者', ids['一块石头在地上'])['state']['values'] == ['无']
+    assert project.property_state('I1', '持有者')['state']['values'] == [ids['甲']]
     assert next(r for r in project.property_records() if r['id'] == 'holder0')['value'] == '无'
 
 
@@ -115,7 +115,7 @@ def test_person_id_shaped_text_is_not_a_relationship(project):
     )
     mapped = tool_api.call("relation_map", {}, project=layout(project.project_info().path).entry)
     assert {edge["kind"] for edge in mapped["edges"]} == {"朋友"}
-    assert project.property_state(ids["甲"], "代号")["state"]["value"] == ids["乙"]
+    assert project.property_state(ids["甲"], "代号")["state"]["values"] == [ids["乙"]]
 
 
 @pytest.mark.parametrize("value_type", ["node", "either"])

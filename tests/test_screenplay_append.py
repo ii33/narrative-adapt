@@ -45,7 +45,7 @@ def test_append_at_tail_preserves_old_content_order_and_written_work_then_dedupl
     edit(project, screenplay_id, ids["甲坐下"], {"name": "本地静坐"})
     edit(project, screenplay_id, ids["甲"], {"name": "剧本甲"})
     local = project.read_screenplay_timeline(screenplay_id)
-    project.edit_screenplay_timeline_node(screenplay_id, changes={"node_type": "event", "name": "本地插入"},
+    project.edit_screenplay_timeline_node(screenplay_id, changes={"node_type": "event", "name": "本地插入", "initial_location": "未知"},
         parent_id=ids["门口与屋内"], expected_timeline_revision=local["revision"], reason="本地插入并调序")
     segment_id, unit_id, span_id = write_body(project, screenplay_id, ids["甲坐下"], ids["甲"])
     project.edit_adaptation_node(ids["门口与屋内"], {"name": "源场景改名"})
@@ -86,29 +86,30 @@ def test_append_at_tail_preserves_old_content_order_and_written_work_then_dedupl
 
 def initial_state(project):
     ids = seed(project)
-    source = project.set_adaptation_property(ids["甲"], "服装", "青衣", event_id=ids["甲敲门"])
+    source = project.set_adaptation_property(ids["甲"], "服装", ids["甲敲门"], "set", "青衣")
     record = next(r for r in source["properties"] if r.get("property_id") == "服装")
     screenplay_id = create(project)
     import_points(project, screenplay_id, [ids["甲敲门"]])
     return ids, screenplay_id, record["id"]
 
 
-def test_append_continues_unedited_open_source_state_with_explicit_boundary_update(project):
+def test_append_continues_unedited_open_source_state_with_new_change_record(project):
     ids, screenplay_id, record_id = initial_state(project)
     old = copy.deepcopy(project.read_screenplay_timeline(screenplay_id))
-    project.set_adaptation_property(ids["甲"], "服装", "白衣", event_id=ids["甲坐下"], record_id=record_id)
+    project.set_adaptation_property(ids["甲"], "服装", ids["甲坐下"], "set", "白衣")
     result = append(project, screenplay_id, [ids["甲坐下"]])
     prior = next(r for r in result["properties"] if r["id"] == record_id)
-    assert prior["value"] == "青衣" and prior["end_event_id"] == ids["甲坐下"]
-    assert result["import_summary"]["boundary_updates"] == [{"record_id": record_id, "previous_end_event_id": None, "end_event_id": ids["甲坐下"]}]
+    assert prior["value"] == "青衣" and prior["event_id"] == ids["甲敲门"]
+    assert "end_event_id" not in prior
     new_values = [r for r in result["properties"] if r.get("property_id") == "服装" and r["id"] != record_id]
-    assert len(new_values) == 1 and new_values[0]["value"] == "白衣"
+    assert len(new_values) == 1 and new_values[0]["value"] == "白衣" and new_values[0]["event_id"] == ids["甲坐下"]
+    assert "boundary_updates" not in result["import_summary"]
     assert all(by_id(result, n["id"])["sort_id"] == n["sort_id"] for n in old["nodes"])
     assert ids["甲开门"] not in {n["id"] for n in result["nodes"]}
     assert ids["甲进屋"] not in {n["id"] for n in result["nodes"]}
     repeated = append(project, screenplay_id, [ids["甲坐下"]])
     assert repeated["properties"] == result["properties"]
-    assert repeated["import_summary"]["boundary_updates"] == []
+    assert repeated["import_summary"]["added_property_ids"] == []
 
 
 @pytest.mark.parametrize("changed", ["local_value", "source_value"])
@@ -117,30 +118,38 @@ def test_append_never_replaces_changed_existing_value_or_silently_closes_it(proj
     write_body(project, screenplay_id, ids["甲敲门"], ids["甲"])
     if changed == "local_value":
         local = project.read_screenplay_timeline(screenplay_id)
-        project.set_screenplay_timeline_property(screenplay_id, ids["甲"], "服装", "本地红衣", record_id=record_id,
+        project.set_screenplay_timeline_property(screenplay_id, ids["甲"], "服装", ids["甲敲门"], "set", "本地红衣", record_id=record_id,
             expected_timeline_revision=local["revision"], reason="本地属性改写")
     else:
-        project.set_adaptation_property(ids["甲"], "服装", "源修正青衣", event_id=ids["甲敲门"], record_id=record_id)
-    project.set_adaptation_property(ids["甲"], "服装", "白衣", event_id=ids["甲坐下"], record_id=record_id)
-    before = read_context(project)
-    with pytest.raises(ValueError, match="区间.*重叠.*未关闭或改写"):
-        append(project, screenplay_id, [ids["甲坐下"]])
-    assert read_context(project) == before
+        project.set_adaptation_property(ids["甲"], "服装", ids["甲敲门"], "set", "源修正青衣", record_id=record_id)
+    project.set_adaptation_property(ids["甲"], "服装", ids["甲坐下"], "set", "白衣")
+    result = append(project, screenplay_id, [ids["甲坐下"]])
+    existing = next(r for r in result["properties"] if r["id"] == record_id)
+    assert existing["value"] == ("本地红衣" if changed == "local_value" else "青衣")
+    assert "end_event_id" not in existing
+    source = next(r for r in project.adaptation_snapshot()["properties"] if r["id"] == record_id)
+    assert source["value"] == ("源修正青衣" if changed == "source_value" else "青衣")
+    assert any(r["value"] == "白衣" and r["event_id"] == ids["甲坐下"]
+               for r in result["properties"] if r.get("property_id") == "服装")
 
 
-def test_append_preserves_authored_closed_interval_and_skips_existing_value_updates(project):
+def test_append_preserves_authored_change_records_and_skips_existing_value_updates(project):
     ids, screenplay_id, record_id = initial_state(project)
     local = project.read_screenplay_timeline(screenplay_id)
-    local = project.edit_screenplay_timeline_node(screenplay_id, changes={"node_type": "event", "name": "本地服装失效"},
+    local = project.edit_screenplay_timeline_node(screenplay_id, changes={"node_type": "event", "name": "本地服装失效", "initial_location": "未知"},
         parent_id=ids["门口与屋内"], after_id=ids["甲敲门"], expected_timeline_revision=local["revision"], reason="本地边界")
     local_end = next(n["id"] for n in local["nodes"] if n["name"] == "本地服装失效")
-    project.set_screenplay_timeline_property(screenplay_id, ids["甲"], "服装", event_id=local_end, record_id=record_id,
-        expire=True, expected_timeline_revision=local["revision"], reason="明确本地失效")
-    previous = copy.deepcopy(next(r for r in project.read_screenplay_timeline(screenplay_id)["properties"] if r["id"] == record_id))
-    project.set_adaptation_property(ids["甲"], "服装", "白衣", event_id=ids["甲坐下"], record_id=record_id)
+    local = project.set_screenplay_timeline_property(screenplay_id, ids["甲"], "服装", local_end, "clear",
+        expected_timeline_revision=local["revision"], reason="明确本地失效")
+    previous = copy.deepcopy(next(r for r in local["properties"] if r["id"] == record_id))
+    cleared = copy.deepcopy(next(r for r in local["properties"] if r.get("property_id") == "服装" and r["event_id"] == local_end))
+    project.set_adaptation_property(ids["甲"], "服装", ids["甲坐下"], "set", "白衣")
     result = append(project, screenplay_id, [ids["甲坐下"]])
     assert next(r for r in result["properties"] if r["id"] == record_id) == previous
-    assert result["import_summary"]["boundary_updates"] == []
+    assert next(r for r in result["properties"] if r["id"] == cleared["id"]) == cleared
+    assert any(r.get("value") == "白衣" and r["event_id"] == ids["甲坐下"]
+               for r in result["properties"] if r.get("property_id") == "服装")
+    assert "boundary_updates" not in result["import_summary"]
 
 
 def test_append_checks_both_revisions_and_invalid_selections_atomically(project):
@@ -165,9 +174,10 @@ def test_append_checks_both_revisions_and_invalid_selections_atomically(project)
 
 def test_append_skips_existing_value_even_when_source_changed_without_new_state(project):
     ids, screenplay_id, record_id = initial_state(project)
-    previous = copy.deepcopy(project.read_screenplay_timeline(screenplay_id)["properties"])
-    project.set_adaptation_property(ids["甲"], "服装", "来源修正服装", event_id=ids["甲敲门"], record_id=record_id)
+    previous = copy.deepcopy([r for r in project.read_screenplay_timeline(screenplay_id)["properties"]
+                              if r.get("property_id") == "服装"])
+    project.set_adaptation_property(ids["甲"], "服装", ids["甲敲门"], "set", "来源修正服装", record_id=record_id)
     result = append(project, screenplay_id, [ids["甲坐下"]])
-    assert result["properties"] == previous
+    assert [r for r in result["properties"] if r.get("property_id") == "服装"] == previous
     assert record_id in result["import_summary"]["skipped_existing_property_ids"]
-    assert result["import_summary"]["boundary_updates"] == []
+    assert "boundary_updates" not in result["import_summary"]

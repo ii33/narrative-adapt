@@ -6,10 +6,11 @@ import copy
 from .state_anchors import anchor_nodes
 
 
-def event_order(snapshot):
-    return {key: node["sort_id"] for key, node in {
-        **anchor_nodes(snapshot), **{node["id"]: node for node in snapshot["nodes"]}
-    }.items() if node.get("node_type") in {"event", "action"} and not node.get("suppressed") and not node.get("retracted")}
+def event_order(snapshot, *, include_suppressed=False):
+    nodes = {**anchor_nodes(snapshot), **{node["id"]: node for node in snapshot["nodes"]}}
+    return {key: node["sort_id"] for key, node in nodes.items()
+            if node.get("node_type") in {"event", "action"} and not node.get("retracted")
+            and (include_suppressed or not node.get("suppressed"))}
 
 
 def group_key(row):
@@ -17,12 +18,12 @@ def group_key(row):
             row.get("scope", "world"), row.get("holder_id"))
 
 
-def replay(snapshot, cutoff=None):
+def replay(snapshot, cutoff=None, *, include_suppressed_events=False):
     from .property_core import reduce_changes
 
     nodes = {node["id"]: node for node in snapshot["nodes"]}
     definitions = {row["id"]: row for row in snapshot["properties"] if row.get("kind") == "property_definition"}
-    order = event_order(snapshot)
+    order = event_order(snapshot, include_suppressed=include_suppressed_events)
     if cutoff is None:
         cutoff = max((node["sort_id"] for node in snapshot["nodes"] if node["id"] in order), default=float("-inf"))
     groups = {}
@@ -46,7 +47,7 @@ def replay(snapshot, cutoff=None):
     return result
 
 
-def current_rows(snapshot, cutoff=None):
+def current_rows(snapshot, cutoff=None, *, include_suppressed_events=False):
     """Derived current facts with unchanged change provenance, never persisted."""
     from .property_core import relation_target
 
@@ -54,7 +55,7 @@ def current_rows(snapshot, cutoff=None):
     raw = {row["id"]: row for row in snapshot["properties"]}
     nodes = {node["id"]: node for node in snapshot["nodes"]}
     definitions = {row["id"]: row for row in snapshot["properties"] if row.get("kind") == "property_definition"}
-    for key, result in replay(snapshot, cutoff).items():
+    for key, result in replay(snapshot, cutoff, include_suppressed_events=include_suppressed_events).items():
         state, active = result["state"], result.get("active_change_ids", [])
         history = result["history_changes"]
         if not history:
@@ -66,15 +67,16 @@ def current_rows(snapshot, cutoff=None):
                    provenance=copy.deepcopy(contributors), history_change_ids=[change["id"] for change in history])
         if state["kind"] == "known":
             row["op"] = "set"
-            value = state["value"]
+            # 状态查询是列表；投影出来的是记录，单值还原成标量、集合保持列表。
+            values = state["values"]
             relation = definitions[key[1]].get("cardinality", "one") == "one" and any(relation_target(change, nodes, definitions) for change in history)
             if relation:
-                for target in value:
+                for target in values:
                     source = next((change for change in reversed(contributors) if change.get("value") == target), row)
                     rows.append(row | {"id": source["id"], "event_id": source["event_id"], "sequence": source["sequence"],
                                        "value": target, "active_change_ids": [source["id"]]})
                 continue
-            row["value"] = copy.deepcopy(value)
+            row["value"] = copy.deepcopy(list(values) if definitions[key[1]].get("cardinality") == "many" else values[0])
         if state["kind"] == "unknown":
             row["op"] = "unknown"
         elif state["kind"] == "absent":

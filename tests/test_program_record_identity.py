@@ -24,7 +24,8 @@ def test_same_value_in_distinct_scope_or_holder_is_not_dropped(project, scopes):
         data["properties"].append(row)
     assert project.preview_extraction(sid, data)["valid"]
     result = project.submit_extraction(sid, data)
-    assert result["status"] == "accepted" and result["property_count"] == 2
+    # Each active event also receives its own world location definition/change.
+    assert result["status"] == "accepted" and result["property_count"] == 6
     records = friend_rows(project)
     assert len(records) == 2 and len({row["id"] for row in records}) == 2
     assert all(row["id"].startswith("PC") and row["id"][2:].isdigit() for row in records)
@@ -47,7 +48,7 @@ def test_same_anchor_and_value_at_different_disclosure_positions_are_preserved(p
 def test_typed_json_value_is_preserved_without_model_stringification(project):
     sid = project.import_source("原文", TEXT)
     data = draft_result(ended=False)
-    data["properties"] = [{"node": "甲", "property": "备注", "op": "set", "value_type": "any",
+    data["properties"] = [{"node": "甲", "property": "备注", "category": "未分类", "op": "set", "value_type": "any",
                             "value": {"items": [1, False]}, "quotes": ["甲约好接乙。"], "at_event": "甲约好接乙"}]
     assert project.submit_extraction(sid, data)["status"] == "accepted"
     row = next(row for row in project.property_records() if row.get("property_id") == "备注")
@@ -59,10 +60,11 @@ def test_automatic_ids_skip_explicitly_reserved_definition_ids(project):
 
     sid, event = seed(project)
     person = next(node for node in project.graph_snapshot()["nodes"] if node["node_type"] == "person")
-    records = [{"kind": "property_definition", "id": "PC1", "value_type": "string", "cardinality": "one"},
-               {"kind": "property_change", "op": "set", "sequence": 0, "node_id": person["id"], "property_id": "PC1", "value": "观察",
+    records = [{"kind": "property_definition", "id": "PC2", "value_type": "string", "cardinality": "one"},
+               {"kind": "property_change", "op": "set", "sequence": 0, "node_id": person["id"], "property_id": "PC2", "value": "观察",
                 "event_id": event["id"], "evidence": {"source_id": sid, "quote": "停下张望"}}]
     result = project.apply_changes([], records, project.graph_project_info()["revision"], "程序分配避开用户语义属性名")
     assert result["status"] == "accepted"
-    value = next(row for row in project.property_records() if row["kind"] == "property_change")
-    assert value["id"] == "PC2"
+    value = next(row for row in project.property_records()
+                 if row["kind"] == "property_change" and row["property_id"] == "PC2")
+    assert value["id"] == "PC3"

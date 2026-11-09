@@ -34,15 +34,19 @@ def browse(tmp_path, monkeypatch):
         app.processEvents()
 
 
-@pytest.mark.parametrize("value,explanation", [("未记录", "尚无该属性的记录"),
-                                             ("未披露", "截至当前阅读位置尚未披露")])
-def test_missing_holder_is_not_a_historical_or_scene_derived_fact(browse, value, explanation):
+@pytest.mark.parametrize("values,explanation", [
+    ([], "尚无该属性的记录"),
+])
+def test_missing_holder_is_not_a_historical_or_scene_derived_fact(browse, values, explanation):
     placeholder = {"property_id": "holder", "property_ids": ["holder"], "aspect": "holder",
-        "label": "持有者", "category": "归属与持有", "value": value, "value_node": None,
+        "label": "持有者", "category": "归属与持有", "value_node": None,
         "scope": "world", "scopes": ["world"], "is_current": False, "derived": True,
-        "state": "unrecorded", "disclosed_at": "", "records": []}
+        "state": {"kind": "unrecorded"}, "state_kind": "unrecorded",
+        "disclosed_at": "", "records": []}
     result = browse.buildItem(placeholder).toVariant()
-    assert result["valueText"] == value
+    # Missing state is displayed as "未记录"; the explanation says it was never
+    # recorded. States carry values, never a scalar value — so no value field here.
+    assert result["valueText"] == "未记录"
     assert result["derivedText"] == explanation
     assert result["disclosedText"] == ""
     assert result["records"] == [] and result["recordIds"] == []
@@ -51,7 +55,8 @@ def test_missing_holder_is_not_a_historical_or_scene_derived_fact(browse, value,
 
 @pytest.mark.parametrize("current", [True, False])
 def test_real_scene_derived_progress_retains_source_and_history(browse, current):
-    item = {"property_id": "storyline_progress", "value": "正在交谈", "scope": "world",
+    item = {"property_id": "storyline_progress", "state": {"kind": "known", "values": ["正在交谈"]},
+            "state_kind": "known", "scope": "world",
             "derived": True, "from_scene": {"name": "门前交谈"}, "is_current": current,
             "disclosed_at": "E1", "records": [{"id": "actual-record"}]}
     result = browse.buildItem(item).toVariant()

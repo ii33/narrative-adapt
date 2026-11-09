@@ -601,19 +601,64 @@ Item {
     }
 
     readonly property var changeOps:[{key:"set",label:"设为"},{key:"add",label:"增加"},{key:"remove",label:"移除"},{key:"clear",label:"清除"},{key:"unknown",label:"未知"}]
+    // 状态形状由后端给定：kind 决定显示哪一行文案，known 才渲染 values 列表。
+    // 状态只读 values；单值属性也是长度 1 的列表，界面不自己拼 value。
+    function stateKind(item) {
+        if (!item) return ""
+        return item.state_kind || (typeof item.state === "object" && item.state ? item.state.kind : "") || ""
+    }
+    function stateValues(item) {
+        var state = (item && item.state) || ({})
+        var values = state.values
+        return values === undefined || values === null ? [] : values
+    }
+    // 值指向节点时显示节点名；其余原样显示。
+    function valueLabel(value) {
+        if (value === null || value === undefined || value === "") return "（空）"
+        if (typeof value === "string") return page.nameOf(value)
+        return typeof value === "object" ? JSON.stringify(value) : String(value)
+    }
+    // 列表一律逐项一行：单值也走这里（长度 1 就是一行），界面不判断「是不是单值属性」。
+    function valuesText(values) {
+        var list = values || []
+        var lines = []
+        for (var i = 0; i < list.length; ++i) lines.push(page.valueLabel(list[i]))
+        return lines.join("\n")
+    }
     function valueText(item) {
-        var state=item.state_kind||(typeof item.state==="object"&&item.state?item.state.kind:"");
-        if(state==="unknown")return "未知";
-        if(state==="absent")return "已清除";
-        if(state==="unrecorded")return "未记录";
-        if(state==="conflict")return "变更冲突，需核对";
-        if (item.value_node) return item.value_node.name
-        if (item.value === null || item.value === undefined) return "（空）"
-        return String(item.value)
+        var kind = page.stateKind(item)
+        if (kind === "unrecorded") return "未记录"
+        if (kind === "unknown") return "未知"
+        if (kind === "absent") return "无"
+        if (kind === "conflict") return "冲突（同事件同序号不相容）"
+        var text = page.valuesText(page.stateValues(item))
+        // known 至少一项；真收到空列表就按「无」显示，不冒充有值。
+        return text.length > 0 ? text : "无"
+    }
+    // 值的跳转目标：恰好一个值且它是节点时才可点，多值不猜。
+    function valueNodeId(item) {
+        if (page.stateKind(item) !== "known") return ""
+        var values = page.stateValues(item)
+        if (values.length !== 1 || typeof values[0] !== "string") return ""
+        return page.nameOf(values[0]) === values[0] ? "" : values[0]
+    }
+    // 两种形状别混：状态（查询态）是 {kind, values:[...]}，讲「当前有效值有哪些」；
+    // 变更记录仍是单值 value，讲「这一步把值设成了什么」。反向/声称/认知这些
+    // 「引用一行记录」的视图也沿用记录形状——不要去统一成 values。
+    function recordValues(record) {
+        var row = record || ({})
+        if (row.values !== undefined && row.values !== null) return row.values
+        var value = row.value
+        if (value === undefined || value === null) return []
+        return Array.isArray(value) ? value : [value]
+    }
+    function recordValueText(record) {
+        var text = page.valuesText(page.recordValues(record))
+        return text.length > 0 ? text : "（空）"
     }
 
     function buildItem(item) {
-        var unrecorded = (item.state_kind || (item.state || {}).kind) === "unrecorded"
+        var unrecorded = page.stateKind(item) === "unrecorded"
         var records = item.records || []
         var ids = []
         for (var i = 0; i < records.length; ++i) ids.push(records[i].id)
@@ -637,7 +682,7 @@ Item {
             recordIds: ids,
             valueText: (!unrecorded && item.is_current === false
                         ? "（历史）" : "") + page.valueText(item),
-            valueNodeId: item.value_node ? item.value_node.id : "",
+            valueNodeId: page.valueNodeId(item),
             scopeText: scopes.length > 1 ? scopeText : (page.scopeLabels[item.scope] || "世界"),
             mixedScope: scopes.length > 1,
             holderId: item.holder_id || "",
@@ -647,7 +692,7 @@ Item {
             disclosedText: unrecorded ? "" : ("披露于 " + (item.disclosed_at || "—")),
             // 大事件这一行是从场景借来的：说清出处，读者才知道它是跟着阅读位置变的。
             derivedText: unrecorded
-                ? (item.value === "未披露" ? "截至当前阅读位置尚未披露" : "尚无该属性的记录")
+                ? "尚无该属性的记录"
                 : item.derived === true
                 ? ("来自场景 " + ((item.from_scene || {}).name || "—") + "，随阅读位置更新")
                 : "",
@@ -1344,8 +1389,9 @@ Item {
                                         Layout.fillWidth: true
                                         text: {
                                             var record = page.focusedIssue.record || ({})
+                                            var values = page.recordValues(record)
                                             return (record.property_id || record.kind || "") + " · "
-                                                + (record.value !== undefined ? JSON.stringify(record.value) : record.reason || "")
+                                                + (values.length > 0 ? page.recordValueText(record) : record.reason || "")
                                         }
                                         wrapMode: Text.Wrap; color: t.body
                                     }
@@ -1694,7 +1740,10 @@ Item {
                                                 || page.propertyLabels[modelData.property_id]
                                                 || modelData.property_id) + " = "
                                                 + (modelData.node_type ? "" : "")
-                                                + page.nameOf(modelData.value)
+                                                // 反向记录说的就是「本节点是它的值」；记录不带值时用本节点名。
+                                                + (page.recordValues(modelData).length > 0
+                                                   ? page.recordValueText(modelData)
+                                                   : page.nameOf(page.selectedId))
                                             color: t.body
                                             font.pixelSize: 11
                                             elide: Text.ElideRight
@@ -1759,7 +1808,7 @@ Item {
                                         }
                                         Label {
                                             text: "· " + modelData.property_label + " = "
-                                                + page.nameOf(modelData.value)
+                                                + page.recordValueText(modelData)
                                             color: t.body
                                             font.pixelSize: 11
                                             elide: Text.ElideRight
@@ -1824,7 +1873,7 @@ Item {
                                         }
                                         Label {
                                             text: "· " + modelData.property_label + " = "
-                                                + page.nameOf(modelData.value)
+                                                + page.recordValueText(modelData)
                                             color: t.body
                                             font.pixelSize: 11
                                             elide: Text.ElideRight

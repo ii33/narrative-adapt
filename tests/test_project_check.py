@@ -95,8 +95,8 @@ def test_earlier_bad_change_is_still_reported_after_later_valid_fact(project):
     result = project.check_project()
     offending = [r for r in result['issues'] if r.get('record_id') == bad['id'] or bad['id'] in r.get('record_ids', [])]
     assert [r for r in offending if r['severity'] == 'error']
-    assert project.property_state('I1', '曾接触者')['state']['value'] == ids['甲']
-    assert project.property_state('I1', '持有者')['state']['value'] == '未知'
+    assert project.property_state('I1', '曾接触者')['state']['values'] == [ids['甲']]
+    assert project.property_state('I1', '持有者')['state']['values'] == ['未知']
     assert project.property_records() == before
 
 

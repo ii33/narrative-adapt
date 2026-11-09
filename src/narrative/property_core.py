@@ -168,7 +168,8 @@ def reduce_changes(changes, definition, nodes, *, event_order, cut=None):
                     partners[value] = identifier
                 elif op == 'remove':
                     partners.pop(value, None)
-                state = {'kind': 'known', 'value': list(partners)} if partners else {'kind': 'absent'}
+                # 查询一律返回当前有效值列表（对齐原始契约）：单值属性也是长度 1 的列表。
+                state = {'kind': 'known', 'values': list(partners)} if partners else {'kind': 'absent'}
                 active = list(partners.values()) or [identifier]
             elif many:
                 values = value if isinstance(value, list) else []
@@ -183,9 +184,10 @@ def reduce_changes(changes, definition, nodes, *, event_order, cut=None):
                     for v in values:
                         known_members.pop(_freeze(v), None)
                     active.append(identifier)
-                state = {'kind': 'known', 'value': list(known_members.values())} if baseline else {'kind': 'unknown'}
+                state = {'kind': 'known', 'values': list(known_members.values())} if baseline else {'kind': 'unknown'}
             elif op == 'set':
-                state, active = {'kind': 'known', 'value': value}, [identifier]
+                # 查询形状与基数无关：one 也返回列表，len(values) == 1。
+                state, active = {'kind': 'known', 'values': [value]}, [identifier]
             else:
                 diagnostics.append(_issue('OP', '单值非人物关系只允许set、clear或unknown', identifier))
     if diagnostics and any(d['code'] in {'STATE_GROUP', 'EVENT_ORDER', 'SEQUENCE'} for d in diagnostics):

@@ -68,7 +68,7 @@ def test_graph_content_invalid_stage_no_nested_duplicate_and_patch(project):
     committed = project.patch_content_submission(staged['submission_id'], 1,
         [{'op': 'set', 'path': ['value'], 'value': 3}], '只改数值')
     assert committed['status'] == 'accepted'
-    assert project.property_state(names['甲'], '新计数')['state']['value'] == 3
+    assert project.property_state(names['甲'], '新计数')['state']['values'] == [3]
 
 
 def test_extraction_adapter_is_discoverable_readable_and_patchable(project):
@@ -353,4 +353,4 @@ def test_fixed_missing_owner_is_guard_but_missing_value_reference_can_be_repaire
     fixed = project.patch_content_submission(staged['submission_id'], 1,
         [{'op': 'set', 'path': ['property_records', 1, 'value'], 'value': names['乙']}], '修内容引用')
     assert fixed['status'] == 'accepted'
-    assert project.property_state(names['甲'], '指向对象')['state']['value'] == [names['乙']]
+    assert project.property_state(names['甲'], '指向对象')['state']['values'] == [names['乙']]

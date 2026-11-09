@@ -86,7 +86,7 @@
 | 提示词 | 版本 | 字数（旧→新） |
 | --- | --- | --- |
 | `system` | v11 | 1819 → 900 |
-| `extraction` | v25 | 5832 → 3749（五层语义对齐：T＝一卷/一部、B＝部内重要篇章、S＝空间接近且时间连续的连续事件；同一原文三次运行事件数 13/8/10 → 11/11/12，见 [EXTRACTION_PROMPT_REWRITE.md](EXTRACTION_PROMPT_REWRITE.md)） |
+| `extraction` | v26 | 5832 → 3801（五层语义对齐：T＝一卷/一部、B＝部内重要篇章、S＝空间接近且时间连续的连续事件；同一原文三次运行事件数 13/8/10 → 11/11/12，见 [EXTRACTION_PROMPT_REWRITE.md](EXTRACTION_PROMPT_REWRITE.md)） |
 | `source_extraction` | v9 | 1106 → 965 |
 | `review` | v11 | 1810 → 1289 |
 | `action_extraction` | v7 | 1003 → 774 |

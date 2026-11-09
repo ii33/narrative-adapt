@@ -158,11 +158,12 @@ class PropertyStore:
                     'category': category, 'category_source': category_source, 'is_current': row['id'] in active,
                     'is_latest': row is latest})
             cell = result['state']
-            value = cell.get('value')
-            ref = {'id': value, 'name': names[value]} if isinstance(value, str) and value in names else None
+            # 两种形状别混：**查询态**只有 ``{kind, values:[…]}``，讲「当前有效值有哪些」，
+            # 这里不再另给一份单值；**变更记录**（下面 decorated 里的每一行）保留单值
+            # ``value``，讲「这一步把值设成了什么」。不要把两者统一成同一种形状。
             items.append({'property_id': group[1], 'property_ids': [group[1]], 'aspect': group[1], 'label': property_labels.label_for(group[1]),
                 'category': category, 'category_source': category_source, 'other_categories': [], 'state': cell,
-                'state_kind': cell['kind'], 'value': value, 'value_node': ref, 'scope': group[3], 'scopes': [group[3]],
+                'state_kind': cell['kind'], 'scope': group[3], 'scopes': [group[3]],
                 'holder_id': group[4], 'holder_name': names.get(group[4]), 'context_id': group[2], 'value_type': definitions.get(group[1], {}).get('value_type'),
                 'event_id': latest['event_id'], 'start': (latest.get('disclosure') or {}).get('start'), 'disclosed_at': names.get(latest['event_id']),
                 'is_current': cell['kind'] != 'unrecorded', 'record_count': len(history), 'later_count': len(changes)-len(history),

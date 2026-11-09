@@ -8,7 +8,25 @@ from narrative.operations import Operations
 
 
 def change(ops, unit, changes):
-    return ops.apply_storyboard_changes(unit, ops.read_storyboard(unit)['revision'], changes)
+    """Apply a batch expected to succeed; batches with immediate-only actions return no envelope."""
+    result = ops.apply_storyboard_changes(unit, ops.read_storyboard(unit)['revision'], changes)
+    assert result.get('status') in {None, 'accepted', 'unchanged'}, result
+    return ops.read_storyboard(unit)
+
+
+def staged(ops, unit, changes):
+    """Apply a batch whose content checks fail; it must return a staged draft."""
+    result = ops.apply_storyboard_changes(unit, ops.read_storyboard(unit)['revision'], changes)
+    assert result['status'] == 'staged', result
+    assert result['validation_status'] == 'invalid'
+    assert result['problems'] and all(problem.get('code') and isinstance(problem.get('path'), list)
+                                      for problem in result['problems'])
+    return result
+
+
+def assert_problem(result, *fragments):
+    assert any(all(fragment in str(problem.get('message', '')) for fragment in fragments)
+               for problem in result['problems']), result['problems']
 
 
 def test_shared_action_preview_cut_hold_linear_reorder_and_reopen(project, tmp_path):
@@ -56,8 +74,8 @@ def test_frame_and_action_key_move_preserve_identity_and_final_batch_validation(
     board = change(ops, unit, [{'op': 'set_keyframe', 'shot_id': shot, 'offset_ms': 1500, 'sketch_path': str(image)},
                                {'op': 'set_action_keyframe', 'object_id': obj, 'time_ms': 200, 'x': .2}])
     frame, key = board['shots'][0]['keyframes'][0]['id'], board['objects'][0]['keyframes'][0]['id']
-    with pytest.raises(ValueError, match=frame + '.*1500.*1000'):
-        change(ops, unit, [{'op': 'update_shot', 'shot_id': shot, 'duration_ms': 1000}])
+    result = staged(ops, unit, [{'op': 'update_shot', 'shot_id': shot, 'duration_ms': 1000}])
+    assert_problem(result, frame, '1500', '1000')
     assert ops.read_storyboard(unit) == board
     board = change(ops, unit, [{'op': 'update_shot', 'shot_id': shot, 'duration_ms': 1000},
                                {'op': 'move_keyframe', 'shot_id': shot, 'frame_id': frame, 'offset_ms': 900},
@@ -80,13 +98,22 @@ def test_parent_transform_and_invalid_references_are_atomic(project):
     state = ops.preview_storyboard(unit, 0)['objects'][1]
     assert state['world_x'] == pytest.approx(.2) and state['world_y'] == pytest.approx(.4)
     for changes, error in [
-        ([{'op': 'update_object', 'object_id': parent, 'parent_id': child}], '循环'),
         ([{'op': 'delete_object', 'object_id': parent}], '本场'),
+        ([{'op': 'set_action_keyframe', 'object_id': 'foreign', 'time_ms': 0}], '当前场'),
         ([{'op': 'update_object', 'object_id': child, 'asset_id': 'missing'}], '资产'),
+    ]:
+        with pytest.raises(ValueError, match=error):
+            change(ops, unit, changes)
+        assert ops.read_storyboard(unit) == board
+    for changes, error in [
+        ([{'op': 'update_object', 'object_id': parent, 'parent_id': child}], '循环'),
         ([{'op': 'set_fps', 'fps': True}], '整数'),
         ([{'op': 'update_object', 'object_id': child, 'x': 1.1}], '0..1'),
-        ([{'op': 'update_object', 'object_id': child, 'state': {'value': float('nan')}}], '有限JSON'),
-        ([{'op': 'set_action_keyframe', 'object_id': 'foreign', 'time_ms': 0}], '本场'),
+    ]:
+        assert_problem(staged(ops, unit, changes), error)
+        assert ops.read_storyboard(unit) == board
+    for changes, error in [
+        ([{'op': 'update_object', 'object_id': child, 'state': {'value': float('nan')}}], 'JSON'),
     ]:
         with pytest.raises(ValueError, match=error):
             change(ops, unit, changes)
@@ -121,15 +148,18 @@ def test_duplicate_keys_hold_and_approval_reject_without_partial_writes(project,
     assert ops.preview_storyboard(unit, 499)['objects'][0]['x'] == .2
     assert ops.preview_storyboard(unit, 500)['objects'][0]['x'] == .8
     key = board['objects'][0]['keyframes'][1]['id']
-    for action in [
-        {'op': 'move_action_keyframe', 'object_id': obj, 'keyframe_id': key, 'time_ms': 0},
-        {'op': 'update_shot', 'shot_id': shot, 'action_start_ms': True},
-        {'op': 'update_object', 'object_id': obj, 'state': {'bad': float('nan')}},
-        {'op': 'set_action_keyframe', 'object_id': obj, 'time_ms': 250, 'interpolation': 'spline'},
+    with pytest.raises(ValueError, match='重复'):
+        change(ops, unit, [{'op': 'move_action_keyframe', 'object_id': obj, 'keyframe_id': key, 'time_ms': 0}])
+    assert ops.read_storyboard(unit) == board
+    for action, error in [
+        ({'op': 'update_shot', 'shot_id': shot, 'action_start_ms': True}, '整数'),
+        ({'op': 'set_action_keyframe', 'object_id': obj, 'time_ms': 250, 'interpolation': 'spline'}, 'hold或linear'),
     ]:
-        with pytest.raises(ValueError):
-            change(ops, unit, [action])
+        assert_problem(staged(ops, unit, [action]), error)
         assert ops.read_storyboard(unit) == board
+    with pytest.raises(ValueError, match='JSON'):
+        change(ops, unit, [{'op': 'update_object', 'object_id': obj, 'state': {'bad': float('nan')}}])
+    assert ops.read_storyboard(unit) == board
     board = change(ops, unit, [{'op': 'set_approved', 'approved': True}])
     with pytest.raises(ValueError, match='解除定案'):
         change(ops, unit, [{'op': 'set_fps', 'fps': 25}])

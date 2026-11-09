@@ -201,7 +201,7 @@ def main():
             and old["valid_to"]["start"] == new["valid_from"]["start"] > cut
         )
         assert new.get("valid_to") is None
-        assert ops.property_state(item["id"], holder_name)["state"]["value"] == people["乙"]
+        assert ops.property_state(item["id"], holder_name)["state"]["values"] == people["乙"]
         assert not any(
             r["kind"] in {"property_retraction", "property_merge", "property_rename"}
             for r in records
@@ -231,7 +231,7 @@ def main():
         after_records = ops.property_records()
         save("program-snapshot-after-rollback.json", after)
         save("program-property-records-after-rollback.json", after_records)
-        assert ops.property_state(item["id"], holder_name)["state"]["value"] == people["甲"]
+        assert ops.property_state(item["id"], holder_name)["state"]["values"] == people["甲"]
         assert new["id"] not in {r["id"] for r in after_records}
         assert next(r for r in after_records if r["id"] == old["id"]).get("valid_to") is None
         assert not [r for r in ops.check_project()["issues"] if r["severity"] == "error"]
