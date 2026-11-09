@@ -9,7 +9,7 @@ def seed(project):
     draft = {"nodes": [
         {"type": "person", "name": "甲", "quotes": [TEXT]},
         {"type": "scene", "name": "屋内", "quotes": [TEXT]},
-        {"type": "event", "name": "甲入屋查看", "scene": "屋内", "participants": ["甲"], "quotes": [TEXT]},
+        {"type": "event", "location": "未知", "name": "甲入屋查看", "scene": "屋内", "participants": ["甲"], "quotes": [TEXT]},
     ], "properties": []}
     assert project.submit_extraction(sid, draft)["status"] == "accepted"
     return sid, next(n for n in project.graph_snapshot()["nodes"] if n["node_type"] == "event")
@@ -40,7 +40,9 @@ def test_new_actions_require_an_event_parent_without_writing(project):
     before = project.graph_snapshot()
     draft = {"nodes": [{"type": "action", "name": "停下观察", "quotes": ["停下张望"]}], "properties": []}
     assert not project.preview_extraction(sid, draft)["valid"]
-    assert project.submit_extraction(sid, draft)["status"] == "rejected"
+    staged = project.submit_extraction(sid, draft)
+    assert staged["status"] == "staged"
+    assert any(problem["code"] == "ACTION_EVENT" for problem in staged["problems"])
     assert project.graph_snapshot() == before
 
 

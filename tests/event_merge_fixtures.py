@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 
+from agent_fixtures import location_record
 from test_extraction_identity import Q1, Q2, Q3, TEXT, draft, node
 
 
@@ -48,7 +49,9 @@ def seed_event_duplicates(ops):
                 'scope': 'cognition', 'holder_id': person_b},
     ]
     rev = ops.graph_project_info()['revision']
-    committed = ops.apply_changes([target, source, third, scene], definitions + records, rev,
+    locations = [location_record('E2', sid, TEXT.index(Q2), Q2),
+                 location_record('E3', sid, TEXT.index(Q3), Q3)]
+    committed = ops.apply_changes([target, source, third, scene], definitions + locations + records, rev,
                                   reason='隔离工程验收种子：模拟历史重复，不是模型输出')
     assert committed['status'] == 'accepted'
     return {'source_id': sid, 'target': target['id'], 'source': source['id'], 'third': third['id'],

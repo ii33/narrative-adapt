@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 
 import pytest
+from agent_fixtures import location_record
 from agent_fixtures import project as project
 from test_current_state_contract import QUOTES, TEXT, setup
 
@@ -75,10 +76,11 @@ def seed(ops):
     values.append(common | {"id": "ended-clear", "node_id": ids["甲"], "property_id": "标注", "op": "clear",
                             "event_id": ids[QUOTES[1][:-1]], "disclosure": {"source_id": sid, "start": TEXT.index(QUOTES[1])},
                             "evidence": {"source_id": sid, "quote": QUOTES[1]}})
+    source_location = location_record("E99", sid, TEXT.index(QUOTES[0]), QUOTES[0])
     assert (
         ops.apply_changes(
             [source, scene],
-            definitions + values,
+            definitions + [source_location, *values],
             ops.graph_project_info()["revision"],
             reason="隔离物理合并fixture",
         )["status"]
@@ -187,6 +189,7 @@ def test_physical_merge_rejects_conflicts_without_writing(project, problem):
     else:
         updated = copy.deepcopy(source)
         objects = []
+        records = []
         if problem == "occurrence":
             updated["occurrence"] = {
                 "kind": "point",
@@ -208,6 +211,10 @@ def test_physical_merge_rejects_conflicts_without_writing(project, problem):
             )
             alternate.update(id="S99", context_id="other", events=[source_id])
             objects.append(alternate)
+            records.append(
+                location_record("E99", sid, TEXT.index(QUOTES[0]), QUOTES[0])
+                | {"context_id": "other"}
+            )
         elif problem == "source":
             other = project.import_source("另一来源", TEXT)
             updated["disclosure"] = updated["disclosure"] | {"source_id": other}
@@ -228,7 +235,7 @@ def test_physical_merge_rejects_conflicts_without_writing(project, problem):
             updated["predecessors"] = [target_id]
         objects.append(updated)
         result = project.apply_changes(
-            objects, [], project.graph_project_info()["revision"], reason="明确不同身份或结构"
+            objects, records, project.graph_project_info()["revision"], reason="明确不同身份或结构"
         )
         assert result["status"] == "accepted", result
         expected = project.graph_project_info()["revision"]

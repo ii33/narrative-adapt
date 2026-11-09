@@ -64,7 +64,7 @@ narrative-desktop = "narrative.native_app:main"
 narrative-mcp = "narrative.mcp_server:main"
 
 [dependency-groups]
-dev = ["ruff>=0.11", "pyright>=1.1", "pytest>=8"]
+dev = ["ruff>=0.11", "pyright>=1.1", "pytest>=8", "pytest-xdist>=3"]
 
 [tool.ruff]
 target-version = "py312"
@@ -73,6 +73,16 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 ignore = ["E501"]
+
+[tool.pytest.ini_options]
+# 默认只跑数据/合同测试并使用全部核心并行；UI、真实 SDK 与非数据集成套件显式选择。
+addopts = "-m 'not ui and not native and not integration' -n auto"
+testpaths = ["tests"]
+markers = [
+  "ui: Qt Quick UI tests (slow, heavy)",
+  "native: real SDK/HTTP/host runtime tests (slow, environment sensitive)",
+  "integration: non-data integration suites kept opt-in",
+]
 
 [tool.pyright]
 include = ["src"]
