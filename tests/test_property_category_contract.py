@@ -89,3 +89,24 @@ def test_vocabulary_tail_is_unclassified_and_old_config_is_normalized():
     # 旧工程保存的词表末项还是「其他」：归一化成一个尾巴，不动任何记录。
     assert property_categories.normalize_vocabulary({"person": ["基本信息", "其他"]})["person"] == [
         "基本信息", "未分类"]
+
+
+@pytest.mark.parametrize("location", ["@2", "未知"])
+def test_event_location_shortcut_generates_a_categorized_record(ops, location):
+    """程序按 `event.location` 自动生成的地点行也必须带分类：地点的语义分类是「基本信息」。
+
+    防的是「程序生成的行绕过分类必填」——v25 验收里 run2/run3 就是这样缺了 43 条。
+    """
+    text = "林岚在会议室的会开完了。"
+    source = ops.import_source("快捷地点", text)
+    accepted = ops.submit_extraction(source, {"nodes": [
+        {"type": "person", "name": "林岚", "quotes": ["林岚"]},
+        {"type": "location", "name": "会议室", "quotes": ["会议室"]},
+        {"type": "scene", "name": "会议", "quotes": [text]},
+        {"type": "event", "name": "会议结束", "scene": "@3", "quotes": [text],
+         "participants": ["@1"], "location": location},
+    ], "properties": []})
+    assert accepted["status"] == "accepted", accepted
+    records = [row for row in ops.property_records() if row.get("kind") == "property_change"]
+    assert [(row["property_id"], row["category"]) for row in records] == [("地点", "基本信息")]
+    assert not any(issue["code"] == "category_unassigned" for issue in ops.check_project()["issues"])

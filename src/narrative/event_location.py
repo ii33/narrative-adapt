@@ -3,6 +3,8 @@ from __future__ import annotations
 
 LOCATION_PROPERTIES = frozenset({'地点', '发生地点', 'location_of_event', 'event_location'})
 LOCATION_SEMANTICS = frozenset({'location_of_event', 'event_location'})
+# 地点属性的语义分类：程序自动生成地点属性行时也用它，与模型写的一致。
+LOCATION_CATEGORY = '基本信息'
 
 
 def _location_value_allowed(value, value_type, nodes, context):
@@ -73,7 +75,7 @@ def event_location_issues(objects, records, *, snapshot=None):
             if kind == 'conflict':
                 report('EVENT_LOCATION_CONFLICT', '地点状态冲突，不能按提交顺序猜测', changes, property_id)
                 continue
-            value = state['state'].get('value')
+            value = state['state'].get('values')
             values = value if isinstance(value, list) else [value]
             if kind != 'known' or not values or not all(_location_value_allowed(value, value_type, nodes, context) for value in values):
                 report('EVENT_LOCATION_VALUE', '地点须引用有效同语境location节点，或以string/either明确记录无/未知', changes, property_id)

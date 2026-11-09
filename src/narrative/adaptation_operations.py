@@ -298,6 +298,8 @@ def _set_initial_location(state, db, node, value):
         definition["value_type"] = "either"
     row = {"id": _value_id(db, state), "kind": "property_change", "node_id": node["id"], "property_id": definition["id"],
            "event_id": node["id"], "context_id": node.get("context_id", "canon"), "scope": "world",
+           # 程序生成的改编属性行也带分类：地点语义上属于「基本信息」。
+           "category": "基本信息",
            "op": "unknown" if value == "未知" else "set",
            "sequence": max((r["sequence"] for r in state["properties"] if r.get("kind") == "property_change" and r.get("event_id") == node["id"]), default=-1) + 1}
     if value != "未知":
@@ -391,6 +393,8 @@ class AdaptationOperationsMixin:
                                                     "cardinality": "one", "semantic": "item_holder"})
                     state["properties"].append({"id": _value_id(db, state), "kind": "property_change", "node_id": node["id"],
                                                 "property_id": holder_name, "value": changes["initial_holder"],
+                                                # 物品持有状态的语义分类是「归属与持有」。
+                                                "category": "归属与持有",
                                                 "event_id": changes.get("point_id"), "scope": "world", "op": "set", "sequence": max((p["sequence"] for p in state["properties"] if p.get("kind") == "property_change" and p.get("event_id") == changes.get("point_id")), default=-1) + 1})
                 _order(state, node["id"], after_id)
                 report["created_node_id"] = node["id"]

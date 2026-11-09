@@ -203,7 +203,7 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
     current_graph = reader.graph_snapshot()
     current_records = reader.property_records()
     definitions = {row['id']: row for row in current_records if row.get('kind') == 'property_definition'}
-    from .event_location import LOCATION_PROPERTIES, LOCATION_SEMANTICS
+    from .event_location import LOCATION_CATEGORY, LOCATION_PROPERTIES, LOCATION_SEMANTICS
     shortcut_indices = []
     explicit_count = len(original['properties'])
     location_definitions = [row for key, row in definitions.items()
@@ -223,6 +223,9 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
         generated = {'node': f'@{index+1}', 'property': property_id, 'at_event': f'@{index+1}',
             'scope': 'world', 'op': 'unknown' if location == '未知' else 'set',
             'quotes': list(row.get('quotes') or []),
+            # 程序生成的行也要满足「分类必填」：地点的语义分类就是「基本信息」，
+            # 与模型自己写地点属性时一致；不能用「未分类」敷衍。
+            'category': LOCATION_CATEGORY,
             'value_type': location_definition['value_type'] if location_definition else 'either'}
         if location != '未知':
             generated['value'] = ([location] if location_definition and location_definition.get('cardinality') == 'many' else location)
