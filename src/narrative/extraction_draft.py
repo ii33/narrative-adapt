@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 
 DRAFT_VERSION = "conversation-draft/19"
+# How many info notices preview repeats verbatim; the rest is only counted.
+INFO_PREVIEW_LIMIT = 5
 
 RESULT_SCHEMA = {
     "type": "object", "required": ["nodes", "properties"],
@@ -274,6 +276,7 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
                 'related_paths': [['properties', row['_draft_index']] for row in explicit_locations]})
     shortcut_paths = {explicit_count + order: ['nodes', index, 'location'] for order, index in enumerate(shortcut_indices)}
     for item in data.get('rejected', []):
+        # A rejected generated row is reported where the model filled it in.
         path = item.get('path', [])
         if len(path) >= 2 and path[0] == 'properties' and path[1] in shortcut_paths:
             item['path'] = shortcut_paths[path[1]]
@@ -296,11 +299,29 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
     data.update(source_id=source_id, chapter=source["title"],
                 slice_text=selected, slice_start=start, slice_end=end)
     built = build_extraction(reader, data)
+    # A notice about a dropped container write names the record that won. When
+    # that winner is a location shortcut row, the model never wrote it as a
+    # property: say which node field it actually filled in.
+    origins = built.get("property_origins") or {}
+    for item in built.get("diagnostics") or []:
+        duplicate = item.get("duplicate_of")
+        for index in (origins.get(duplicate) or []) if isinstance(duplicate, str) else []:
+            if index in shortcut_paths:
+                item["duplicate_of_origin"] = "location"
+                item["duplicate_of_path"] = list(shortcut_paths[index])
+                break
     issues += list(built.get("skipped") or [])
     prepared = None
     diagnostics = [{"severity": "error", "code": "EXTRACTION_CONTENT",
                     "object_id": item.get("name"), "message": item.get("reason") or str(item),
                     **{key: item[key] for key in ('path', 'related_paths', 'quote', 'positions_sample', 'position_basis') if key in item}} for item in issues]
+    # Notices the build raised about rows it deliberately did not store. They
+    # never turn the batch invalid; they are reported so the model can see the
+    # decision instead of silently disagreeing with the stored result.
+    diagnostics += [{**item, "severity": item.get("severity", "info"),
+                     "code": item.get("code", "EXTRACTION_INFO"),
+                     "message": item.get("message") or item.get("reason")}
+                    for item in built.get("diagnostics") or []]
     if not issues and not built.get("empty"):
         prepared = ops.prepare_changes(built["objects"], built["property_records"], snapshot.revision, snapshot=snapshot)
         diagnostics += prepared.diagnostics
@@ -312,15 +333,24 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
 
 
 def _compact(outcome: dict) -> dict:
+    """Compact preflight view: actionable problems plus a bounded info summary.
+
+    Info rows never move ``valid``: they report a decision the build made, such
+    as a write it dropped. ``preview`` shows the first few so the same notice is
+    visible without re-reading the draft; the rest is only counted.
+    """
     result = {key: value for key, value in outcome.items() if key != "diagnostics"}
     diagnostics = outcome.get("diagnostics") or []
+    from .diagnostic_locations import normalize_problems
     actionable = [row for row in diagnostics if row.get("severity") in {"error", "warning"}]
     if actionable:
-        from .diagnostic_locations import normalize_problems
         result['diagnostics'] = normalize_problems(actionable, operation='submit_extraction')
-    info_count = sum(row.get("severity") == "info" for row in diagnostics)
-    if info_count:
-        result["info_count"] = info_count
+    notices = [row for row in diagnostics if row.get("severity") == "info"]
+    if notices:
+        result["info_count"] = len(notices)
+        result["info"] = normalize_problems(notices[:INFO_PREVIEW_LIMIT], operation='submit_extraction')
+        if len(notices) > INFO_PREVIEW_LIMIT:
+            result["info_omitted"] = len(notices) - INFO_PREVIEW_LIMIT
     return result
 
 

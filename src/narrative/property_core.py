@@ -63,6 +63,35 @@ def change_group(row):
     return (row.get('node_id'), row.get('property_id'), row.get('context_id', 'canon'), row.get('scope', 'world'), row.get('holder_id'))
 
 
+def container_property_duplicate(record, records, nodes):
+    """The event-level record that already states this container property.
+
+    A scene/big_event/storyline summarizes its events, so the same property on
+    the container and on one of its descendant events would state one fact
+    twice — and the two levels reduce separately, so both would survive. The
+    event record wins. Everything in ``change_group`` except the subject must
+    match; the subject is exactly what collapses. Unknown hierarchy means no
+    judgement at all.
+    """
+    from .container_evidence import CONTAINER_TYPES, descendant_events
+    if record.get('kind') != 'property_change':
+        return None
+    node = nodes.get(record.get('node_id')) if isinstance(record.get('node_id'), str) else None
+    if not node or node.get('node_type') not in CONTAINER_TYPES:
+        return None
+    events = descendant_events(nodes, record['node_id'])
+    if not events:
+        return None
+    key = change_group(record)[1:]
+    owners = set(events)
+    for row in records:
+        if row is record or row.get('kind') != 'property_change':
+            continue
+        if row.get('node_id') in owners and change_group(row)[1:] == key:
+            return row
+    return None
+
+
 def _rank(value):
     return value if isinstance(value, tuple) else tuple(value) if isinstance(value, list) else (value,)
 

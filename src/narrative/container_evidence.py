@@ -36,6 +36,47 @@ def validated_spans(node, sources, *, strict=False):
     return result
 
 
+def descendant_events(nodes, container_id, *, context_id=None):
+    """Leaf event/action ids under one container, by these same direct-child rules.
+
+    Returns ``None`` when the hierarchy cannot be determined (missing child,
+    other context, wrong child type, cycle): a caller who only wants to compare
+    levels must then decline rather than guess.
+    """
+    root = nodes.get(container_id) if isinstance(container_id, str) else None
+    if not root or root.get('node_type') not in CONTAINER_TYPES:
+        return []
+    context = root.get('context_id', 'canon') if context_id is None else context_id
+    found, visiting = [], set()
+
+    def walk(identifier):
+        node = nodes.get(identifier)
+        if not node or node.get('retracted') or node.get('suppressed'):
+            raise ValueError('下级节点不存在或未活动')
+        kind = node.get('node_type')
+        if kind not in CONTAINER_TYPES:
+            if kind in {'event', 'action'}:
+                found.append(identifier)
+            return
+        if identifier in visiting:
+            raise ValueError('下级包含关系成环')
+        visiting.add(identifier)
+        for child_id in node.get('events') or []:
+            child = nodes.get(child_id)
+            if child is None:
+                raise ValueError('下级节点未入库')
+            if child.get('context_id', 'canon') != context or child.get('node_type') not in CHILD_TYPES[kind]:
+                raise ValueError('下级节点语境或类型与上层不符')
+            walk(child_id)
+        visiting.remove(identifier)
+
+    try:
+        walk(container_id)
+    except ValueError:
+        return None
+    return found
+
+
 def ordered_spans(spans, graph, context_id='canon'):
     from .temporal_state import source_order
     order = source_order(graph)

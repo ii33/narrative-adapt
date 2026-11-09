@@ -75,7 +75,9 @@ def _problems(raw, diagnostics, built=None):
     node_ids = (built or {}).get('node_ids') or {}
     problems = []
     for diagnostic in diagnostics:
-        if diagnostic.get('severity', 'error') not in {'error', 'warning'}:
+        # info rows are notices about a draft decision, not reasons to repair;
+        # they are kept so the notice reaches whoever reads the draft.
+        if diagnostic.get('severity', 'error') not in {'error', 'warning', 'info'}:
             continue
         message = str(diagnostic.get('message') or diagnostic.get('reason') or diagnostic)
         identity = str(diagnostic.get('object_id') or '')

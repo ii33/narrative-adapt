@@ -6,6 +6,7 @@ import json
 from typing import cast
 
 from .order_ids import allocate, prefix_for
+from .property_core import container_property_duplicate
 from .property_labels import BIG_EVENT_PROGRESS, STORYLINE_PROGRESS
 from .source_location import ExactQuoteLookup
 
@@ -423,6 +424,9 @@ def build_extraction(ops, data: dict) -> dict:
     """
     snapshot = ops.graph_snapshot()
     skipped: list[dict] = []
+    # Notices that never block the batch: the write is dropped, everything else
+    # is still stored. They travel back with the preflight result.
+    diagnostics: list[dict] = []
     snapshot_nodes = {node["id"]: node for node in snapshot["nodes"]}
     # Ids are disclosure positions, so a new mention needs to know where it sits
     # relative to the nodes that already exist.
@@ -939,17 +943,39 @@ def build_extraction(ops, data: dict) -> dict:
         known_values[key] = record
         records.append(record)
 
+    # A container states what its events state. When a descendant event already
+    # carries the same property, the event record keeps the fact and the
+    # container write is dropped with a notice: the container value is derived
+    # from the events (last effective value), so writing it again would let the
+    # reduction count one fact twice at two levels.
+    comparable = [row for row in accepted_records if row.get("kind") == "property_change"] + [
+        row for row in records if row.get("kind") == "property_change"]
+    kept: list[dict] = []
+    for row in records:
+        duplicate = container_property_duplicate(row, comparable, current_nodes)
+        if duplicate is None:
+            kept.append(row)
+            continue
+        indexes = property_origins.get(row.get("id")) or []
+        diagnostics.append({
+            "severity": "info", "code": "CONTAINER_PROPERTY_DEDUP", "object_id": row.get("node_id"),
+            "path": ["properties", indexes[0]] if indexes else [],
+            "message": "该属性由下属事件自动归纳（取最后有效值），此处写入已忽略",
+            "node_id": row.get("node_id"), "property_id": row.get("property_id"),
+            "duplicate_of": duplicate.get("id"), "event_id": duplicate.get("event_id"),
+        })
+    records = kept
+
     revision = ops.graph_project_info()["revision"]
     node_ids = {item['reference']: ids[(item['type'], item['name'])] for item in data['nodes']
                 if 'reference' in item and (item['type'], item['name']) in ids}
     if not objects and not records:
         return {
-            "objects": [], "property_records": [], "diagnostics": [], "errors": [],
+            "objects": [], "property_records": [], "diagnostics": diagnostics, "errors": [],
             "revision": revision, "empty": True, "node_count": 0,
             "property_count": 0, "scene_links": 0,
             "skipped": skipped, "node_ids": node_ids, "property_origins": property_origins,
         }
-    diagnostics: list[dict] = []
     errors: list[dict] = []
     return {
         "node_ids": node_ids,
