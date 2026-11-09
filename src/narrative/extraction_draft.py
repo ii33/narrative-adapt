@@ -11,6 +11,8 @@ RESULT_SCHEMA = {
     "description": "引用优先已有正式节点ID或@1起原始nodes完整数组索引；名称仅在唯一时可解析，同名须ID/@。",
     "properties": {
         "nodes": {"type": "array", "items": {"type": "object", "required": ["name", "type"],
+            "allOf": [{"if": {"properties": {"type": {"const": "event"}}},
+                       "then": {"required": ["participants"]}}],
             "properties": {
                 "name": {"type": "string"},
                 "type": {"type": "string", "enum": ["person", "group", "item", "location", "storyline", "big_event", "scene", "event", "action"],
@@ -23,7 +25,7 @@ RESULT_SCHEMA = {
                 "new_occurrence": {"type": "boolean", "description": "同名但原文明确是另一次发生时声明"},
                 "context_id": {"type": "string"},
                 "participants": {"type": "array", "items": {"type": "string"},
-                    "description": "事件中原文明示出场或有实际作用的人物引用；包含次要或无名人物，不含地点"},
+                    "description": "事件的参与者必填：原文明示出场或有实际作用的人物引用（含次要、无名人物，不含地点）；确无参与者或原文未交代时给空数组，程序据此视为无或未知"},
                 "children": {"type": "array", "items": {"type": "string"}, "description": "容器直接子项ID/@，可归入已有子项而不重列原文；按T→B→S→E→A校验"},
                 "scene": {"type": "string", "description": "同语境场景的正式ID或本批@序号；唯一名亦可"},
                 "event": {"type": "string", "description": "action直属事件正式ID或本批@序号；唯一名亦可，仅按需动作提取使用"},

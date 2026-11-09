@@ -194,6 +194,10 @@ def parse_nodes(payload: dict, text: str) -> dict:
                 if invalid:
                     _diagnostic(rejected, path + [field], name, '父级、参与者和子项须为正式ID或@索引字符串；数组字段须为字符串数组')
             continue
+        if node_type == 'event' and 'participants' not in row:
+            _diagnostic(rejected, path + ['participants'], name,
+                        '事件必须给出参与者：人物引用或本批 @索引；确无参与者或原文未交代时给空数组')
+            continue
         is_container = node_type in {'scene', 'big_event', 'storyline'}
         quote_entries = [(index, str(item)) for index, item in enumerate(row.get('quotes') or []) if str(item).strip()]
         quotes = [quote for _, quote in quote_entries]
@@ -355,12 +359,15 @@ def _event_reuse_candidates(item: dict, snapshot: dict, source_id: str,
     if item["type"] == "action":
         named = [node for node in named if node["id"] in (scene.get("events") or [])]
     participants = set(_participants(item, by_name, ids, existing))
+    # 事件必须给 participants：空数组表示「确无参与者」，同样要参与比对；
+    # action 仍按旧规则只在显式给出时比对。
+    compare_participants = item["type"] == "event" or bool(item.get("participants"))
     spans = {_span_key(span) for span in _node_spans(item, source_id)}
     proven = []
     for candidate in named:
         if scene_name and candidate["id"] not in (scene.get("events") or []):
             continue
-        if item.get("participants") and set(candidate.get("participants") or []) != participants:
+        if compare_participants and set(candidate.get("participants") or []) != participants:
             continue
         if (candidate.get("disclosure") or {}).get("source_id") != source_id:
             continue
@@ -376,11 +383,15 @@ def _event_reuse_candidates(item: dict, snapshot: dict, source_id: str,
             primary.get("quote") == item["quotes"][0]
             and primary.get("source_id") == source_id and start == item["start"]
         )
-        # Strict primary-quote identity remains valid when a
-        # correction supplies no scene/participants; omitted structure is not a
-        # claim that the event had no scene or participants. Additional evidence
-        # may prove identity only with the full scene/participant checks.
-        complete_structure = bool(scene_id and item.get("participants") is not None
+        # Strict primary-quote identity stays valid when a correction omits the
+        # scene — and, for actions, the participants: omitted structure is not a
+        # claim that the node had none. Additional evidence proves identity only
+        # with the full scene/participant checks.
+        # ``participants`` no longer needs an "was it given?" test here:
+        # parse_nodes fills the list on every row (events must give it, actions
+        # omitted get []), so "omitted" and "explicitly empty" are the same
+        # statement by the time a candidate is judged.
+        complete_structure = bool(scene_id
                                   and set(candidate.get("participants") or []) == participants)
         if exact_primary or (complete_structure and spans.intersection(_span_key(span) for span in recorded)):
             proven.append(candidate)
