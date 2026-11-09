@@ -75,7 +75,7 @@ def main() -> int:
             continue
         order.append(key)
         for new_key, after in NEW_AFTER.items():
-            if after == key:
+            if after == key and new_key not in base:
                 order.append(new_key)
     lines = [MARKER]
     for key in order:

@@ -8,4 +8,4 @@
 
 结构查询只读。修正用 `preview_changes` / `apply_changes`，复核已有重复用显式事件物理合并。轻量并发修订号不是历史查询轴；回退使用原文时间点预览与删除后缀。
 
-完整合同见 [数据模型](DATA_MODEL.md) 与 [Agent API](AGENT_API.md)。
+完整合同见 [数据模型](DATA_MODEL.md) 与 [Agent API](../features/AGENT_API.md)。

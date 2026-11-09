@@ -105,7 +105,7 @@ mapper 不绕过统一候选，也不自动接受。预览 `graphrag_preview` �
 
 首个真实 claim（`809b...`）结果：候选 `e8d2c2bdf1854deeb961b78738667b66`，接受修订 6，`铜钥匙.holder = 林舟`；重跑复用候选，修订保持 6。模型把持有变化边界判为 `start`，人工对照为 `end`；差异已记录为待修订，没有静默修改。
 
-完整输入、原始响应、语义核对和进度记录见 [真实模型 claim 转换报告](MODEL_CLAIM_CONVERSION.md)。
+完整输入、原始响应、语义核对和进度记录见 [真实模型 claim 转换报告](../../data/MODEL_CLAIM_CONVERSION.md)。
 
 ## 人工样例结果
 

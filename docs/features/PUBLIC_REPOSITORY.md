@@ -29,7 +29,7 @@ independently and place them in the expected directory. Do not commit them.
 - `pyproject.toml` keeps the wheel to code (`src/narrative/texts`, databases, caches excluded) and
   lists the sdist contents explicitly instead of walking the tree — which is both slow and how
   project data used to leak into a build.
-- `docs/PUBLIC_REPOSITORY.md` (this file) is the intent; the two above are the mechanism.
+- `docs/features/PUBLIC_REPOSITORY.md` (this file) is the intent; the two above are the mechanism.
 
 Historical reports may link to files under `data/` that are not included here; those links will not
 resolve in a public checkout. This baseline does not claim the full suite passes without locally

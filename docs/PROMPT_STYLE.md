@@ -85,14 +85,14 @@
 | 提示词 | 版本 | 字数（旧→新） |
 | --- | --- | --- |
 | `system` | v11 | 1819 → 900 |
-| `extraction` | v23 | 5832 → 3200（五层语义对齐：T＝一卷/一部、B＝部内重要篇章、S＝空间接近且时间连续的连续事件；同一原文三次运行事件数 13/8/10 → 11/11/12，见 [EXTRACTION_PROMPT_REWRITE.md](EXTRACTION_PROMPT_REWRITE.md)） |
+| `extraction` | v24 | 5832 → 3200（五层语义对齐：T＝一卷/一部、B＝部内重要篇章、S＝空间接近且时间连续的连续事件；同一原文三次运行事件数 13/8/10 → 11/11/12，见 [EXTRACTION_PROMPT_REWRITE.md](EXTRACTION_PROMPT_REWRITE.md)） |
 | `source_extraction` | v9 | 1106 → 965 |
 | `review` | v11 | 1810 → 1289 |
 | `action_extraction` | v7 | 1003 → 774 |
 | `event_merge_review` | v3 | 118 → 658（旧版未定义重复与字段，新增内容为合同必要项） |
 | `writing` | v8 | 820 → 940（吸收已删除的 `batch_writing`） |
 | `scene_table` | v6 | 627 → 770 |
-| `scene_policy` | v5 | 330 → 364（保持一行一条） |
+| `scene_policy` | v6 | 330 → 391（保持一行一条；首行点明「场」指剧本场次，与提取层场景 S 无关） |
 | `granularity_standard` / `granularity_fine` | v6 / v6 | 182 → 180 / 316 → 306 |
 | `storyboard` / `sketch_style` / `storyboard_assets` | v6 / v3 / v3 | 1639 → 1588 / 415 → 426 / 439 → 495 |
 | `reference_policy` / `conversation_actions` | v4 / v3 | 262 → 270 / 54 → 58 |

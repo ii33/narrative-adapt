@@ -219,7 +219,7 @@ uv run python scripts/graphrag_query.py `
 
 ## 7. 相关文件
 
-- `docs/MS_GRAPHRAG_STANDARD.md`：三章标准索引的构建、恢复与验收记录。
+- `docs/archive/graphrag/MS_GRAPHRAG_STANDARD.md`：三章标准索引的构建、恢复与验收记录。
 - `src/narrative/ms_graphrag_adapter.py`：只读预览适配器。
 - `src/narrative/graph_operations.py`：`graphrag_stage_sources`、`graphrag_preview_staged`。
 - `scripts/graphrag_env_check.py`、`scripts/graphrag_query.py`、`scripts/graphrag_query_suite.py`、`scripts/graphrag_query_suite.json`、`scripts/setup_graphrag_env.ps1`：本次补齐的部署与测试工具。

@@ -1,6 +1,6 @@
 # 分镜一期时间与调度合同
 
-本文记录现有执行合同。目标重构见[画格 场内调度与关键帧重构方案](STORYBOARD_STAGING_REFACTOR_PLAN.md)，将明确区分意图画格、播放图像点、场内调度和关键状态帧；新合同尚未实施，不能将本文的图像 `keyframes` 当作动态状态设计已经完成。
+本文记录现有执行合同。目标重构（原方案已随一次性文档清理删除）将明确区分意图画格、播放图像点、场内调度和关键状态帧；新合同尚未实施，不能将本文的图像 `keyframes` 当作动态状态设计已经完成。
 
 业务统一经 `Operations.read_storyboard(unit_id)`、`apply_storyboard_changes(unit_id, revision, changes)` 与 `preview_storyboard(unit_id, time_ms)`。修改要求当前 storyboard revision，整个批次校验并原子入库、记录审计；已定案方案须显式解除定案。无自动迁移或修补。
 

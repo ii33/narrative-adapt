@@ -34,23 +34,23 @@ GraphRAG 是面向全量抽取与检索的目标方向；当前源码只提供 M
 
 ### 属性/事件真实模型验收
 
-docs/PROPERTY_ACCEPTANCE.md 记录的一次三章 DeepSeek Harness 运行共 18 个请求。模型产生一个通过图预检的待审候选：23 个事件节点、21 条无环 before 断言、104 条定位证据；并尝试 18 条属性记录，但 property_precheck 返回 48 条诊断、没有属性候选。该图候选没有被接受，正式图/属性状态没有因此改变。之后将提示版本改为 graph-agent/11；记录明确说没有用该版本再次请求小说，因此不能宣称真实节点属性抽取已验收。
+docs/data/PROPERTY_ACCEPTANCE.md 记录的一次三章 DeepSeek Harness 运行共 18 个请求。模型产生一个通过图预检的待审候选：23 个事件节点、21 条无环 before 断言、104 条定位证据；并尝试 18 条属性记录，但 property_precheck 返回 48 条诊断、没有属性候选。该图候选没有被接受，正式图/属性状态没有因此改变。之后将提示版本改为 graph-agent/11；记录明确说没有用该版本再次请求小说，因此不能宣称真实节点属性抽取已验收。
 
 ### Microsoft GraphRAG 三章 sidecar
 
-docs/MS_GRAPHRAG_STANDARD.md 记录官方 standard 索引成功退出：15 个 text units、82 个实体、135 个关系、113 个 claims、23 个 communities/reports；LanceDB 有 82/23/15 个对应向量。三条本地检索查询均在 rank 1 命中目标实体。113 条 claims 中 41 条可精确定位短引文，另外 72 条仍是释义或未定位检索提示。正式修订数保持 3，正式候选数为 0，没有 GraphRAG 事实进入正式图。该结果证明一次有限本地索引和检索映射，不证明全量作品处理、全面召回或答案质量。
+docs/archive/graphrag/MS_GRAPHRAG_STANDARD.md 记录官方 standard 索引成功退出：15 个 text units、82 个实体、135 个关系、113 个 claims、23 个 communities/reports；LanceDB 有 82/23/15 个对应向量。三条本地检索查询均在 rank 1 命中目标实体。113 条 claims 中 41 条可精确定位短引文，另外 72 条仍是释义或未定位检索提示。正式修订数保持 3，正式候选数为 0，没有 GraphRAG 事实进入正式图。该结果证明一次有限本地索引和检索映射，不证明全量作品处理、全面召回或答案质量。
 
 两份三章记录的样本长度分别为 16,371 字符（属性/Agent 验收记录）与 16,106 字符（Microsoft GraphRAG staged input），各自报告了边界/哈希；在跨流程比较前应核对它们是否是同一文本版本与计数口径。
 
 ### 计划与旧界面
 
-docs/PLAN.md 中 v0.3 局部补全、v0.4 场景资产、v0.5 受控创作仍是后续路线，不应写成已交付。Streamlit 相关入口/测试仍存在，但当前验收范围暂缓其工作；README 仍描述浏览器入口。应后续明确它是暂缓维护还是待恢复。
+原 docs/PLAN.md（已随一次性文档清理删除）中的 v0.3 局部补全、v0.4 场景资产、v0.5 受控创作仍是后续路线，不应写成已交付。Streamlit 相关入口/测试仍存在，但当前验收范围暂缓其工作；README 仍描述浏览器入口。应后续明确它是暂缓维护还是待恢复。
 
 ## 实际测试证据与限制
 
 以下是仓库现有记录，不是本轮新跑结果：
 
-- docs/PROPERTY_ACCEPTANCE.md：v5 图/属性偏序组 65 passed；Qt 组 12 passed、0 skipped；graph-agent 组 23 passed。相关 Ruff 检查通过，Pyright 对改动路径报告 0 errors；之后又记录合成 property/agent 测试 50/50。
+- docs/data/PROPERTY_ACCEPTANCE.md：v5 图/属性偏序组 65 passed；Qt 组 12 passed、0 skipped；graph-agent 组 23 passed。相关 Ruff 检查通过，Pyright 对改动路径报告 0 errors；之后又记录合成 property/agent 测试 50/50。
 - 同一记录报告最终的非 Streamlit 文件级排除套件为 727 passed、0 failed，233.23 秒；并记录 Ruff、Pyright 和 diff 检查通过。15 个混合 Streamlit/UI 文件被排除，因此其中非 UI 测试也可能一并遗漏。文档中的明确复现命令对应较早的 714/0、191.46 秒运行；727/727 是后续结果，文档未在该段另列最终完整命令。
 - 最近一次完整仓库运行记录为 806 passed、21 failed、0 skipped，247.47 秒。记录称 20 个失败来自已退役 Streamlit 页面的旧控件/指标断言；另一个 Operations 模型目录导入问题之后有修复，相关测试文件随后 4 passed，但完整套件未在该修复后重跑。因此不能说全量测试当前全绿。
 - Microsoft GraphRAG 索引与真实模型结果分开于确定性单元测试。它们不能被 Ruff、Pyright、mock 或部分测试通过替代。
@@ -90,7 +90,7 @@ uv run pyright
 uv run pytest -q
 ~~~
 
-Streamlit 被排除的历史复现命令见 docs/PROPERTY_ACCEPTANCE.md；它不是全量套件，也不代表最新 727 结果在本轮重新验证。
+Streamlit 被排除的历史复现命令见 docs/data/PROPERTY_ACCEPTANCE.md；它不是全量套件，也不代表最新 727 结果在本轮重新验证。
 
 ## 后续优先级
 

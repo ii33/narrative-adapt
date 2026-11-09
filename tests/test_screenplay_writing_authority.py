@@ -32,9 +32,9 @@ def test_deleted_local_event_is_reference_despite_old_outcome_and_draft(tmp_path
 
 
 def test_writing_defaults_distinguish_plot_scope_from_artistic_expression():
-    versions = {"system": "5", "writing": "4", "batch_writing": "4",
-                "unit_writing_shortcut": "3", "batch_writing_shortcut": "3"}
-    for key in ("system", "scene_table", "writing", "scene_policy", "batch_writing", "scene_table_shortcut", "unit_writing_shortcut", "batch_writing_shortcut", "reference_policy"):
+    versions = {"system": "11", "scene_table": "6", "writing": "8", "scene_policy": "6",
+                "reference_policy": "4", "writing_shortcut": "1"}
+    for key in ("system", "scene_table", "writing", "scene_policy", "reference_policy", "writing_shortcut"):
         assert DEFAULT_PROMPTS[key]["version"] == versions.get(key, "2")
         assert "事件线" in DEFAULT_PROMPTS[key]["text"]
     writing = DEFAULT_PROMPTS["writing"]["text"]

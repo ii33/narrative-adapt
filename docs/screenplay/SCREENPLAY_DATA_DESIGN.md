@@ -25,7 +25,7 @@
 
 **改编时间段及剧本能力已按分期计划实现。** 本文后续保留早期设计背景；当前对象字段、操作和验收状态以 `SCREENPLAY_PHASE_PLAN.md` 及类型化接口为准。现有 `point_id` 和资产时间点仍不能充当时间段。
 
-遵循现有 [数据模型](DATA_MODEL.md) 与 [接口合同](AGENT_API.md)：
+遵循现有 [数据模型](../data/DATA_MODEL.md) 与 [接口合同](../features/AGENT_API.md)：
 
 - 原作 schema 11 继续只表达原作当前对象、证据和按事件记录的属性变更与派生状态。
 - 新业务由 `Operations` 统一开放给 UI、CLI、MCP 和当前统一对话，不直接由前端写库。

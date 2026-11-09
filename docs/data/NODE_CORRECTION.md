@@ -8,4 +8,4 @@
 
 属性状态变化在事件处追加 set/add/remove/clear/unknown，由程序重算状态；录入错误直接更正或删除原变更。按原文时间点回退会删除该点之后的事实并清理引用，不恢复节点旧名称或旧编辑版本。旧工程直接拒绝打开，不提供转换或兼容入口。
 
-接口与边界见 [数据模型](DATA_MODEL.md) 和 [Agent API](AGENT_API.md)。
+接口与边界见 [数据模型](DATA_MODEL.md) 和 [Agent API](../features/AGENT_API.md)。

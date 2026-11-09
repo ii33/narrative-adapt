@@ -23,7 +23,7 @@ def test_standard_and_fine_are_distinct_but_both_leave_actions_opt_in(project):
     assert "次要人物、无名人物与具体地点" in fine
     assert "无法区分的泛称、同一对象的重复提及不拆新实体" in fine
     assert "不臆造身份" in fine
-    assert "每个事件都必须在自身事件处记录world“地点”属性" in standard
+    assert "每个事件都必须在自身事件处记录world 地点属性" in standard
     assert "上层容器由成员派生人物与地点集合" in standard
     assert "场景不拥有单一地点" in standard
     assert all("标准与精细粒度都默认不提取动作" in text for text in (standard, fine))
@@ -31,7 +31,11 @@ def test_standard_and_fine_are_distinct_but_both_leave_actions_opt_in(project):
     property_fields = RESULT_SCHEMA["properties"]["properties"]["items"]["properties"]
     node_fields = RESULT_SCHEMA["properties"]["nodes"]["items"]["properties"]
     assert "事件地点使用属性名‘地点’" in property_fields["property"]["description"]
-    assert "不含地点" in node_fields["participants"]["description"]
+    # 参与者取值域已收窄：描述写"人物或群体"，并把地点/物品指向各自的属性族。
+    participants_description = node_fields["participants"]["description"]
+    assert "人物或群体" in participants_description
+    assert "地点用事件自身的地点属性" in participants_description
+    assert "不含地点" not in participants_description
     assert node_fields['location']['type'] == 'string' and "locations" not in node_fields
     with pytest.raises(ValueError, match="提取粒度"):
         _first_prompt("提取", extraction_granularity="unknown")
@@ -97,7 +101,7 @@ def test_both_modes_balance_events_between_scenes_and_actions(project):
     assert guides['standard'] != guides['fine']
     assert '可独立处理的情节单元' in DEFAULT_PROMPTS['granularity_fine']['text']
     assert '次要人物、无名人物与具体地点' in DEFAULT_PROMPTS['granularity_fine']['text']
-    assert DEFAULT_PROMPTS['extraction']['version'] == '23'
+    assert DEFAULT_PROMPTS['extraction']['version'] == '24'
     assert DEFAULT_PROMPTS['granularity_standard']['version'] == '6'
     assert DEFAULT_PROMPTS['granularity_fine']['version'] == '6'
 

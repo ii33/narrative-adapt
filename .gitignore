@@ -11,6 +11,8 @@ pytest-of-*/
 .env
 .env.*
 data/
+# 文档目录里的 data 是数据结构文档，不是运行产物
+!docs/data/
 *.sqlite*
 *.db*
 
