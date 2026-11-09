@@ -6,9 +6,12 @@ import pytest
 from agent_fixtures import TEXT, draft_result
 
 from narrative import mcp_server, tool_api, tool_cli
-from narrative.assistant import ASSISTANT_TOOLS
+from narrative.assistant import ASSISTANT_TOOLS, _allowed_tool_names
 from narrative.operations import Operations
 from narrative.screenplay_writing import validate_script_writing_tool_call
+
+# CLI/UI-only secret inputs stay out of the shared model-facing schema.
+CLI_ONLY_SECRETS = {"save_storyboard_video_settings": {"api_key"}}
 
 
 @pytest.fixture
@@ -31,12 +34,19 @@ def rpc(entry, name, args):
 
 def test_catalog_signature_parity(project):
     _entry, ops, _state = project
+    full_access = _allowed_tool_names("full")
     for name in tool_cli._SCREENPLAY_ALIASES.values():
-        assert name in ASSISTANT_TOOLS
+        tool = tool_api.TOOLS[name]
+        if tool.scope == "project":
+            assert name in ASSISTANT_TOOLS, name
+        elif tool.scope in {"host", "workspace"}:
+            assert name in full_access and name not in ASSISTANT_TOOLS, name
+        else:
+            assert tool.scope == "configuration" and name not in ASSISTANT_TOOLS, name
         params = inspect.signature(getattr(ops, name)).parameters
-        assert set(params) == set(tool_api.TOOLS[name].params), name
+        assert set(params) - CLI_ONLY_SECRETS.get(name, set()) == set(tool.params), name
         required = {key for key, param in params.items() if param.default is inspect.Parameter.empty}
-        assert required <= set(tool_api.TOOLS[name].schema()["required"]), name
+        assert required <= set(tool.schema()["required"]), name
 
 
 def test_cli_mcp_scene_identity_and_local_body_edit(project, capsys):
@@ -118,7 +128,7 @@ def test_cli_append_then_mcp_repeat_keeps_old_local_content(project, capsys):
     ops.edit_screenplay_timeline_node(screenplay["id"], events[0], {"name": "本地稿保留"}, expected_timeline_revision=timeline["revision"], reason="本地编辑")
     before = ops.read_screenplay_timeline(screenplay["id"])
     parent = next(n["id"] for n in adaptation["nodes"] if n["node_type"] == "scene")
-    source = ops.edit_adaptation_node(changes={"node_type": "event", "name": "待追加节点"}, parent_id=parent,
+    source = ops.edit_adaptation_node(changes={"node_type": "event", "name": "待追加节点", "initial_location": "未知"}, parent_id=parent,
         after_id=max(adaptation["nodes"], key=lambda n: n["sort_id"])["id"], reason="源新增fixture")
     added_id = next(n["id"] for n in source["nodes"] if n["name"] == "待追加节点")
     assert tool_cli.main(["screenplay-timeline-append", "--screenplay-id", screenplay["id"],

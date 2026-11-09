@@ -43,8 +43,11 @@ def test_new_screenplays_start_empty_and_read_candidates_never_import_or_write(p
     assert read_context(project) == before
     document = project.read_screenplay(one)
     assert document["timeline_id"] == first["timeline_id"] and document["timeline_revision"] == 0
-    with pytest.raises(ValueError, match="边界"):
-        project.create_adaptation_span(one, "未导入", start_node_id=ids["甲敲门"], end_node_id=ids["甲进屋"], expected_timeline_revision=0, reason="拒绝全量默认")
+    refused = project.create_adaptation_span(one, "未导入", start_node_id=ids["甲敲门"], end_node_id=ids["甲进屋"], expected_timeline_revision=0, reason="拒绝全量默认")
+    assert refused["status"] == "staged" and refused["submission_status"] == "staged", refused
+    assert refused["problems"][0]["code"] == "CONTENT_VALIDATION"
+    assert "边界" in refused["problems"][0]["message"]
+    assert project.read_screenplay_timeline(one)["nodes"] == []
     assert project.adaptation_snapshot() == source
 
 

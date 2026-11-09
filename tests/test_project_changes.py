@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-from agent_fixtures import TEXT, draft_result
+from agent_fixtures import LOCATION_DEFINITION, TEXT, draft_result, location_record
 from agent_fixtures import project as project
 
 from narrative import assistant, tool_api
@@ -57,6 +57,8 @@ def batch(ops, sid):
             "value_type": "string",
             "cardinality": "one",
         },
+        LOCATION_DEFINITION,
+        location_record("generic-event", sid, TEXT.index(quote), quote),
         {
             "kind": "property_change", "op": "set",
             "id": "generic-value",
@@ -129,7 +131,7 @@ def test_generic_invalid_batch_never_writes_or_stages(project, bad):
     objects, records = batch(project, sid)
     before = deepcopy(project.graph_snapshot())
     if bad == "quote":
-        objects[0]["evidence"] = {"source_id": sid, "quote": "原文里没有"}
+        objects[1]["evidence"] = {"source_id": sid, "quote": "原文里没有"}
     elif bad == "reference":
         records[-1]["node_id"] = "missing-person"
     else:

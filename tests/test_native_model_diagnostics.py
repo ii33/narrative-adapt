@@ -223,7 +223,7 @@ def test_native_malformed_tool_diagnostics_preserve_raw_and_actual_commit_state(
                 assert len(requests) == (4 if partial_commit else 3)
                 assert not any(row.get('kind') == 'assistant_incomplete' for row in saved['messages'])
                 failure = next(row for row in saved['messages'] if row.get('kind') == 'format_correction')
-                assert len(action_receipts(ops)) == (1 if partial_commit else 0)
+                assert len([row for row in action_receipts(ops) if row['id'].startswith('extraction-submission-')]) == (1 if partial_commit else 0)
                 assert sum(row['role'] == 'user' for row in saved['messages']) == 1
             else:
                 error = next(text for kind, text in errors if kind == 'assistant')
@@ -231,7 +231,7 @@ def test_native_malformed_tool_diagnostics_preserve_raw_and_actual_commit_state(
                 assert len(requests) == (2 if partial_commit else 1)
                 failure = next(row for row in saved['messages'] if row.get('kind') == 'assistant_incomplete')
                 assert failure['starting_revision'] == initial_revision and failure['revision'] == revision
-                assert ('已完成的入库变更仍保留' if partial_commit else '未产生新的入库变更') in failure['text']
+                assert '实际已提交内容见程序入库汇总' in failure['text']
             assert failure['error_code'] == 'tool_input_invalid_json'
             path = Path(failure['diagnostic_path'])
             assert path.is_file()

@@ -161,8 +161,11 @@ def test_element_create_is_manual_and_binds_only_after_save(tmp_path, monkeypatc
         assert not ops.list_assets("item")["assets"]  # Opening the form creates nothing.
         script.findChild(object, "storyboardCreateElementAssetTitle").setProperty("text", "铜钥匙测试")
         click(ui, script.findChild(object, "storyboardSaveElementAsset"))
-        ui.wait(lambda: bool(ops.read_storyboard(unit)["shots"][1]["visual_elements"][0].get("asset_id")))
+        ui.wait(lambda: not script.property("elementActionPending"))
+        ui.settle()
+        assert dialog.property("errorText") == ""
         asset_id = ops.read_storyboard(unit)["shots"][1]["visual_elements"][0]["asset_id"]
+        assert asset_id
         assert ops.get_asset(asset_id)["title"] == "铜钥匙测试"
         assert ops.get_asset(asset_id)["node_id"] == ""
         ui.wait(lambda: not dialog.property("opened"))
@@ -185,7 +188,9 @@ def test_existing_asset_is_selected_from_element_list(tmp_path, monkeypatch):
         render_ready(ui)
         option = next(x for x in visuals(dialog.property("contentItem")) if x.objectName() == "storyboardElementAssetOption")
         click(ui, option)
-        ui.wait(lambda: ops.read_storyboard(unit)["shots"][1]["visual_elements"][0]["asset_id"] == asset["id"])
+        ui.wait(lambda: not script.property("elementActionPending"))
+        ui.settle()
+        assert ops.read_storyboard(unit)["shots"][1]["visual_elements"][0]["asset_id"] == asset["id"]
         assert len(ops.list_assets("item")["assets"]) == 1
         assert not ui.errors
 
@@ -228,7 +233,9 @@ def test_element_asset_staged_form_repairs_same_submission_then_binds(tmp_path, 
         assert not ops.list_assets("item")["assets"]
         script.findChild(object, "storyboardCreateElementAssetTitle").setProperty("text", "修好的钥匙")
         click(ui, script.findChild(object, "storyboardSaveElementAsset"))
-        ui.wait(lambda: bool(ops.read_storyboard(unit)["shots"][1]["visual_elements"][0].get("asset_id")))
+        ui.wait(lambda: not script.property("elementActionPending"))
+        ui.settle()
+        assert ops.read_storyboard(unit)["shots"][1]["visual_elements"][0].get("asset_id")
         repaired = ops.read_content_submission(submission["submission_id"])
         assert repaired["submission_status"] == "committed" and repaired["submission_revision"] == 2
         assert not ops.list_content_submissions(operation="save_asset")["submissions"]
@@ -251,7 +258,9 @@ def test_one_click_creates_selected_missing_cards_without_model_or_name_merge(tm
         assert desk.property("selectedMissingAssetCount") == 2
         assert not ops.list_assets("item")["assets"]
         click(ui, desk.findChild(object, "storyboardCreateMissingAssets"))
-        ui.wait(lambda: len(ops.list_assets("item")["assets"]) == 2 and not desk.property("missingAssetsPending"))
+        ui.wait(lambda: not desk.property("missingAssetsPending"))
+        ui.settle()
+        assert len(ops.list_assets("item")["assets"]) == 2
         cards = ops.list_assets("item")["assets"]
         assert cards[0]["id"] != cards[1]["id"] and all(c["title"].startswith("钥匙") for c in cards)
         assert all(not c["images"] and not c["node_id"] for c in cards)
@@ -279,7 +288,9 @@ def test_one_click_row_creates_only_that_element(tmp_path, monkeypatch):
         rows.positionViewAtIndex(1, 0)
         render_ready(ui)
         click(ui, button)
-        ui.wait(lambda: len(ops.list_assets("location")["assets"]) == 1)
+        ui.wait(lambda: not desk.property("missingAssetsPending"))
+        ui.settle()
+        assert len(ops.list_assets("location")["assets"]) == 1
         elements = ops.read_storyboard(unit)["shots"][1]["visual_elements"]
         assert elements[0]["asset_id"] is None and elements[1]["asset_id"]
         assert not ops.list_assets("item")["assets"]

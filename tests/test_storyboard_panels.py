@@ -4,13 +4,21 @@ import pytest
 from PIL import Image, ImageChops
 from test_screenplay_writing import project as project
 from test_storyboard_operations import setup_board
+from test_storyboard_timing import assert_problem, staged
+
+
+def apply_board(ops, unit, revision, changes):
+    result = ops.apply_storyboard_changes(unit, revision, changes)
+    assert result.get('status') in {None, 'accepted', 'unchanged'}, result
+    return result if result.get('status') else ops.read_storyboard(unit)
 
 
 def test_panel_images_candidates_marks_and_atomic_validation(project, tmp_path):
     ops, unit, _ = setup_board(project)
-    board = ops.apply_storyboard_changes(unit, 0, [{"op": "create_shot", "title": "独立镜头"}])
+    board = apply_board(ops, unit, 0, [{"op": "create_shot", "title": "独立镜头"}])
     shot = board["shots"][0]["id"]
-    board = ops.apply_storyboard_changes(
+    board = apply_board(
+        ops,
         unit,
         1,
         [
@@ -21,7 +29,8 @@ def test_panel_images_candidates_marks_and_atomic_validation(project, tmp_path):
     one, two = board["shots"][0]["panels"]
     image = tmp_path / "source.png"
     Image.new("RGB", (960, 540), "blue").save(image)
-    board = ops.apply_storyboard_changes(
+    board = apply_board(
+        ops,
         unit,
         2,
         [
@@ -34,7 +43,8 @@ def test_panel_images_candidates_marks_and_atomic_validation(project, tmp_path):
         ],
     )
     candidate = board["shots"][0]["panels"][0]["candidates"][0]
-    board = ops.apply_storyboard_changes(
+    board = apply_board(
+        ops,
         unit,
         3,
         [
@@ -53,26 +63,22 @@ def test_panel_images_candidates_marks_and_atomic_validation(project, tmp_path):
         ],
     )
     assert board["shots"][0]["panels"][1] == two
+    before = ops.read_storyboard(unit)
     clean = tmp_path / "clean.png"
     marked = tmp_path / "marked.png"
     ops.export_storyboard_panel(unit, shot, one["id"], str(clean))
     ops.export_storyboard_panel(unit, shot, one["id"], str(marked), True)
     assert Image.open(clean).getpixel((96, 54)) == (0, 0, 255)
     assert ImageChops.difference(Image.open(clean), Image.open(marked)).getbbox()
-    with pytest.raises(ValueError, match="归一化"):
-        ops.apply_storyboard_changes(
-            unit,
-            4,
-            [
+    assert_problem(staged(ops, unit, [
                 {
                     "op": "update_panel",
                     "shot_id": shot,
                     "panel_id": one["id"],
                     "marks": [{"kind": "stroke", "points": [[1.1, 0]]}],
                 }
-            ],
-        )
-    assert ops.read_storyboard(unit) == board
+            ]), "归一化")
+    assert ops.read_storyboard(unit) == before
     board = ops.apply_storyboard_changes(
         unit,
         4,
@@ -88,19 +94,17 @@ def test_panel_images_candidates_marks_and_atomic_validation(project, tmp_path):
     assert board["shots"][0]["panels"][1]["base"]["kind"] == "snapshot"
     with pytest.raises(FileExistsError):
         ops.export_storyboard_panel(unit, shot, one["id"], str(clean))
-    with pytest.raises(ValueError, match="位置"):
-        ops.apply_storyboard_changes(
-            unit, 5, [{"op": "update_shot", "shot_id": shot, "duration_ms": 50}]
-        )
+    assert_problem(staged(ops, unit, [{"op": "update_shot", "shot_id": shot, "duration_ms": 50}]), "位置")
 
 
 def test_panel_generation_and_use_are_independent_and_keep_provenance(
     project, tmp_path, monkeypatch
 ):
     ops, unit, _ = setup_board(project)
-    board = ops.apply_storyboard_changes(unit, 0, [{"op": "create_shot", "title": "交接"}])
+    board = apply_board(ops, unit, 0, [{"op": "create_shot", "title": "交接"}])
     shot = board["shots"][0]["id"]
-    board = ops.apply_storyboard_changes(
+    board = apply_board(
+        ops,
         unit,
         1,
         [
@@ -121,7 +125,8 @@ def test_panel_generation_and_use_are_independent_and_keep_provenance(
     assert board["shots"][0]["panels"][1] == second
     assert board["shots"][0]["keyframes"] == []
     candidate = board["shots"][0]["panels"][0]["candidates"][0]
-    board = ops.apply_storyboard_changes(
+    board = apply_board(
+        ops,
         unit,
         3,
         [
@@ -134,6 +139,7 @@ def test_panel_generation_and_use_are_independent_and_keep_provenance(
             {"op": "use_panel_frame", "shot_id": shot, "panel_id": first["id"]},
         ],
     )
+    assert board.get("status") in {None, "accepted"}
     panel = board["shots"][0]["panels"][0]
     assert panel["frame_id"] == board["shots"][0]["keyframes"][0]["id"]
     assert (
@@ -163,9 +169,10 @@ def test_panel_generation_and_use_are_independent_and_keep_provenance(
 
 def test_panel_review_tracks_only_visual_dependencies(project, monkeypatch):
     ops, unit, _ = setup_board(project)
-    board = ops.apply_storyboard_changes(unit, 0, [{"op": "create_shot", "title": "等候"}])
+    board = apply_board(ops, unit, 0, [{"op": "create_shot", "title": "等候"}])
     shot = board["shots"][0]["id"]
-    board = ops.apply_storyboard_changes(
+    board = apply_board(
+        ops,
         unit,
         1,
         [

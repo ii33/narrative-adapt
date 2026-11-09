@@ -247,7 +247,7 @@ def test_real_sdk_manual_stop_button_cancels_current_task_and_preserves_commits(
             saved = store.load(result['chat_id'])
             cancelled = next(row for row in saved['messages'] if row.get('kind') == 'assistant_cancelled')
             assert cancelled['error_code'] == 'user_stopped' and cancelled['finish_reason'] == 'cancelled'
-            assert ('已完成的入库变更仍保留' if partial_commit else '未产生新的入库变更') in cancelled['text']
+            assert '实际已提交内容见程序入库汇总' in cancelled['text']
             assert 'stdout closed' not in cancelled['text'] and '超时' not in cancelled['text']
             task = json.loads((Path(result['audit_directory']) / 'task.json').read_text(encoding='utf-8'))
             assert task['status'] == 'cancelled'

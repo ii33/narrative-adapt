@@ -25,6 +25,9 @@ def legacy_storage(project, *, populated):
 def protected_data(project):
     with project._store.connect() as db:
         meta = {row[0]: row[1] for row in db.execute("SELECT key,value FROM meta")}
+    # Content staging bookkeeping is audit, not protected business data.
+    meta = {key: value for key, value in meta.items()
+            if not key.startswith("content_submission:") and key != "next_content_submission_number"}
     return project.graph_snapshot(), project.property_records(), project.adaptation_snapshot(), meta
 
 
@@ -80,7 +83,10 @@ def test_explicit_reset_discards_only_script_domain_and_new_create_succeeds(proj
     assert after[:3] == before[:3]
     # New screenplay IDs advance their own program-owned counters in meta.
     def outside_metadata(meta):
-        return {key: value for key, value in meta.items() if not key.startswith("readable_id:screenplay:")}
+        return {key: value for key, value in meta.items()
+                if not key.startswith("readable_id:screenplay:")
+                and not key.startswith("content_submission:")
+                and key != "next_content_submission_number"}
     assert outside_metadata(after[3]) == outside_metadata(before[3])
 
 
@@ -91,8 +97,8 @@ def test_empty_legacy_domain_can_initialize_on_explicit_create_but_failed_create
     protected = protected_data(project)
     assert before["status"] == "incomplete" and before["total_rows"] == 0
     assert before["can_initialize_on_create"] and not before["reset_required"]
-    with pytest.raises(ValueError):
-        project.create_screenplay("非法格式", format="episode", reason="验证原子创建")
+    refused = project.create_screenplay("非法格式", format="episode", reason="验证原子创建")
+    assert refused["status"] == "staged" and refused["problems"][0]["path"] == ["format"]
     assert project.inspect_screenplay_storage() == before
     assert protected_data(project) == protected
     project.create_screenplay("正常新建", reason="显式创建初始化空旧域")

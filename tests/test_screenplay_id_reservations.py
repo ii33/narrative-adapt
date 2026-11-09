@@ -69,10 +69,10 @@ def test_explicit_number_created_then_deleted_remains_reserved_in_and_across_tra
 def test_failed_batch_rolls_back_reservations_and_restores_context(project):
     screenplay_id = project.create_screenplay("事务回滚", reason="编号fixture")["screenplay"]["id"]
     before = read_context(project)
-    with pytest.raises(ValueError):
-        apply(project, screenplay_id, [
-            {"op": "create_act", "id": "act-100", "title": "不能提交"},
-            {"op": "create_episode", "title": "单片不允许有集"}])
+    refused = apply(project, screenplay_id, [
+        {"op": "create_act", "id": "act-100", "title": "不能提交"},
+        {"op": "create_episode", "title": "单片不允许有集"}])
+    assert refused["status"] == "staged" and refused["problems"]
     assert read_context(project) == before
     with pytest.raises(ValueError, match="写入事务"):
         new_id("act")

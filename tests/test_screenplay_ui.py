@@ -82,8 +82,8 @@ def test_screenplay_manual_workflow_repeated_body_edit_and_export(tmp_path, monk
         ops = Operations.open(ui.bridge._project_path)
         snap = ops.edit_adaptation_node(changes={"node_type": "scene", "name": "渡桥"})
         scene_id = snap["nodes"][0]["id"]
-        ops.edit_adaptation_node(changes={"node_type": "event", "name": "甲上桥"}, parent_id=scene_id)
-        ops.edit_adaptation_node(changes={"node_type": "event", "name": "桥上传来呼唤"}, parent_id=scene_id)
+        ops.edit_adaptation_node(changes={"node_type": "event", "name": "甲上桥", "initial_location": "未知"}, parent_id=scene_id)
+        ops.edit_adaptation_node(changes={"node_type": "event", "name": "桥上传来呼唤", "initial_location": "未知"}, parent_id=scene_id)
         original = ops.graph_snapshot()
         ui.window.setProperty("assistantOpen", False)
         ui.window.setProperty("currentPage", "screenplay")
@@ -174,7 +174,7 @@ def test_screenplay_manual_workflow_repeated_body_edit_and_export(tmp_path, monk
         source = ops.adaptation_snapshot()
         old_event_id = next(node["id"] for node in source["nodes"] if node["node_type"] == "event")
         ops.edit_adaptation_node(old_event_id, {"name": "源改编中的新名字"})
-        added = ops.edit_adaptation_node(changes={"node_type": "event", "name": "乙走上桥"}, parent_id=scene_id)
+        added = ops.edit_adaptation_node(changes={"node_type": "event", "name": "乙走上桥", "initial_location": "未知"}, parent_id=scene_id)
         new_event_id = next(node["id"] for node in added["nodes"] if node["name"] == "乙走上桥")
         for name in ("Segment", "Scene"):
             click(ui, page.findChild(object, "script" + name + "ColumnToggle"))
@@ -196,7 +196,13 @@ def test_screenplay_manual_workflow_repeated_body_edit_and_export(tmp_path, monk
         assert (picker.property("startId"), picker.property("endId")) == prior_range
         assert page.property("selectedSegmentId") == segment_id
         assert page.property("selectedUnitId") == unit_id
-        assert ops.read_script_segment(segment_id)["units"] == prior_units
+        # Appending another timeline import refreshes the unit's provenance
+        # references but must not rewrite its own plan, blocks or identity.
+        def without_provenance(units):
+            return [{key: value for key, value in unit.items() if key != "source_references"}
+                    for unit in units]
+
+        assert without_provenance(ops.read_script_segment(segment_id)["units"]) == without_provenance(prior_units)
         assert {node["id"]: node["name"] for node in ops.read_screenplay_timeline(screenplay_id)["nodes"] if node["id"] in prior_names} == prior_names
         assert all(page.findChild(object, "script" + name + "Column").property("collapsed") for name in ("Segment", "Scene"))
         for name in ("Segment", "Scene"):
@@ -242,9 +248,11 @@ def test_screenplay_manual_workflow_repeated_body_edit_and_export(tmp_path, monk
 
 
 def create_fixture(ops):
-    snap = ops.edit_adaptation_node(changes={"node_type": "scene", "name": "桥上相遇"})
-    scene_id = snap["nodes"][0]["id"]
-    ops.edit_adaptation_node(changes={"node_type": "event", "name": "渡桥"}, parent_id=scene_id)
+    scene = ops.edit_adaptation_node(changes={"node_type": "scene", "name": "桥上相遇"})
+    assert scene["status"] == "accepted", scene
+    scene_id = scene["created_node_id"]
+    event = ops.edit_adaptation_node(changes={"node_type": "event", "name": "渡桥", "initial_location": "未知"}, parent_id=scene_id)
+    assert event["status"] == "accepted", event
     document = ops.create_screenplay("桥上", reason="UI隔离测试")
     screenplay_id = document["screenplay"]["id"]
     ops.import_screenplay_timeline(screenplay_id, [scene_id],
@@ -486,7 +494,10 @@ def test_import_picker_has_five_levels_and_keeps_an_independent_copy(tmp_path, m
         parent = None
         ids = {}
         for kind, title in (("storyline", "渡桥篇"), ("big_event", "赴约"), ("scene", "桥头"), ("event", "甲停步"), ("action", "甲回头")):
-            snapshot = ops.edit_adaptation_node(changes={"node_type": kind, "name": title}, parent_id=parent)
+            changes = {"node_type": kind, "name": title}
+            if kind == "event":
+                changes["initial_location"] = "未知"
+            snapshot = ops.edit_adaptation_node(changes=changes, parent_id=parent)
             parent = next(n["id"] for n in snapshot["nodes"] if n["name"] == title)
             ids[kind] = parent
         document = ops.create_screenplay("渡桥剧本", reason="五级导入测试")
@@ -616,7 +627,7 @@ def test_scene_table_ui_uses_effective_project_prompt_and_preserves_optional_pla
     with transcript_shell(tmp_path, monkeypatch) as ui:
         ops = Operations.open(ui.bridge._project_path)
         settings = ops.load_prompt_settings()
-        ops.save_prompt_override("scene_table_shortcut", "按本工程散文创作要求整理片段提纲。", settings["revision"], reason="验证快捷提示覆盖")
+        ops.save_prompt_override("writing_shortcut", "按本工程散文创作要求整理片段提纲。", settings["revision"], reason="验证快捷提示覆盖")
         screenplay_id = create_fixture(ops)
         segment = ops.read_screenplay(screenplay_id)["segments"][0]
         plan = {"title": "原有场次", "summary": "甲停步回头，仍然穿着湿雨衣。", "production_notes": "保留已有场级备注",
@@ -633,7 +644,7 @@ def test_scene_table_ui_uses_effective_project_prompt_and_preserves_optional_pla
         ui.wait(lambda: writing_dialog.property("opened"))
         prompt = page.findChild(object, "scriptWritingPrompt").property("text")
         effective = {row["id"]: row["effective"] for row in ops.load_prompt_settings()["prompts"]}
-        assert prompt == effective["scene_table_shortcut"]
+        assert prompt == effective["writing_shortcut"]
         assert plain(page.property("writingTarget"))["kind"] == "scene_table"
         assert plain(page.property("writingTarget"))["ids"] == [segment["id"]]
         writing_dialog.close()

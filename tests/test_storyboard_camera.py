@@ -3,7 +3,7 @@ import pytest
 from PIL import Image
 from test_screenplay_writing import project as project
 from test_storyboard_operations import setup_board
-from test_storyboard_timing import change
+from test_storyboard_timing import assert_problem, change, staged
 
 from narrative.operations import Operations
 from narrative.storyboard_camera import CAMERA_FIELDS, PRESETS
@@ -46,8 +46,7 @@ def test_marker_move_previews_all_conflicts_preserves_free_items_and_ids(project
     rejected = ops.preview_storyboard_changes(unit, moved['revision'], edit)
     assert not rejected['valid'] and len(rejected['conflicts']) == 2
     assert any(row['duration_locked'] for row in rejected['conflicts'])
-    with pytest.raises(ValueError, match='超出'):
-        change(ops, unit, edit)
+    assert_problem(staged(ops, unit, edit), '超出')
     assert ops.read_storyboard(unit) == moved
     with pytest.raises(ValueError, match='命名时刻'):
         change(ops, unit, [{'op': 'delete_marker', 'marker_id': marker}])
@@ -76,7 +75,7 @@ def test_camera_dolly_zoom_projection_and_saved_editable_presets(project, tmp_pa
     preset = ops.save_storyboard_camera_preset('缓慢推进', {'preset': 'dolly_zoom', 'amount': .2}, 0, '项目复用')
     assert preset['presets'][0]['id'].startswith('camera-preset-')
     reopened = Operations.open_graph_project(tmp_path / 'writing.nproj')
-    assert reopened.load_storyboard_camera_presets() == preset
+    assert reopened.load_storyboard_camera_presets() == ops.load_storyboard_camera_presets()
     with pytest.raises(ValueError, match='刷新'):
         ops.save_storyboard_camera_preset('另一条', {'preset': 'fixed'}, 0, '过期')
 
@@ -131,10 +130,15 @@ def test_orbit_uses_arc_and_invalid_camera_edits_roll_back(project):
         [{'op': 'set_camera_preset', 'shot_id': shot, 'preset': 'fixed', 'start': {'invalid': 1}}],
         [{'op': 'update_shot', 'shot_id': shot, 'action_start_marker_id': False}],
     ]
-    for edit in edits:
-        with pytest.raises(ValueError):
-            change(ops, unit, edit)
-        assert ops.read_storyboard(unit) == board
+    with pytest.raises(ValueError):
+        change(ops, unit, edits[0])
+    assert ops.read_storyboard(unit) == board
+    assert_problem(staged(ops, unit, edits[1]), '视野')
+    assert ops.read_storyboard(unit) == board
+    assert_problem(staged(ops, unit, edits[2]), '姿态')
+    assert ops.read_storyboard(unit) == board
+    assert_problem(staged(ops, unit, edits[3]), '命名时刻')
+    assert ops.read_storyboard(unit) == board
 
 
 def test_dolly_zoom_changes_background_perspective_without_using_render_depth_as_height(project):

@@ -71,12 +71,17 @@ def test_invalid_top_level_json_does_not_dispatch_or_create_a_fake_submission(mo
 
 
 def test_guidance_uses_feedback_direct_patch_and_never_claims_staged_as_committed():
-    for name in ['extraction', 'source_extraction', 'review', 'action_extraction']:
+    # 修补流程只在 extraction 里完整讲一次；其余入口共用同一条合同，不复制整段说明。
+    flow = DEFAULT_PROMPTS['extraction']['text']
+    assert 'staged' in flow and '未写入正式事实' in flow
+    assert '无需先read_extraction_submission' in flow and '一次patch数组' in flow
+    assert '不重发整批' in flow and 'submission_revision' in flow
+    assert 'index从0起' in flow and '从1起' in flow
+    for name in ['source_extraction', 'review', 'action_extraction']:
         text = DEFAULT_PROMPTS[name]['text']
-        assert 'staged' in text and '未写入正式事实' in text
-        assert '无需先read_extraction_submission' in text and '一次patch数组' in text
-        assert '不重发整批' in text and 'submission_revision' in text
-        assert 'index从0起' in text and '从1起' in text
+        assert 'staged' in text
+        assert 'patch' in text or '修补' in text
+        assert '不重发整批' in text or '不重发' in text
 
 
 def test_pending_submissions_are_discoverable_without_draft_payload(project, capsys):

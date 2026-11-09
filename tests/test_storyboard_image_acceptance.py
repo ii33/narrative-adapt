@@ -24,13 +24,14 @@ def test_generated_picture_binds_provider_output_not_private_guide(project, monk
     with Image.open(actual) as image:
         assert image.getpixel((0, 0)) == (255, 0, 0)
     assert "甲等待。" in seen["prompt"] and "明确手与道具接触" in seen["prompt"]
-    assert "简洁色彩" in seen["prompt"] and not result["approved"]
+    assert "本次简彩" in seen["prompt"] and not result["approved"]
 
 
 def test_failed_service_cannot_bind_geometric_guide(project, monkeypatch):
     from narrative import storyboard_style_provider
     ops, unit, block = setup_board(project)
-    before = ops.apply_storyboard_changes(unit, 0, [{"op": "create_shot", "title": "等待", "source_block_ids": [block]}])
+    ops.apply_storyboard_changes(unit, 0, [{"op": "create_shot", "title": "等待", "source_block_ids": [block]}])
+    before = ops.read_storyboard(unit)
     def fail(*args, **kwargs):
         raise ValueError("isolated image service failure")
     monkeypatch.setattr(storyboard_style_provider, "render_sketch_image", fail)

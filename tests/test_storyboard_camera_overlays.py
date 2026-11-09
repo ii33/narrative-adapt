@@ -4,7 +4,7 @@ import copy
 import pytest
 from test_screenplay_writing import project as project
 from test_storyboard_operations import setup_board
-from test_storyboard_timing import change
+from test_storyboard_timing import assert_problem, change, staged
 
 
 @pytest.mark.parametrize('easing,quarter,mid', [('linear', .25, .5), ('ease_in', .0625, .25),
@@ -66,18 +66,20 @@ def test_overlay_presets_persist_and_invalid_values_reject_atomically(project):
     board = change(ops, unit, [{'op': 'set_camera_preset', 'shot_id': shot, **settings}])
     assert board['shots'][0]['camera']['handheld'] == handheld
     assert board['shots'][0]['camera']['keys'][0]['easing'] == 'ease_in_out'
-    for invalid in [
-        {'op': 'set_camera_overlays', 'shot_id': shot, 'focus_target_object_id': 'foreign-object'},
-        {'op': 'set_camera_overlays', 'shot_id': shot, 'handheld': handheld | {'amplitude': .1}},
-        {'op': 'set_camera_overlays', 'shot_id': shot, 'handheld': handheld | {'seed': True}},
-        {'op': 'set_camera_keyframe', 'shot_id': shot, 'offset_ms': 0, 'focus_distance': 0},
-        {'op': 'set_camera_keyframe', 'shot_id': shot, 'offset_ms': 0, 'easing': 'bounce'},
+    for invalid, error in [
+        ({'op': 'set_camera_overlays', 'shot_id': shot, 'focus_target_object_id': 'foreign-object'}, '对焦目标'),
+        ({'op': 'set_camera_overlays', 'shot_id': shot, 'handheld': handheld | {'amplitude': .1}}, '手持幅度'),
+        ({'op': 'set_camera_overlays', 'shot_id': shot, 'handheld': handheld | {'seed': True}}, '手持种子'),
+        ({'op': 'set_camera_keyframe', 'shot_id': shot, 'offset_ms': 0, 'focus_distance': 0}, '对焦距离'),
+        ({'op': 'set_camera_keyframe', 'shot_id': shot, 'offset_ms': 0, 'easing': 'bounce'}, '速度曲线'),
     ]:
-        with pytest.raises(ValueError):
-            change(ops, unit, [invalid])
+        assert_problem(staged(ops, unit, [invalid]), error)
         assert ops.read_storyboard(unit) == board
-    with pytest.raises(ValueError, match='场内目标'):
-        ops.save_storyboard_camera_preset('不应保存引用', settings | {'focus_target_object_id': 'object-1'}, 1, '非法')
+    presets_before = ops.load_storyboard_camera_presets()
+    invalid_preset = ops.save_storyboard_camera_preset('不应保存引用', settings | {'focus_target_object_id': 'object-1'}, 1, '非法')
+    assert invalid_preset['status'] == 'staged'
+    assert_problem(invalid_preset, '场内目标')
+    assert ops.load_storyboard_camera_presets() == presets_before
 
 
 def test_inserting_focus_only_camera_key_preserves_linear_motion(project):

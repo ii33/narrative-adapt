@@ -4,6 +4,7 @@ import copy
 import pytest
 from test_screenplay_writing import project as project
 from test_storyboard_operations import setup_board
+from test_storyboard_timing import assert_problem, change, staged
 
 from narrative.storyboard_contract import (
     ACTION_FIELDS,
@@ -31,28 +32,43 @@ def test_contract_is_typed_closed_and_fields_match_business_operations():
     assert len(storyboard_change_schema()['oneOf']) == len(ACTION_SCHEMAS)
 
 
-@pytest.mark.parametrize('invalid,diagnostic', [
-    ({'op': 'set_action_keyframe', 'object_id': 'object-1', 'time_ms': 0, 'kind': 'action_keyframe'}, 'kind'),
-    ({'op': 'set_keyframe', 'shot_id': 'shot-1', 'keyframe': {'offset_ms': 0, 'sketch_path': 'C:/x.png'}}, 'offset_ms'),
-    ({'op': 'set_keyframe', 'shot_id': 'shot-1', 'offset_ms': 0}, '只能提供一个'),
-    ({'op': 'create_object', 'name': '人物'}, 'kind'),
-])
-def test_flat_field_errors_are_specific_and_do_not_execute_any_batch_write(project, invalid, diagnostic):
+def test_flat_field_errors_are_specific_and_do_not_execute_any_batch_write(project):
+    ops, unit, _ = setup_board(project)
+    board = change(ops, unit, [{'op': 'create_shot', 'title': '既有'}, {'op': 'create_object', 'name': '人物', 'kind': 'person'}])
+    obj = board['objects'][0]['id']
+    before = ops.read_storyboard(unit)
+    original = {'op': 'set_action_keyframe', 'object_id': obj, 'time_ms': 0, 'kind': 'action_keyframe'}
+    frozen = copy.deepcopy(original)
+    result = staged(ops, unit, [{'op': 'create_shot', 'title': '不应写入'}, original])
+    assert_problem(result, 'set_action_keyframe', 'kind', '允许字段', '扁平示例')
+    assert original == frozen and ops.read_storyboard(unit) == before
+    result = staged(ops, unit, [{'op': 'create_shot', 'title': '不应写入'}, {'op': 'create_object', 'name': '人物'}])
+    assert_problem(result, 'create_object', 'kind', '允许字段', '扁平示例')
+    assert ops.read_storyboard(unit) == before
+
+
+def test_unknown_target_and_nested_keyframe_still_raise_without_writes(project):
     ops, unit, _ = setup_board(project)
     before = ops.read_storyboard(unit)
+    invalid = {'op': 'set_keyframe', 'shot_id': 'shot-1', 'keyframe': {'offset_ms': 0, 'sketch_path': 'C:/x.png'}}
     original = copy.deepcopy(invalid)
     with pytest.raises(ValueError) as error:
         ops.apply_storyboard_changes(unit, before['revision'], [{'op': 'create_shot', 'title': '不应写入'}, invalid])
     message = str(error.value)
-    assert invalid['op'] in message and diagnostic in message
+    assert invalid['op'] in message and 'offset_ms' in message
     assert '允许字段' in message and '扁平示例' in message
     assert invalid == original and ops.read_storyboard(unit) == before
+    with pytest.raises(ValueError):
+        ops.apply_storyboard_changes(unit, before['revision'], [
+            {'op': 'create_shot', 'title': '不应写入'},
+            {'op': 'set_keyframe', 'shot_id': 'shot-1', 'offset_ms': 0}])
+    assert ops.read_storyboard(unit) == before
 
 
 def test_flat_valid_shapes_are_not_rewritten():
-    for change in [
+    for action in [
         {'op': 'set_keyframe', 'shot_id': 'shot-1', 'offset_ms': 0, 'sketch_path': 'C:/x.png'},
         {'op': 'set_action_keyframe', 'object_id': 'object-1', 'time_ms': 0, 'x': .2},
     ]:
-        before = copy.deepcopy(change)
-        assert validate_action_shape(change) == change['op'] and change == before
+        before = copy.deepcopy(action)
+        assert validate_action_shape(action) == action['op'] and action == before

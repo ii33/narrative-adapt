@@ -48,7 +48,7 @@ def test_conversation_retains_terminal_result_during_graph_refresh(monkeypatch, 
         read_id = bridge._next_request
         for request_id in (assistant_id, read_id):
             request = bridge._requests[request_id]
-            bridge._requests[request_id] = (*request[:4], time.perf_counter() - bridge.STALE_AFTER_SECONDS - 1)
+            bridge._requests[request_id] = (*request[:4], time.perf_counter() - bridge.STALE_AFTER_SECONDS - 1, request[5])
         bridge._submit("graph_refresh", lambda: {"fresh": True})
         assert assistant_id in bridge._requests
         assert read_id not in bridge._requests

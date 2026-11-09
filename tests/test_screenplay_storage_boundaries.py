@@ -31,6 +31,19 @@ def _snapshot(ops):
         return tuple(db.iterdump())
 
 
+def _durable(ops):
+    """Business rows plus non-staging audit; content staging is its own audit."""
+    with ops._store.connect() as db:
+        meta = {row[0]: row[1] for row in db.execute("SELECT key,value FROM meta")
+                if not row[0].startswith("content_submission:") and row[0] != "next_content_submission_number"}
+        present = {row[0].lower() for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        tables = {table: tuple(tuple(row) for row in db.execute(f'SELECT * FROM "{table}" ORDER BY rowid'))
+                  for table in ("objects", "sources", "property_records", *TABLES) if table.lower() in present}
+        actions = tuple(tuple(row) for row in db.execute(
+            "SELECT id,revision,action,reason,summary FROM actions WHERE action != 'content_staging' ORDER BY rowid"))
+    return sorted(present), meta, tables, actions
+
+
 def _outside(ops):
     with ops._store.connect() as db:
         return {table: [tuple(row) for row in db.execute(f'SELECT * FROM "{table}" ORDER BY rowid')]
@@ -86,12 +99,12 @@ def test_external_foreign_key_refuses_reset_atomically_even_when_empty(project, 
     report = ops.inspect_screenplay_storage()
     assert report["external_references"] == [{"table": "external_assets", "from": "screenplay_id", "target_table": "screenplays", "to": "id"}]
     assert not report["can_initialize_on_create"]
-    before, raw = _snapshot(ops), ops._store.path.read_bytes()
+    before = _durable(ops)
     with pytest.raises(ValueError, match="域外"):
         _reset(ops, report)
     with pytest.raises(ValueError):
         ops.create_screenplay("不得暗中清理", reason="测试拒绝外域引用")
-    assert _snapshot(ops) == before and ops._store.path.read_bytes() == raw
+    assert _durable(ops) == before
 
 
 def test_external_foreign_key_detection_respects_sqlite_case_insensitive_table_names(project):

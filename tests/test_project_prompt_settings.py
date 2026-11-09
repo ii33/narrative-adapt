@@ -5,7 +5,6 @@ import pytest
 from agent_fixtures import project as project
 
 from narrative import mcp_server, tool_cli
-from narrative.assistant import _first_prompt
 from narrative.conversation_runtime import close_project_runtime, get_runtime
 from narrative.harness import HarnessSettings
 from narrative.operations import Operations
@@ -23,7 +22,7 @@ def test_defaults_plain_text_override_reset_stale_and_project_isolation(project,
     changed = save(project, "extraction", text)
     assert changed["revision"] == original["revision"] + 1
     assert effective_prompt(project, "extraction") == text
-    assert text in _first_prompt("用户任务", prompt_config=prompt_snapshot(project))
+    assert prompt_snapshot(project)["texts"]["extraction"] == text
     assert other.load_prompt_settings() == original
     with pytest.raises(ValueError, match="已变化"):
         project.save_prompt_override("extraction", "过期写入", 0)
@@ -93,8 +92,8 @@ def test_empty_override_is_distinct_from_restore(project):
     save(project, "system", "")
     assert effective_prompt(project, "system") == ""
     assert next(row for row in project.load_prompt_settings()["prompts"] if row["id"] == "system")["overridden"]
-    save(project, "scene_table_shortcut", "")
-    assert effective_prompt(project, "scene_table_shortcut") == ""
+    save(project, "writing_shortcut", "")
+    assert effective_prompt(project, "writing_shortcut") == ""
     save(project, "system", None)
     assert effective_prompt(project, "system")
 

@@ -139,7 +139,7 @@ def test_native_full_focus_is_not_frozen_and_async_prepare_captures_send_mode(tm
         ops.save_provider_profile(HarnessSettings(provider='custom', model='offline', base_url='http://127.0.0.1:1/v1', key_env='NARRATIVE_ACCESS_TEST_KEY').model_dump())
         script = create_fixture(ops)
         segment = ops.read_screenplay(script)['segments'][0]
-        table = ops.apply_scene_table_changes(segment['id'], [{'op': 'insert', 'unit': {'plan': {'title': '焦点场'}}}], segment['outline_revision'], reason='offline focus fixture')
+        table = ops.apply_scene_table_changes(segment['id'], [{'op': 'insert', 'unit': {'plan': {'title': '焦点场', 'summary': '焦点场概要。'}}}], segment['outline_revision'], reason='offline focus fixture')
         target = {'kind': 'unit', 'ids': [table['units'][0]['id']], 'screenplay_id': script}
         task = ops.prepare_script_writing_task(target)
         chat_id = ui.a['id']

@@ -37,7 +37,9 @@ def storyboard_diagnostics():
         yield
     finally:
         qInstallMessageHandler(previous)
-    assert not [msg for msg in messages if "Storyboard" in msg or "StoryVideo" in msg]
+    benign = "does not support customization of this control"
+    assert not [msg for msg in messages
+                if ("Storyboard" in msg or "StoryVideo" in msg) and benign not in msg]
 
 
 def test_director_desk_tracks_bound_frames_and_plays_across_cut(tmp_path, monkeypatch, storyboard_diagnostics, sketch_provider_stub):

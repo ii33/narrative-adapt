@@ -20,6 +20,8 @@ def test_removed_workbenches_and_business_entrypoints_are_absent(tmp_path, monke
     assert {name for name in tool_api.TOOLS if 'extract' in name} == {
         'preview_extraction', 'submit_extraction',
         'get_extraction_settings', 'set_extraction_granularity',
+        'read_extraction_submission', 'patch_extraction_submission',
+        'delete_extraction_submission', 'list_extraction_submissions',
     }
     main = (qml / 'Main.qml').read_text(encoding='utf-8')
     assert 'ExtractPage' not in main and 'PropertyPage' not in main and 'ReviewPage' not in main

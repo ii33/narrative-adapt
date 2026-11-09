@@ -70,7 +70,8 @@ def test_timeline_zoom_anchor_controls_fit_and_edit_guard(tmp_path, monkeypatch)
         QTest.mouseMove(ui.window,end,30)
         QTest.mouseRelease(ui.window,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.NoModifier,end)
         render_ready(ui)
-        assert 0.1<desk.property("trackZoom")<=1
+        # QML clamps the explicit zoom factor to [0.01, 1]; the slider keeps it in range.
+        assert 0.01<=desk.property("trackZoom")<=1
         anchor=track.width()*0.35
         at=actual_time(anchor)
         scale=desk.property("trackZoom")

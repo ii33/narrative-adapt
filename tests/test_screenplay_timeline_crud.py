@@ -28,7 +28,7 @@ def test_local_create_edit_root_move_copy_and_stale_are_isolated(project):
     source, original, unrelated = copy.deepcopy(project.adaptation_snapshot()), copy.deepcopy(project.graph_snapshot()), copy.deepcopy(project.read_screenplay_timeline(other))
     added = call(project, script, "edit_screenplay_timeline_node", changes={"node_type": "scene", "name": "新增场"}, parent_id=ids["入屋"])
     scene = added["created_node_id"]
-    event = call(project, script, "edit_screenplay_timeline_node", changes={"node_type": "event", "name": "新事件"}, parent_id=scene)["created_node_id"]
+    event = call(project, script, "edit_screenplay_timeline_node", changes={"node_type": "event", "name": "新事件", "initial_location": "未知"}, parent_id=scene)["created_node_id"]
     call(project, script, "edit_screenplay_timeline_node", node_id=event, changes={"name": "已改名"})
     rooted = call(project, script, "move_screenplay_timeline_node", node_id=scene, after_id=ids["甲坐下"], parent_id="")
     assert not any(scene in n.get("events", []) for n in rooted["nodes"])
@@ -81,7 +81,9 @@ def test_delete_event_removes_its_changes_and_replays_prior_state(project):
     result = call(project, script, "delete_screenplay_timeline_node", node_id=ids["甲开门"])
     remaining = [r for r in result["properties"] if r.get("property_id") == "服装"]
     assert len(remaining) == 1 and remaining[0]["value"] == "青衣" and "end_event_id" not in remaining[0]
-    assert len(result["deleted_property_ids"]) == 1
+    # The deleted event's own explicit location change is removed with it.
+    assert len(result["deleted_property_ids"]) == 2
+    assert remaining[0]["id"] not in result["deleted_property_ids"]
 
 
 def test_delete_clear_event_replays_remaining_changes_without_intervals(project):

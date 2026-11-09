@@ -57,6 +57,8 @@ def test_screenplay_timeline_crud_subtree_delete_stale_form_and_late_reply(tmp_p
             open_editor('scriptTimelineNew')
             editor.findChild(object, 'scriptTimelineNodeName').setProperty('text', name)
             editor.findChild(object, 'scriptTimelineNodeType').setProperty('currentIndex', kind_index)
+            if kind_index == 3:  # 事件必须显式记录世界地点状态。
+                editor.findChild(object, 'scriptTimelineInitialLocation').setProperty('currentIndex', 2)
             choose_parent(parent_id)
             save()
             return next(n['id'] for n in nodes() if n['name'] == name)

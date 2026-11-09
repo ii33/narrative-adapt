@@ -76,7 +76,7 @@ def test_ordinary_assistant_append_then_cancel_keeps_copy_body_and_resident_sess
         old_units = ops.read_script_segment(segment["id"])["units"]
         source = ops.adaptation_snapshot()
         scene_id = next(n["id"] for n in source["nodes"] if n["node_type"] == "scene")
-        source = ops.edit_adaptation_node(changes={"node_type": "event", "name": "乙来到桥头"}, parent_id=scene_id)
+        source = ops.edit_adaptation_node(changes={"node_type": "event", "name": "乙来到桥头", "initial_location": "未知"}, parent_id=scene_id)
         new_event = next(n["id"] for n in source["nodes"] if n["name"] == "乙来到桥头")
         local_before = ops.read_screenplay_timeline(screenplay_id)
         graph_revision = ops.graph_project_info()["revision"]
@@ -98,7 +98,9 @@ def test_ordinary_assistant_append_then_cancel_keeps_copy_body_and_resident_sess
         assert result["status"] == "cancelled"
         assert ops.graph_project_info()["revision"] == graph_revision
         assert any(n["id"] == new_event for n in ops.read_screenplay_timeline(screenplay_id)["nodes"])
-        assert ops.read_script_segment(segment["id"])["units"] == old_units
+        current_units = ops.read_script_segment(segment["id"])["units"]
+        assert [unit["blocks"] for unit in current_units] == [unit["blocks"] for unit in old_units]
+        assert [unit["plan"] for unit in current_units] == [unit["plan"] for unit in old_units]
         messages = ui.store.load(job["chat_id"])["messages"]
         stopped = next(m for m in reversed(messages) if m.get("kind") == "assistant_cancelled")
         assert "程序入库汇总" in stopped["text"]

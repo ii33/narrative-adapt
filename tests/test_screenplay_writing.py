@@ -17,9 +17,6 @@ def project(tmp_path, monkeypatch):
     ops = Operations.create_graph_project(tmp_path / "writing.nproj")
     source = ops.import_source("合成", TEXT)
     draft = draft_result(ended=False)
-    draft['properties'].extend({'node': node['name'], 'property': '地点', 'value_type': 'either',
-                                'op': 'unknown', 'scope': 'world', 'at_event': node['name'],
-                                'quotes': node['quotes']} for node in draft['nodes'] if node['type'] == 'event')
     result = ops.submit_extraction(source, draft)
     assert result["status"] == "accepted", result
     adaptation = ops.sync_adaptation()

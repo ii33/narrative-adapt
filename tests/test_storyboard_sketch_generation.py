@@ -28,7 +28,7 @@ def test_provider_gets_real_basis_and_generated_image_not_guide(project, monkeyp
     with Image.open(path) as image:
         assert image.size == (31, 19)
     assert '甲等待。' in observed['prompt'] and '手部接触清楚' in observed['prompt']
-    assert '遮挡' in observed['prompt'] and '简洁色彩' in observed['prompt']
+    assert '遮挡' in observed['prompt'] and '本次简彩' in observed['prompt']
     assert 'raw' not in json.dumps(board['sketch_render'])
     with ops._store.connect() as db:
         audit = json.loads(db.execute("SELECT summary FROM actions WHERE action='apply_storyboard_changes' ORDER BY rowid DESC LIMIT 1").fetchone()[0])

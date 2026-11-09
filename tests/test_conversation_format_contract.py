@@ -27,6 +27,23 @@ def test_complete_malformed_json_feedback_preserves_original_arguments(tmp_path)
     assert data == original
 
 
+def test_expired_or_invalid_key_is_reported_explicitly(tmp_path):
+    data = {"finish_reason": "error", "service_error": "HTTP 401：This API key has expired.",
+            "sdk_error_diagnostics": [{"event_type": "turn/end", "kind": "error", "code": "AUTH",
+                                       "message": "This API key has expired."}]}
+    error = IncompleteConversation(data, tmp_path / "metadata.json")
+    assert error.code == "auth_failed" and not error.recoverable
+    message = str(error)
+    assert "401" in message and "密钥" in message and "更新" in message
+
+
+def test_provider_error_without_auth_stays_generic(tmp_path):
+    data = {"finish_reason": "error", "service_error": "HTTP 500：internal",
+            "sdk_error_diagnostics": [{"event_type": "turn/end", "kind": "error", "code": "SERVER"}]}
+    error = IncompleteConversation(data, tmp_path / "metadata.json")
+    assert error.code == "provider_server_error" and error.code != "auth_failed"
+
+
 @pytest.mark.parametrize("condition", ["capacity", "network", "compaction", "incomplete_stream", "provider_length",
                                        "other_sdk_error", "valid_arguments", "missing_upstream"])
 def test_other_failures_cannot_be_automatically_continued(tmp_path, condition):

@@ -1,7 +1,6 @@
 """Readable identities are automatic, stable, and transactional."""
 from __future__ import annotations
 
-import pytest
 from test_screenplay_writing import body, table
 from test_screenplay_writing import project as project
 
@@ -30,8 +29,8 @@ def test_business_ids_are_readable_and_references_remain_stable(project):
 
 def test_failed_creation_rolls_back_number_and_reset_does_not_reuse_identity(project):
     ops, _screenplay_id, _segment_id = project
-    with pytest.raises(ValueError):
-        ops.create_screenplay("", reason="无效名称不消耗编号")
+    refused = ops.create_screenplay("", reason="无效名称不消耗编号")
+    assert refused["status"] == "staged" and refused["problems"][0]["path"] == ["title"]
     new = ops.create_screenplay("第二份", format="series", reason="有效创建")
     assert new["screenplay"]["id"] == "screenplay-2"
     assert new["timeline"]["id"] == "script-timeline-2"

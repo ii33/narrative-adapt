@@ -65,7 +65,7 @@ def test_manager_stop_admission_nonce_and_authority_are_exact(tmp_path):
             pass
     manager = get_runtime(ops, HarnessSettings(), "offline", runner_factory=Runner)
     try:
-        manager.activate("chat", [{"name":"read"}], lambda name,args: args, session_id="sdk-chat")
+        manager.activate("chat", [{"name":"read_source"}], lambda name,args: args, session_id="sdk-chat")
         nonce = manager._binding["nonce"]
         assert manager._authority("sdk-chat") == nonce
         manager.signal_stop(nonce)
@@ -73,15 +73,15 @@ def test_manager_stop_admission_nonce_and_authority_are_exact(tmp_path):
         with pytest.raises(ValueError):
             manager.begin_turn(nonce, "sdk-chat")
         with pytest.raises(ValueError):
-            manager._dispatch("read", {}, "sdk-chat", nonce)
+            manager._dispatch("read_source", {}, "sdk-chat", nonce)
         manager.deactivate()
-        manager.activate("chat", [{"name":"read"}], lambda name,args: args, session_id="sdk-chat")
+        manager.activate("chat", [{"name":"read_source"}], lambda name,args: args, session_id="sdk-chat")
         new = manager._binding["nonce"]
         manager.interrupt(nonce)
         assert not manager._binding["cancelled"]
         with pytest.raises(ValueError):
-            manager._dispatch("read", {}, "sdk-chat", nonce)
-        assert manager._dispatch("read", {"current":True}, "sdk-chat", new) == {"current":True}
+            manager._dispatch("read_source", {}, "sdk-chat", nonce)
+        assert manager._dispatch("read_source", {"current":True}, "sdk-chat", new) == {"current":True}
     finally:
         close_project_runtime(ops)
 
@@ -178,6 +178,7 @@ def test_stop_during_session_startup_does_not_send_a_prompt_or_close_runtime(tmp
     from test_chat_scroll import transcript_shell
 
     from narrative import native_bridge
+    monkeypatch.setenv('DEEPSEEK_API_KEY', 'offline-placeholder')
     entered, release = threading.Event(), threading.Event()
     instances = []
     class Runner:

@@ -44,7 +44,8 @@ def test_probe_cache_returns_copies_and_invalidates_changed_file(tmp_path, monke
 
 def test_import_copied_video_bytes_must_match_validated_source(project, tmp_path, monkeypatch):
     ops, unit, _ = setup_board(project)
-    board = ops.apply_storyboard_changes(unit, 0, [{'op': 'create_shot', 'title': '视频选段', 'duration_ms': 1000}])
+    ops.apply_storyboard_changes(unit, 0, [{'op': 'create_shot', 'title': '视频选段', 'duration_ms': 1000}])
+    board = ops.read_storyboard(unit)
     red = movie(tmp_path / 'red.mp4', (220, 20, 20))
     blue = movie(tmp_path / 'blue.mp4', (20, 20, 220)).read_bytes()
     before = red.read_bytes()

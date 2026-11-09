@@ -1,6 +1,6 @@
 """One block editor owns manual edits and fixed-target conversational modifications."""
-from test_chat_scroll import transcript_shell
 from screenplay_scene_fixture import seed
+from test_chat_scroll import transcript_shell
 from test_screenplay_ui import dialog_action, render_ready, visuals
 from test_static_check_ui import click, plain
 

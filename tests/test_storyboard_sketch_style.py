@@ -30,7 +30,7 @@ def provider(monkeypatch, seen, callback=None):
 def test_shared_default_and_custom_style_reach_both_image_entrypoints(board, monkeypatch):
     ops, _script, unit, b = board
     defaults = current_sketch_style(ops)
-    assert all(text in defaults for text in ['以线条为主、结构简单', '少量清楚的轮廓线', '简单几何体', '大量干净白底与留白', '局部受光面', '软光', '固有深浅', '密集铅笔排线', '未知颜色'])
+    assert all(text in defaults for text in ['以线条为主', '线', '几何体', '白底', '受光面', '软光', '固有深浅', '排线', '颜色'])
     ops.save_prompt_override('sketch_style', '统一测试：自然清楚节制，保留侧窗软光与接触暗部。', 0, '测试工程统一草图风格')
     style = current_sketch_style(ops)
     seen = []
@@ -149,10 +149,10 @@ def test_global_line_drawing_default_applies_without_project_override(prepared):
     row = next(row for row in ops.load_prompt_settings()['prompts'] if row['id'] == 'sketch_style')
     assert row['overridden'] is False
     assert row['effective'] == DEFAULT_PROMPTS['sketch_style']['text']
-    assert row['version'] == '2'
+    assert row['version'] == '3'
     for simple_color in (False, True):
         prompt = sketch_render_instructions(row['effective'], simple_color)
-        assert '简单几何体' in prompt and '白底' in prompt
+        assert '几何体' in prompt and '白底' in prompt
         assert '必要局部背光' in prompt or '既定光照' in prompt
-        assert '密集铅笔排线' in prompt and '纸纹' in prompt
-    assert '少量清淡' in sketch_render_instructions(row['effective'], True)
+        assert ('排线' in prompt or '灰调' in prompt) and ('纸纹' in prompt or '材质细节' in prompt)
+    assert '简彩' in sketch_render_instructions(row['effective'], True)

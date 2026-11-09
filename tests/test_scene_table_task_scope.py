@@ -82,9 +82,9 @@ def test_resident_scene_table_host_has_full_catalog_and_preserves_normal_write_a
 
     invoked, replies, catalogs = [], [], []
     original_call = assistant._call
-    def observed_call(project, name, args):
+    def observed_call(project, name, args, **kwargs):
         invoked.append(name)
-        return original_call(project, name, args)
+        return original_call(project, name, args, **kwargs)
 
     class Runner:
         def __init__(self, *args, **kwargs):
@@ -118,7 +118,7 @@ def test_resident_scene_table_host_has_full_catalog_and_preserves_normal_write_a
                 status, payload = post("check_screenplay", {"screenplay_id": fixture["screenplay_id"]})
                 assert status == 200
                 assert all(marker not in json.dumps(payload, ensure_ascii=False) for marker in (OLD_PLAN, OLD_BODY, RAW_SOURCE))
-                submit = {"segment_id": fixture["segment_id"], "units": [{"id": fixture["unit_id"], "plan": {"title": "新场表", "summary": "甲渡桥后停步。"}}],
+                submit = {"segment_id": fixture["segment_id"], "units": [{"id": fixture["unit_id"], "plan": {"title": "新场表", "summary": "甲渡桥后停步。", "source_event_ids": [fixture["event_id"]]}}],
                     "expected_outline_revision": context["expected_outline_revision"], "span_fingerprint": context["span_fingerprint"],
                     "context_fingerprint": context["context_fingerprint"], "dependency_refs": context["dependency_refs"], "reason": "仅重拆目标场表"}
                 status, payload = post("submit_scene_table", submit)

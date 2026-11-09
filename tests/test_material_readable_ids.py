@@ -100,8 +100,11 @@ def test_failed_card_publish_burns_card_number(project, monkeypatch):
     ops, person = project
     save = MaterialStore._save
 
-    def fail(*_args, **_kwargs):
-        raise OSError("injected card save failure")
+    def fail(store, node_id, data, **kwargs):
+        # The staging receipt write must succeed; only the card publish fails.
+        if kwargs.get("_business_result") is not None:
+            raise OSError("injected card save failure")
+        return save(store, node_id, data, **kwargs)
 
     with monkeypatch.context() as patch:
         patch.setattr(MaterialStore, "_save", fail)
@@ -118,10 +121,10 @@ def test_concurrent_writer_is_rejected_without_lost_update_or_counter_reuse(proj
     save = MaterialStore._save
     completed, failures = [], []
 
-    def pause(store, node_id, data):
+    def pause(store, node_id, data, **kwargs):
         entered.set()
         assert release.wait(3)
-        return save(store, node_id, data)
+        return save(store, node_id, data, **kwargs)
 
     def worker():
         try:
