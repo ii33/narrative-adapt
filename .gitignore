@@ -81,3 +81,8 @@ examples/harness_events_result.json
 
 # 成员本地工作账本
 TASKS*.md
+
+# 本地需求清单导出（二进制与 Excel 锁文件，留在仓库根供人打开，不入版本库）
+需求清单.xlsx
+~$需求清单.xlsx
+*.xlsx
