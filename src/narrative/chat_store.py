@@ -15,6 +15,7 @@ import json
 import os
 import re
 import threading
+import time
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
@@ -30,6 +31,18 @@ def _now() -> str:
 
 def _new_id() -> str:
     return uuid4().hex[:12]
+
+
+def _replace(temporary: Path, target: Path) -> None:
+    """Windows 上杀毒/索引可能短暂锁住目标文件；有界重试原子替换。"""
+    for attempt in range(5):
+        try:
+            temporary.replace(target)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.02)
 
 
 def _title_from(text: str) -> str:
@@ -114,7 +127,7 @@ class ChatStore:
             path = self.path_for(str(data["id"]))
             temporary = path.with_suffix(f".{uuid4().hex}.tmp")
             temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-            temporary.replace(path)
+            _replace(temporary, path)
             return data
 
     @_locked_active
@@ -124,7 +137,7 @@ class ChatStore:
         target = self.root / ".active"
         temporary = self.root / f".active-{uuid4().hex}.tmp"
         temporary.write_text(json.dumps({"chat_id": chat["id"]}), encoding="utf-8")
-        temporary.replace(target)
+        _replace(temporary, target)
         return chat
 
     @_locked_active
