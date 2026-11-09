@@ -75,3 +75,6 @@ examples/harness_events_result.json
 
 # Assistant working memory (local only)
 .workbuddy-ai/
+
+# 成员本地工作账本
+TASKS*.md
