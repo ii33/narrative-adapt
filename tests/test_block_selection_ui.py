@@ -1,6 +1,6 @@
 """Real pointer selection and shared block operations preserve text selection and IDs."""
-from test_chat_scroll import transcript_shell
 from screenplay_scene_fixture import seed
+from test_chat_scroll import transcript_shell
 from test_screenplay_ui import render_ready, visuals
 from test_static_check_ui import click, plain
 
@@ -73,6 +73,8 @@ def test_block_selection_toolbar_double_click_text_copy_move_and_delete(tmp_path
         for expected in (ids[0],ids[1],""):
             click(ui,ui.window.findChild(object,"screenplayPage").findChild(object,"scriptBlockDelete"))
             ui.wait(lambda expected=expected:ui.window.findChild(object,"screenplayPage").property("selectedBlockId")==expected and not ui.window.findChild(object,"screenplayPage").property("blockActionBusy"))
+            ui.wait(lambda: plain(page.property("unit")).get("body_revision")
+                    == ops.read_script_segment(segment["id"])["units"][0]["body_revision"])
         ui.wait(lambda:plain(page.property("unit")).get("blocks")==[])
         assert not modify.property("enabled") and not move.property("enabled") and not delete.property("enabled")
         assert ops.graph_snapshot()==original and not ui.errors,ui.errors

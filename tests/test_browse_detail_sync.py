@@ -15,7 +15,7 @@ def prepare(ui):
     payload = draft_result()
     payload["nodes"] += [
         {"type": "action", "name": "完成接人", "event": "@6", "quotes": ["甲接到乙后离开。"]},
-        {"type": "storyline", "name": "接人篇章", "closing_quote": "甲接到乙后离开。", "children": ["@3"]},
+        {"type": "storyline", "name": "接人篇章", "children": ["@3"]},
     ]
     assert ops.submit_extraction(sid, payload)["status"] == "accepted"
     ui.window.setProperty("assistantOpen", False)
@@ -39,16 +39,18 @@ def test_big_event_graph_allows_person_header_and_refresh_reloads_matching_detai
         ops, page = prepare(ui)
         errors = []
         ui.bridge.errorOccurred.connect(lambda kind, text: errors.append((kind, text)))
-        choose(ui, "P2")
-        ui.wait(lambda: plain(page.property("detail")).get("node", {}).get("id") == "P2")
+        person = next(n for n in ops.graph_snapshot()["nodes"]
+                      if n["node_type"] == "person" and n["name"] == "甲")
+        choose(ui, person["id"])
+        ui.wait(lambda: plain(page.property("detail")).get("node", {}).get("id") == person["id"])
         ui.wait(lambda: len(plain(page.property("propertyRows"))) > 0)
         title = ui.window.findChild(object, "browseDetailTitle")
         identity = ui.window.findChild(object, "browseDetailIdentity")
-        assert title.property("text") == "甲" and "P2" in identity.property("text")
+        assert title.property("text") == person["name"] and person["id"] in identity.property("text")
         # Conversation/graph updates enter the same existing refresh path.
         ui.bridge.resultReady.emit("node_edit", {"graph_reset_required": True, "status": "accepted"})
         ui.wait(lambda: not ui.window.property("busy"))
-        assert title.property("text") == "甲" and plain(page.property("detail"))["node"]["id"] == "P2"
+        assert title.property("text") == person["name"] and plain(page.property("detail"))["node"]["id"] == person["id"]
         assert not errors
         labels = ops.graph_display_map()["items"]
         phase = next(n for n in ops.graph_snapshot()["nodes"] if n["node_type"] == "big_event")
@@ -68,7 +70,7 @@ def test_big_event_graph_allows_person_header_and_refresh_reloads_matching_detai
 
 def test_browse_epoch_refresh_and_late_previous_selection_cannot_clear_or_replace_header(tmp_path, monkeypatch):
     with transcript_shell(tmp_path, monkeypatch) as ui:
-        _ops, page = prepare(ui)
+        ops, page = prepare(ui)
         original_query = GraphOperations.graph_query
         entered, release = threading.Event(), threading.Event()
         first = True
@@ -87,15 +89,17 @@ def test_browse_epoch_refresh_and_late_previous_selection_cannot_clear_or_replac
             ui.wait(lambda: plain(page.property("detail")).get("node", {}).get("id") == "P2")
             choose(ui, "P1")
             ui.wait(lambda: plain(page.property("detail")).get("node", {}).get("id") == "P1")
+            expected = next(n["name"] for n in ops.graph_snapshot()["nodes"] if n["id"] == "P1")
             release.set()
             ui.wait(lambda: not ui.window.property("busy"))
             ui.settle()
-            assert ui.window.findChild(object, "browseDetailTitle").property("text") == "乙"
+            assert ui.window.findChild(object, "browseDetailTitle").property("text") == expected
             assert plain(page.property("detail"))["node"]["id"] == "P1"
             # An old node's properties must not attach below the new heading.
             ui.bridge.resultReady.emit("node_properties", {"node_id": "P2", "categories": [{"key": "旧节点", "items": [{"property_id": "不应出现", "value": "错误"}]}]})
             ui.settle()
-            assert not plain(page.property("propertyRows"))
+            rows = plain(page.property("propertyRows"))
+            assert rows and not any("不应出现" in str(row) for row in rows)
         finally:
             release.set()
 
@@ -109,7 +113,7 @@ def test_public_display_map_covers_every_schema_node_type(tmp_path):
     payload = draft_result()
     payload["nodes"] += [
         {"type": "action", "name": "完成接人", "event": "@6", "quotes": ["甲接到乙后离开。"]},
-        {"type": "storyline", "name": "接人篇章", "closing_quote": "甲接到乙后离开。", "children": ["@3"]},
+        {"type": "storyline", "name": "接人篇章", "children": ["@3"]},
     ]
     assert ops.submit_extraction(sid, payload)["status"] == "accepted"
     existing_types = {node["node_type"] for node in ops.graph_snapshot()["nodes"]}

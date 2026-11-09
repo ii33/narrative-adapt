@@ -34,7 +34,7 @@ def test_answer_selection_context_copy_and_formatted_tool_output(tmp_path, monke
                         content=[{'type': 'tool_use', 'id': 'call-1', 'name': 'list_nodes', 'input': {}}])
         ui.store.append(chat['id'], 'assistant', '', kind='assistant_result', task_id='format-task', steps=[{'tool':'list_nodes','args':{},'display_name':'查看结构目录','arguments_text':'{\n  "类型": "事件"\n}','output_text':'{\n  "节点": []\n}','output_truncated':True,'arguments_truncated':True}])
         ui.bridge.openChat(chat['id'])
-        ui.settle()
+        ui.wait(lambda: any(item.objectName() == 'assistantProcessToggle' and item.property('visible') for item in visuals(ui.view)))
         process = next(item for item in visuals(ui.view) if item.objectName() == 'assistantProcessToggle' and item.property('visible'))
         click(ui, process)
         toggle = next(item for item in visuals(ui.view) if item.objectName() == 'assistantToolToggle' and item.property('visible'))

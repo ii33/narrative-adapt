@@ -32,6 +32,10 @@ def test_script_default_edit_readonly_and_shared_selection(tmp_path, monkeypatch
         desk.findChild(object,"storyboardScriptLanguage").setProperty("text","中景，固定机位。")
         click(ui,desk.findChild(object,"storyboardScriptSave"))
         ui.wait(lambda:ops.read_storyboard(unit["id"])["shots"][0]["description"]=="窗外的人抬起手。")
+        # The saved board arrives asynchronously and reloads the form; wait for that
+        # round-trip before typing the next unsaved draft, otherwise it is replaced.
+        ui.wait(lambda:not desk.property("busy"))
+        render_ready(ui)
         desk.findChild(object,"storyboardScriptDescription").setProperty("text","尚未保存的本镜文字")
         QMetaObject.invokeMethod(desk,"seek",Q_ARG("QVariant",1100))
         render_ready(ui)

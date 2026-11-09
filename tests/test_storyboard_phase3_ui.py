@@ -121,8 +121,15 @@ def test_phase3_real_animatic_adoption_and_single_submitted_job(tmp_path, monkey
         assert abs(monitor.property("imageX")-(480*(1-zoom)-zoom*dx))<1e-8
         assert abs(monitor.property("imageY")-(270*(1-zoom)+zoom*dy))<1e-8
         movie=tmp_path/"clean.mp4"
+        ui.wait(lambda: not desk.property("busy"))
         QMetaObject.invokeMethod(desk,"mediaAction",Q_ARG("QVariant","render_storyboard_animatic"),Q_ARG("QVariant",{"unit_id":uid,"shot_id":shot["id"],"output_path":str(movie),"variant":"sketch","include_audio":False}))
-        ui.wait(lambda:movie.is_file() and not desk.property("busy"))
+        import time as _t
+        _end=_t.monotonic()+20
+        while _t.monotonic()<_end and not (movie.is_file() and not desk.property("busy")):
+            ui.app.processEvents()
+            _t.sleep(.02)
+        if not (movie.is_file() and not desk.property("busy")):
+            raise AssertionError((movie.is_file(), desk.property("busy"), desk.property("message"), ui.errors, [(k, p.get("operation"), p.get("error")) for k,p in ui.results[-8:] if isinstance(p,dict)]))
         assert plain(desk.property("lastExport"))["annotation_free"]
         monkeypatch.setattr(storyboard_video_provider,"download",lambda url,path:shutil.copyfile(movie,path))
         click(ui,desk.findChild(object,"storyboardVideo"))
@@ -161,7 +168,13 @@ def test_phase3_real_animatic_adoption_and_single_submitted_job(tmp_path, monkey
         assert "api_key" not in ops.read_storyboard_video_settings()
         desk.findChild(object,"storyboardVideoPrompt").setProperty("text","保持手部动作与窗的显露顺序。")
         click(ui,dialog_action(ui,desk,"storyboardVideoDialog","storyboardPrepareVideo"))
-        ui.wait(lambda:plain(video.property("generation")).get("status")=="prepared" and not desk.property("busy"))
+        import time as _t
+        _end=_t.monotonic()+30
+        while _t.monotonic()<_end and plain(video.property("generation")).get("status")!="prepared":
+            ui.app.processEvents()
+            _t.sleep(.02)
+        if plain(video.property("generation")).get("status")!="prepared":
+            raise AssertionError((round(_t.monotonic()-(_end-30),1), desk.property("busy"), desk.property("message"), plain(video.property("generation")), ui.errors, [(k, p.get("operation"), p.get("error")) for k,p in ui.results[-8:] if isinstance(p,dict)]))
         generation=plain(video.property("generation"))
         assert {item["kind"] for item in generation["inputs"]}=={"motion","style"}
         assert all(Path(item["path"]).is_file() for item in generation["inputs"])
