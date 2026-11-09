@@ -58,6 +58,8 @@ class IncompleteConversation(ValueError):
         server_status = re.match(r"^HTTP\s+(5\d\d)\b", str(metadata.get("service_error", "")))
         server_error = bool(server_status) or any(isinstance(row, dict) and row.get("code") == "SERVER"
                                                    for row in diagnostics)
+        auth_failed = (any(isinstance(row, dict) and row.get("code") == "AUTH" for row in diagnostics)
+                       or str(metadata.get("service_error", "")).startswith(("HTTP 401", "HTTP 403")))
         generations = [row for row in metadata.get("model_requests") or []
                        if isinstance(row, dict) and row.get("purpose") == "generation"]
         latest = generations[-1] if generations else {}
@@ -75,6 +77,7 @@ class IncompleteConversation(ValueError):
                     "near": call["arguments"][max(0, exc.pos - 100):exc.pos + 100],
                 })
         self.code = ("tool_input_invalid_json" if invalid_tool_json else "rate_limited" if rate_limited
+                     else "auth_failed" if auth_failed
                      else "provider_server_error" if server_error else "incomplete")
         self.recoverable = bool(
             invalid_tool_json and self.finish_reason == "error"
@@ -95,6 +98,9 @@ class IncompleteConversation(ValueError):
             message = "模型工具参数 JSON 格式错误，本次任务未完成"
         elif self.code == "rate_limited":
             message = "模型服务限流（HTTP 429），本次任务未完成；未自动重试，请稍后重新发送"
+        elif self.code == "auth_failed":
+            message = ("模型服务认证失败（HTTP 401/403）：当前工程的模型服务密钥已过期或无效，"
+                       "本次任务未完成；请更新密钥后重新发送")
         elif self.code == "provider_server_error":
             status = f"（HTTP {server_status.group(1)}）" if server_status else ""
             message = f"模型服务内部错误{status}，本次任务未完成；未自动重试"
