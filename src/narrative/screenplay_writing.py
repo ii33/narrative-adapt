@@ -871,7 +871,7 @@ class WritingOperationsMixin:
             result["target_manifest"] = self.prepare_script_writing_targets(screenplays[0], unit_ids,
                 include_existing=bool(target.get("include_existing", False)), include_screen_segments=bool(target.get("include_screen_segments", False)))
         from .prompt_settings import effective_prompt
-        key = "scene_table" if kind == "scene_table" else "writing" if kind in {"unit", "blocks"} else "batch_writing"
+        key = "scene_table" if kind == "scene_table" else "writing"
         if kind == "storyboard_assets":
             analysis = self.read_storyboard_assets_context(unit_ids[0], target.get('shot_ids'))
             result['shot_ids'] = list(analysis['shot_ids'])
