@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Project = '',
     [double]$QaExitAfterSeconds = 0,
     [string]$RenderLog = '',
@@ -85,6 +85,15 @@ if ($LASTEXITCODE -ne 0) {
 if ($PrepareOnly) {
     Write-Output 'Project environment is ready.'
     return
+}
+# 受限终端/沙箱启动的进程是 Low 完整性，写不了普通用户目录（如 C:\Users\<user>\...）。
+# 这里只提示，不做"自动提权重启"之类的花活：从桌面双击启动即可获得正常权限。
+$integrityText = & $python -I -c "from narrative.runtime_security import current_integrity_level as f; v=f(); print(0 if v is None else v)" 2>$null
+$integrity = 0
+[void][int]::TryParse((@($integrityText) | Select-Object -First 1), [ref]$integrity)
+if ($integrity -gt 0 -and $integrity -lt 0x2000) {
+    Write-Output 'Warning: Low-integrity process (restricted terminal or sandbox).'
+    Write-Output 'Projects outside this session may not be writable; start from the desktop if so.'
 }
 $arguments = @('-I', '-m', 'narrative.native_app')
 if ($Project) {

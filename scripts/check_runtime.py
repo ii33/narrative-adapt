@@ -1,5 +1,6 @@
 """Check the desktop Python paths without shell-embedded Python source."""
 
+import os
 import sys
 import sysconfig
 from pathlib import Path
@@ -21,7 +22,13 @@ for name, path in (
 try:
     require_medium_integrity()
 except RuntimeError as exc:
+    # 低完整性只是可能写不了，不是必然：用真实写入探测决定能否启动。
     print(str(exc), file=sys.stderr)
-    raise SystemExit(1) from None
+    probe = root / f".runtime-write-probe-{os.getpid()}"
+    try:
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError:
+        raise SystemExit(1) from None
 
 check_qt_imports()
