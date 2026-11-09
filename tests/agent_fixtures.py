@@ -50,7 +50,7 @@ def draft_result(*, note=False, ended=True):
     for row in result["properties"]:
         row["op"] = "set"
     if ended:
-        result["properties"].append({"node": "甲", "property": "计划", "at_event": "甲接到乙后离开",
+        result["properties"].append({"node": "甲", "property": "计划", "category": "未分类", "at_event": "甲接到乙后离开",
             "op": "clear", "scope": "claim", "holder": "甲", "quotes": ["甲接到乙后离开。"]})
     if note:
         result["nodes"].append({"type": "item", "name": "便笺", "quotes": ["乙收起便笺。"]})

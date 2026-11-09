@@ -5,6 +5,7 @@ import copy
 import json
 
 import pytest
+from agent_fixtures import location_record
 from agent_fixtures import project as project
 
 Q1 = '甲握住乙的手。'
@@ -16,7 +17,7 @@ FIRST_DAY_END = TEXT.index('翌日')
 
 
 def draft(quotes=None, *, name='甲乙握手', new_occurrence=False, existing_id=None, extra_event=False):
-    event = {'type': 'event', 'name': name, 'scene': '会面', 'participants': ['甲', '乙'],
+    event = {'type': 'event', "location": "未知", 'name': name, 'scene': '会面', 'participants': ['甲', '乙'],
              'quotes': quotes or [Q1, Q2]}
     if new_occurrence:
         event['new_occurrence'] = True
@@ -26,7 +27,7 @@ def draft(quotes=None, *, name='甲乙握手', new_occurrence=False, existing_id
              {'type': 'person', 'name': '乙', 'quotes': [Q1]},
              {'type': 'scene', 'name': '会面', 'quotes': [Q1]}, event]
     if extra_event:
-        nodes.append({'type': 'event', 'name': '甲向乙点头', 'scene': '会面',
+        nodes.append({'type': 'event', "location": "未知", 'name': '甲向乙点头', 'scene': '会面',
                       'participants': ['甲', '乙'], 'quotes': [Q3]})
     return {'nodes': nodes, 'properties': [], 'uncertainties': [], 'exclusions': []}
 
@@ -113,9 +114,10 @@ def test_ambiguous_exact_evidence_requires_an_explicit_existing_id_without_writi
     sid = seed(project)
     duplicate = copy.deepcopy(node(project, '甲乙握手'))
     duplicate['id'] = 'E99'
+    location = location_record('E99', sid, duplicate['disclosure']['start'], duplicate['evidence']['quote'])
     scene = copy.deepcopy(node(project, '会面'))
     scene['events'].append('E99')
-    assert project.apply_changes([duplicate, scene], [], project.graph_project_info()['revision'], reason='合成工程修订')['status'] == 'accepted'
+    assert project.apply_changes([duplicate, scene], [location], project.graph_project_info()['revision'], reason='合成工程修订')['status'] == 'accepted'
     assert len(events(project)) == 2
     before = copy.deepcopy(project.graph_snapshot())
     # A new evidence variant avoids the original submission-id idempotence cache.
@@ -208,13 +210,18 @@ def test_new_occurrence_conflicting_with_one_exact_existing_event_is_not_silentl
     assert project.graph_snapshot() == before
 
 
-@pytest.mark.parametrize('context_input', ['omitted', 'scene_conflict', 'participants_conflict'])
+@pytest.mark.parametrize('context_input', ['omitted', 'scene_conflict', 'participants_conflict',
+                                           'missing_participants_key'])
 def test_legacy_primary_exact_match_does_not_invent_missing_or_override_conflicting_context(project, context_input):
+    # 参与者键对 event 已改为必填：'omitted' 只表示省略场景等结构上下文，
+    # 不再表示可以省略 participants 键；缺键本身另作反例 'missing_participants_key'。
     sid = seed(project, draft([Q1]))
     legacy = copy.deepcopy(node(project, '甲乙握手'))
     legacy.pop('evidence_spans', None)
     assert project.apply_changes([legacy], [], project.graph_project_info()['revision'], reason='合成工程修订')['status'] == 'accepted'
-    event = {'type': 'event', 'name': '甲乙握手', 'quotes': [Q1]}
+    event = {'type': 'event', "location": "未知", 'name': '甲乙握手', 'quotes': [Q1]}
+    if context_input != 'missing_participants_key':
+        event['participants'] = ['甲', '乙']
     nodes = [event]
     if context_input == 'scene_conflict':
         event['scene'] = '另一场景'

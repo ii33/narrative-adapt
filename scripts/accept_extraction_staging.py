@@ -21,9 +21,8 @@ def seed(ops):
         {'type': 'person', 'name': '乙', 'quotes': ['乙']},
         {'type': 'location', 'name': '门口', 'quotes': ['门口']},
         {'type': 'scene', 'name': '门口会面', 'quotes': []},
-        {'type': 'event', 'name': '甲乙会面', 'scene': '@4', 'participants': ['@1', '@2'], 'quotes': [TEXT]},
-    ], 'properties': [{'node': '@5', 'property': '地点', 'value': '@3', 'value_type': 'node',
-                       'op': 'set', 'at_event': '@5', 'quotes': ['门口']}]}
+        {'type': 'event', 'name': '甲乙会面', 'scene': '@4', 'location': '@99', 'participants': ['@1', '@2'], 'quotes': [TEXT]},
+    ], 'properties': []}
     staged = ops.submit_extraction(source_id, draft)
     assert staged['status'] == 'staged' and not ops.graph_snapshot()['nodes']
     screenplay = ops.create_screenplay('只读验收空容器', reason='复用统一验收器')['screenplay']
@@ -33,7 +32,7 @@ def seed(ops):
 
 def prompt(fixture):
     return (TASK + '\n原文：' + TEXT + '\n暂存问题：' + json.dumps(fixture['submission'], ensure_ascii=False)
-            + '\n修补使用此暂存的submission_revision，nodes索引3对应@4场景，仅补quotes即可；无需再读取已提供的原文或整稿。')
+            + '\n修补使用此暂存的submission_revision，nodes索引4对应@5事件，location 应为 @3（门口地点）；无需再读取已提供的原文或整稿。')
 
 
 def validate(ops, fixture, screenplay, calls, report):
@@ -43,8 +42,8 @@ def validate(ops, fixture, screenplay, calls, report):
     properties = ops.read_extraction_submission(identifier, section='properties')['entries']
     expected = copy.deepcopy(fixture['synthetic_invalid_draft'])
     actual = {'nodes': [entry['item'] for entry in nodes], 'properties': [entry['item'] for entry in properties]}
-    repaired_quotes = actual['nodes'][3].get('quotes', [])
-    expected['nodes'][3]['quotes'] = repaired_quotes
+    repaired_location = actual['nodes'][4].get('location')
+    expected['nodes'][4]['location'] = repaired_location
     audit = json.loads((Path(report['audit_directory']) / 'task.json').read_text(encoding='utf-8'))
     steps = audit.get('steps', [])
     patches = [step for step in steps if step.get('tool') == 'patch_extraction_submission']
@@ -55,7 +54,7 @@ def validate(ops, fixture, screenplay, calls, report):
     return {'patched_existing_submission': len(patches) == 1 and patches[0].get('result', {}).get('status') == 'accepted',
             'no_full_resubmission': not any(s.get('tool') == 'submit_extraction' for s in steps),
             'only_problem_field_changed': actual == expected,
-            'valid_repaired_quotes': bool(repaired_quotes) and all(isinstance(q, str) and q and q in TEXT for q in repaired_quotes),
+            'valid_repaired_location': repaired_location in {'@3', '未知'},
             'automatically_committed': current['submission_status'] == 'committed' and len(ops.graph_snapshot()['nodes']) == 5,
             'static_no_errors': checked['counts'].get('error', 0) == 0,
             'source_unchanged': ops.source(fixture['source_id']) == fixture['source_before']}

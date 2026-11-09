@@ -43,7 +43,7 @@ def test_missing_node_evidence_and_property_value_collected_together(project):
     ops, source, text = project
     raw = draft(text)
     del raw['nodes'][0]['quotes']
-    raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排',
+    raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排' , "category": "未分类",
                           'op': 'set', 'value_type': 'string', 'quotes': [text]}]
     result = ops.submit_extraction(source, raw)
     assert {tuple(row['path']) for row in result['diagnostics']} >= {
@@ -129,7 +129,7 @@ def test_preview_preserves_related_paths_metadata(project):
 def test_schema_errors_report_the_original_field(project, section, index, field, value, expected):
     ops, source, text = project
     raw = draft(text)
-    raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排', 'value': '结束',
+    raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排' , "category": "未分类", 'value': '结束',
                           'op': 'set', 'value_type': 'string', 'quotes': [text]}]
     raw[section][index][field] = value
     result = ops.submit_extraction(source, raw)
@@ -148,7 +148,7 @@ def test_root_and_remarks_errors_are_independently_collected(project):
 def test_invalid_op_object_has_structured_error_instead_of_type_error(project):
     ops, source, text = project
     raw = draft(text)
-    raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排',
+    raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排' , "category": "未分类",
                           'op': {'value': 'set'}, 'value_type': 'string', 'quotes': [text]}]
     result = ops.submit_extraction(source, raw)
     assert any(row.get('path') == ['properties', 0, 'op'] for row in result['diagnostics'])

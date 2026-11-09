@@ -103,7 +103,8 @@ def test_property_checks_report_public_argument_not_generated_record_path(projec
         {'type': 'person', 'name': '林岚', 'quotes': [text]},
         {'type': 'location', 'name': '会议室', 'quotes': ['会议室']},
         {'type': 'scene', 'name': '会议延期', 'quotes': [text]},
-        {'type': 'event', 'name': '宣布延期', 'scene': '@3', 'location': '@2', 'quotes': [text]},
+        {'type': 'event', 'name': '宣布延期', 'scene': '@3', 'location': '@2', 'quotes': [text],
+         'participants': ['@1']},
     ], 'properties': []})
     assert result['status'] == 'accepted'
     nodes = {n['name']: n['id'] for n in project.graph_snapshot()['nodes']}

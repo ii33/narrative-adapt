@@ -60,7 +60,7 @@ def test_json_files_and_real_independent_edit_lifecycle(tmp_path, capsys):
     value = tmp_path / "value.json"
     value.write_text("0", encoding="utf-8")
     scene=run("adaptation-edit","--changes",'{"node_type":"scene","name":"数量变更场景"}')["created_node_id"]
-    event=run("adaptation-edit","--changes",'{"node_type":"event","name":"数量变更事件"}',"--parent",scene)["created_node_id"]
+    event=run("adaptation-edit","--changes",'{"node_type":"event","name":"数量变更事件","initial_location":"未知"}',"--parent",scene)["created_node_id"]
     snap = run("adaptation-property", identifier, "数量", event, "set", "--value-file", str(value))
     assert next(p for p in snap["properties"] if p.get("node_id") == identifier)["value"] == 0
     payload = tmp_path / "asset.json"

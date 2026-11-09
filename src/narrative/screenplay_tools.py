@@ -150,7 +150,9 @@ def register(Tool, register_tool, validate):
     add("set_screenplay_timeline_property", "在目标剧本事件记录属性变更；set/add/remove携value，clear/unknown不携value，更正保sequence，不回写源改编", screenplay_id | timeline_revision | reason | node_id | {
         "property_id": text | {"required": True}, "value": {}, "event_id": text | {"required": True},
         "op": text | {"enum": ["set", "add", "remove", "clear", "unknown"], "required": True},
-        "record_id": {"type": ["string", "null"]}}, writes=True)
+        "record_id": {"type": ["string", "null"]},
+        "scope": {"type": "string", "enum": ["world", "cognition", "claim"]},
+        "holder_id": {"type": ["string", "null"]}, "context_id": text}, writes=True)
     add("read_screenplay", "读取剧本、集幕树、唯一权威段落顺序及场表正文；省略ID列出剧本", {"screenplay_id": {"type": ["string", "null"]}})
     add("apply_screenplay_structure", "原子编辑集/幕/段落严格树及排序；非空集幕删除须明确搬移目标；变更模式须完整重组", reason | {
         "screenplay_id": text | {"required": True}, "actions": objects | {"required": True, "description": "typed op: create_episode(title,number?,brief?,id?); create_act(title,episode_id?,brief?,id?); update_episode(episode_id,expected_revision,changes); update_act(act_id,expected_revision,changes); update_screenplay(expected_revision,changes); move(child_kind,child_id,parent_kind,parent_id,after_entry_id?); delete_episode/delete_act(id字段,expected_revision,move_to?); delete_segment(segment_id,expected_revision,body_policy=require_empty|discard)。非空集幕删除必须给move_to。"},

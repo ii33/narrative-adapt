@@ -22,11 +22,11 @@ def seed(ops):
         {"type": "scene", "name": "办公室工作", "quotes": [TEXT]},
         {"type": "event", "name": "交接预算表", "scene": "办公室工作", "participants": ["陈宁", "方岳"], "quotes": [FIRST]},
         {"type": "event", "name": "播放录音宣布离职", "scene": "办公室工作", "participants": ["方岳"], "quotes": [REMOVED]}],
-        "properties": [{"node": event, "property": "地点", "value": place, "value_type": "node", "scope": "world", "at_event": event, "quotes": [quote]} for event, place, quote in (("交接预算表", "办公室", FIRST), ("播放录音宣布离职", "大厅", REMOVED))]})
+        "properties": [{"node": event, "property": "地点"  , "category": "未分类", "op": "set", "value": place, "value_type": "node", "scope": "world", "at_event": event, "quotes": [quote]} for event, place, quote in (("交接预算表", "办公室", FIRST), ("播放录音宣布离职", "大厅", REMOVED))]})
     assert result["status"] == "accepted", result
     ids = {node["name"]: node["id"] for node in ops.graph_snapshot()["nodes"]}
     adaptation = ops.import_adaptation([ids["办公室工作"]], reason="隔离原作改编")
-    script = ops.create_screenplay("预算表", creative_brief={"tone": "用可见行为展现办公室关系"}, reason="隔离目标剧本")["screenplay"]
+    script = ops.create_screenplay("预算表", creative_agreement_overrides={"tone": "用可见行为展现办公室关系"}, reason="隔离目标剧本")["screenplay"]
     local = ops.import_screenplay_timeline(script["id"], [ids["办公室工作"]], 0, adaptation["revision"], "导入后作独立删改")
     span = ops.create_adaptation_span(script["id"], "仅预算交接", selection_ids=[ids["交接预算表"]], expected_timeline_revision=local["revision"], reason="当前创作范围")["span"]
     segment = ops.create_script_segment(script["id"], span["id"], "下班前的交接", script["structure_revision"], reason="隔离目标段")

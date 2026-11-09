@@ -12,19 +12,23 @@ def project(tmp_path, monkeypatch):
     return Operations.create_graph_project(tmp_path / 'containers.nproj')
 
 
-def hierarchy(quote):
+def hierarchy(quote, participant):
+    # 事件参与者必填：此处给出原文中真正动手的登记人，按唯一名引用，
+    # 使夹具在本文件内被截取/重排 @ 序号后依然有效。
     return {'nodes': [
         {'type': 'storyline', 'name': '登记故事完结', 'children': ['@2']},
         {'type': 'big_event', 'name': '办理登记', 'children': ['@3']},
         {'type': 'scene', 'name': '登记处办理', 'children': ['@4']},
-        {'type': 'event', 'name': '登记完成', 'quotes': [quote], 'location': '未知'},
+        {'type': 'event', 'name': '登记完成', 'quotes': [quote], 'location': '未知',
+         'participants': [participant]},
+        {'type': 'person', 'name': participant, 'quotes': [quote]},
     ], 'properties': []}
 
 
 def test_all_upper_levels_derive_without_model_quotes_and_close_at_child_end(project):
     quote = '甲完成登记。'
     source = project.import_source('登记', quote + '无关尾注。')
-    raw = hierarchy(quote)
+    raw = hierarchy(quote, '甲')
     before = deepcopy(raw)
     result = project.submit_extraction(source, raw)
     assert result['status'] == 'accepted', result
@@ -41,7 +45,7 @@ def test_all_upper_levels_derive_without_model_quotes_and_close_at_child_end(pro
 def test_reverse_parent_fields_supply_direct_children(project):
     quote = '乙完成登记。'
     source = project.import_source('登记', quote)
-    raw = hierarchy(quote)
+    raw = hierarchy(quote, '乙')
     for row in raw['nodes'][:3]:
         row.pop('children')
     raw['nodes'][1]['storyline'] = '@1'
@@ -59,7 +63,7 @@ def test_reverse_parent_fields_supply_direct_children(project):
 def test_model_upper_quotes_are_not_independent_evidence_or_validation_requirements(project):
     quote = '丙完成登记。'
     source = project.import_source('登记', quote)
-    raw = hierarchy(quote)
+    raw = hierarchy(quote, '丙')
     for row in raw['nodes'][:3]:
         row['quotes'] = ['模型不应填写的概括而非原文']
     result = project.submit_extraction(source, raw)
@@ -70,7 +74,7 @@ def test_model_upper_quotes_are_not_independent_evidence_or_validation_requireme
 
 def test_existing_children_outside_submission_range_and_source_are_referenced(project):
     first = project.import_source('首篇', '甲完成登记。')
-    seed = hierarchy('甲完成登记。')
+    seed = hierarchy('甲完成登记。', '甲')
     seed['nodes'] = seed['nodes'][2:]
     seed['nodes'][0]['children'] = ['@2']
     accepted = project.submit_extraction(first, seed)
@@ -111,7 +115,7 @@ def test_cycles_report_actual_child_field_without_writing(project):
 
 def test_invalid_leaf_evidence_remains_root_cause(project):
     source = project.import_source('坏证据', '正文。')
-    raw = hierarchy('不存在的引文')
+    raw = hierarchy('不存在的引文', '甲')
     result = project.submit_extraction(source, raw)
     assert result['status'] == 'staged'
     assert any(p['path'] == ['nodes', 3, 'quotes', 0] for p in result['problems'])
@@ -120,7 +124,7 @@ def test_invalid_leaf_evidence_remains_root_cause(project):
 
 def test_missing_leaf_quotes_is_not_excused_by_ancestor_derivation(project):
     source = project.import_source('缺证据', '正文。')
-    raw = hierarchy('正文。')
+    raw = hierarchy('正文。', '甲')
     raw['nodes'][3].pop('quotes')
     result = project.submit_extraction(source, raw)
     assert result['status'] == 'staged'
@@ -141,7 +145,9 @@ def test_existing_event_new_source_evidence_keeps_original_container_start(proje
     first = project.import_source('首段', '甲开始办理。')
     raw = {'nodes': [
         {'type': 'scene', 'name': '持续办理'},
-        {'type': 'event', 'name': '办理事项', 'scene': '@1', 'quotes': ['甲开始办理。'], 'location': '未知'},
+        {'type': 'event', 'name': '办理事项', 'scene': '@1', 'quotes': ['甲开始办理。'], 'location': '未知',
+         'participants': ['@3']},
+        {'type': 'person', 'name': '甲', 'quotes': ['甲开始办理。']},
     ], 'properties': []}
     assert project.submit_extraction(first, raw)['status'] == 'accepted'
     nodes = {n['node_type']: n for n in project.graph_snapshot()['nodes']}
@@ -149,8 +155,8 @@ def test_existing_event_new_source_evidence_keeps_original_container_start(proje
     second = project.import_source('续段', second_quote + '尾注。')
     result = project.submit_extraction(second, {'nodes': [
         {'type': 'scene', 'name': '持续办理', 'existing_id': nodes['scene']['id']},
-        {'type': 'event', 'name': '办理事项', 'existing_id': nodes['event']['id'],
-         'scene': '@1', 'quotes': [second_quote]},
+        {'type': 'event', "location": "未知", 'name': '办理事项', 'existing_id': nodes['event']['id'],
+         'scene': '@1', 'quotes': [second_quote], 'participants': [nodes['person']['id']]},
         {'type': 'big_event', 'name': '办理阶段', 'children': ['@1']},
         {'type': 'storyline', 'name': '办理故事', 'children': ['@3']},
     ], 'properties': []})
@@ -166,9 +172,13 @@ def test_same_name_unquoted_containers_with_different_children_remain_distinct(p
     source = project.import_source('同名场景', '甲办理第一件事。乙办理第二件事。')
     result = project.submit_extraction(source, {'nodes': [
         {'type': 'scene', 'name': '办公室'},
-        {'type': 'event', 'name': '第一件事', 'scene': '@1', 'quotes': ['甲办理第一件事。'], 'location': '未知'},
+        {'type': 'event', 'name': '第一件事', 'scene': '@1', 'quotes': ['甲办理第一件事。'], 'location': '未知',
+         'participants': ['@5']},
         {'type': 'scene', 'name': '办公室'},
-        {'type': 'event', 'name': '第二件事', 'scene': '@3', 'quotes': ['乙办理第二件事。'], 'location': '未知'},
+        {'type': 'event', 'name': '第二件事', 'scene': '@3', 'quotes': ['乙办理第二件事。'], 'location': '未知',
+         'participants': ['@6']},
+        {'type': 'person', 'name': '甲', 'quotes': ['甲办理第一件事。']},
+        {'type': 'person', 'name': '乙', 'quotes': ['乙办理第二件事。']},
     ], 'properties': []})
     assert result['status'] == 'accepted', result
     scenes = [n for n in project.graph_snapshot()['nodes'] if n['node_type'] == 'scene']

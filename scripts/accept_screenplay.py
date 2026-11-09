@@ -120,17 +120,17 @@ def seed(ops):
         {"type": "event", "name": "周川把铜钥匙交给林岚", "scene": "@6", "participants": ["@1", "@2"], "quotes": [second]},
         {"type": "event", "name": "林岚到东仓听见脚步", "scene": "@6", "participants": ["@1"], "quotes": [third]},
     ], "properties": [
-        {"node": "@7", "property": "地点", "op": "set", "value": "@3", "value_type": "node", "scope": "world", "at_event": "@7", "quotes": ["旧车站门口"]},
-        {"node": "@8", "property": "地点", "op": "unknown", "value_type": "node", "scope": "world", "at_event": "@8", "quotes": [second]},
-        {"node": "@9", "property": "地点", "op": "set", "value": "@4", "value_type": "node", "scope": "world", "at_event": "@9", "quotes": ["东仓"]},
-        {"node": "@5", "property": "持有者", "op": "set", "value": "@1", "value_type": "either", "scope": "world", "at_event": "@8", "quotes": [second]},
+        {"node": "@7", "property": "地点"  , "category": "未分类", "op": "set", "value": "@3", "value_type": "node", "scope": "world", "at_event": "@7", "quotes": ["旧车站门口"]},
+        {"node": "@8", "property": "地点", "category": "未分类", "op": "unknown", "value_type": "node", "scope": "world", "at_event": "@8", "quotes": [second]},
+        {"node": "@9", "property": "地点", "category": "未分类", "op": "set", "value": "@4", "value_type": "node", "scope": "world", "at_event": "@9", "quotes": ["东仓"]},
+        {"node": "@5", "property": "持有者", "category": "未分类", "op": "set", "value": "@1", "value_type": "either", "scope": "world", "at_event": "@8", "quotes": [second]},
     ]}
     result = ops.submit_extraction(sid, draft)
     if result["status"] != "accepted":
         raise ValueError(str(result))
     events = [n["id"] for n in ops.graph_snapshot()["nodes"] if n["node_type"] == "event"]
     imported = ops.import_adaptation(events, expected_revision=0, reason="合成改编输入fixture")
-    screenplay = ops.create_screenplay("雨夜交接", creative_brief={"style": "克制悬疑", "audience": "成年观众"}, reason="验收剧本fixture")["screenplay"]
+    screenplay = ops.create_screenplay("雨夜交接", creative_agreement_overrides={"tone": "克制悬疑", "audience": "成年观众"}, reason="验收剧本fixture")["screenplay"]
     local = ops.import_screenplay_timeline(screenplay["id"], events, expected_timeline_revision=0,
             expected_adaptation_revision=imported["revision"], reason="独立剧本导入fixture")
     span = ops.create_adaptation_span(screenplay["id"], "钥匙交接与仓门悬念", selection_ids=events,

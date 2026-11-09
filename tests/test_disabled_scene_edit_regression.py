@@ -15,7 +15,9 @@ def project(tmp_path, monkeypatch):
     accepted = ops.submit_extraction(source, {"nodes": [
         {"type": "big_event", "name": "等待", "children": ["@2"]},
         {"type": "scene", "name": "门外等候", "children": ["@3"]},
-        {"type": "event", "name": "甲等候", "quotes": [quote], "location": "未知"},
+        {"type": "event", "name": "甲等候", "quotes": [quote], "location": "未知",
+         "participants": ["@4"]},
+        {"type": "person", "name": "甲", "quotes": [quote]},
     ], "properties": []})
     assert accepted["status"] == "accepted", accepted
     adaptation = ops.sync_adaptation()

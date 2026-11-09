@@ -29,21 +29,21 @@ def setup(project, *, item=False):
         nodes += [{"type": "scene", "name": f"场景{index}", "big_event": "等候"},
                   event]
     properties = [
-        {"node": "甲", "property": "服装", "value": "青衣", "value_type": "string", "at_event": "事件0", "quotes": [QUOTES[0]]},
-        {"node": "甲", "property": "服装", "value": "白衣", "value_type": "string", "at_event": "事件2", "quotes": [QUOTES[2]]},
-        {"node": "事件1", "property": "地点", "value": "桥边", "value_type": "node", "at_event": "事件1", "quotes": [QUOTES[1]]},
-        {"node": "事件3", "property": "地点", "value": "远处", "value_type": "node", "at_event": "事件3", "quotes": [QUOTES[3]]},
+        {"node": "甲", "property": "服装", "category": "未分类", "value": "青衣", "value_type": "string", "at_event": "事件0", "quotes": [QUOTES[0]]},
+        {"node": "甲", "property": "服装", "category": "未分类", "value": "白衣", "value_type": "string", "at_event": "事件2", "quotes": [QUOTES[2]]},
+        {"node": "事件1", "property": "地点", "category": "未分类", "value": "桥边", "value_type": "node", "at_event": "事件1", "quotes": [QUOTES[1]]},
+        {"node": "事件3", "property": "地点", "category": "未分类", "value": "远处", "value_type": "node", "at_event": "事件3", "quotes": [QUOTES[3]]},
     ]
     if item:
         nodes.append({"type": "item", "name": "纸条", "quotes": [QUOTES[0]]})
         properties.extend([
             # 纸条靠事件自己的节点属性引用进入导入范围：参与者域已收窄为人物/群体，
             # 物品不能顶替参与者，改用属性引用表达"这个事件涉及纸条"。
-            {"node": "事件1", "property": "涉及物品", "value": "纸条", "value_type": "node",
+            {"node": "事件1", "property": "涉及物品", "category": "未分类", "value": "纸条", "value_type": "node",
              "at_event": "事件1", "quotes": [QUOTES[1]]},
-            {"node": "纸条", "property": "持有者", "value": "甲", "value_type": "either", "scope": "world",
+            {"node": "纸条", "property": "持有者", "category": "未分类", "value": "甲", "value_type": "either", "scope": "world",
              "at_event": "事件0", "quotes": [QUOTES[0]]},
-            {"node": "纸条", "property": "持有者", "value": "无", "value_type": "either", "scope": "world",
+            {"node": "纸条", "property": "持有者", "category": "未分类", "value": "无", "value_type": "either", "scope": "world",
              "at_event": "事件2", "quotes": [QUOTES[2]]},
         ])
     for row in properties:

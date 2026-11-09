@@ -27,7 +27,7 @@ def context(tmp_path, monkeypatch):
         {'type': 'event', 'name': '入城', 'scene': '@6', 'participants': ['@1'], 'location': '@3', 'quotes': [first]},
         {'type': 'event', 'name': '焚图', 'scene': '@6', 'participants': ['@2'], 'location': '@4', 'quotes': [HIDDEN]},
         {'type': 'event', 'name': '继续等候', 'scene': '@6', 'participants': ['@1'], 'location': '@3', 'quotes': [last]},
-    ], 'properties': [{'node': '@1', 'property': '身份', 'value': '来客', 'value_type': 'string',
+    ], 'properties': [{'node': '@1', 'property': '身份', "category": "未分类"  , 'value': '来客', 'value_type': 'string',
         'scope': 'world', 'at_event': '@7', 'op': 'set', 'quotes': [first]}]})
     assert accepted['status'] == 'accepted', accepted
     ids = {n['name']: n['id'] for n in ops.graph_snapshot()['nodes']}

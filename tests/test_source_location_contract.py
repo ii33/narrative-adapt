@@ -70,8 +70,9 @@ def test_submit_locates_and_validates_without_optional_locate_or_preview(project
     before = copy.deepcopy(project.graph_snapshot())
     draft = draft_result()
     draft["nodes"][0]["quotes"] = ["原文不存在的引文"]
-    rejected = project.submit_extraction(sid, draft)
-    assert rejected["status"] == "rejected" and rejected["diagnostics"]
+    staged = project.submit_extraction(sid, draft)
+    assert staged["status"] == "staged" and staged["problems"]
+    assert any(row.get("path") == ["nodes", 0, "quotes"] for row in staged["problems"])
     assert project.graph_snapshot() == before
 
 
@@ -80,7 +81,9 @@ def test_ambiguous_overlapping_event_evidence_is_still_atomic_rejection(project)
     before = copy.deepcopy(project.graph_snapshot())
     result = project.submit_extraction(sid, {"nodes": [
         {"type": "scene", "name": "场", "quotes": ["aaa"]},
-        {"type": "event", "name": "事件", "scene": "场", "quotes": ["aa"]}], "properties": []})
-    assert result["status"] == "rejected"
-    assert any("出现多处" in row["message"] for row in result["diagnostics"])
+        # 原文只有定位用的字符，没有人物：参与者键必填，内容确实为空。
+        {"type": "event", "name": "事件", "scene": "场", "quotes": ["aa"], "participants": []}],
+        "properties": []})
+    assert result["status"] == "staged"
+    assert any("出现多处" in row["message"] for row in result["problems"])
     assert project.graph_snapshot() == before

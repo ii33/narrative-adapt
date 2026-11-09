@@ -25,8 +25,8 @@ def sample(tmp_path, monkeypatch):
         {"type": "scene", "name": "交接钥匙", "quotes": [qa.TEXT]},
         *[{"type": "event", "name": name, "scene": "交接钥匙", "participants": participants, "quotes": [quote]} for name, participants, quote in (("保管钥匙", ["周宁"], first), ("交出钥匙", ["周宁", "林岚"], second), ("带钥匙离开", ["林岚"], third))]],
         "properties": [
-            {"node": "铜钥匙", "property": "持有者", "value": owner, "value_type": "either", "at_event": event, "op": "set", "quotes": [quote]} for owner, event, quote in (("周宁", "保管钥匙", first), ("林岚", "交出钥匙", second))] + [
-            {"node": event, "property": "地点", "value": "资料室", "value_type": "node", "at_event": event, "op": "set", "quotes": [quote]} for event, quote in (("保管钥匙", first), ("交出钥匙", second), ("带钥匙离开", third))]}
+            {"node": "铜钥匙", "property": "持有者"  , "category": "未分类", "value": owner, "value_type": "either", "at_event": event, "op": "set", "quotes": [quote]} for owner, event, quote in (("周宁", "保管钥匙", first), ("林岚", "交出钥匙", second))] + [
+            {"node": event, "property": "地点", "category": "未分类", "value": "资料室", "value_type": "node", "at_event": event, "op": "set", "quotes": [quote]} for event, quote in (("保管钥匙", first), ("交出钥匙", second), ("带钥匙离开", third))]}
     return ops, fixture, draft, qa
 
 
@@ -66,7 +66,8 @@ def test_default_guidance_delegates_string_matching_but_keeps_semantic_review():
         assert "语义" in text and "定位" in text
         assert "accepted" in text and "无error" in text and "info" in text
         assert "具体" in text and "明确" in text and "复核" in text
-    assert "不必代替程序逐引文搜索比对" in DEFAULT_PROMPTS["extraction"]["text"]
-    assert "不能省略语义证据核对" in DEFAULT_PROMPTS["extraction"]["text"]
+    extraction = DEFAULT_PROMPTS["extraction"]["text"]
+    assert "不必代替程序逐引文搜索比对" in extraction
+    assert "语义证据核对不能省略" in extraction
     assert "locate_source" in TOOLS and not TOOLS["locate_source"].writes
     assert "preview_extraction" in TOOLS and not TOOLS["preview_extraction"].writes

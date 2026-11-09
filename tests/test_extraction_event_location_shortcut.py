@@ -17,7 +17,9 @@ def project(tmp_path, monkeypatch):
 
 def draft(location='@3'):
     return {'nodes': [{'type': 'scene', 'name': '会场', 'quotes': [TEXT]},
-        {'type': 'event', 'name': '会议结束', 'scene': '@1', 'quotes': [TEXT], 'location': location},
+        # 原文只有厅与灯，没有出场人物：参与者键必填但内容确实为空。
+        {'type': 'event', 'name': '会议结束', 'scene': '@1', 'quotes': [TEXT], 'location': location,
+         'participants': []},
         {'type': 'location', 'name': '大厅', 'quotes': ['大厅']}], 'properties': []}
 
 
@@ -74,7 +76,7 @@ def test_omission_never_supplies_unknown_and_non_event_field_is_rejected(project
 def test_shortcut_plus_explicit_location_is_never_silently_selected(project, property_id):
     ops, sid = project
     raw = draft()
-    raw['properties'] = [{'node': '@2', 'at_event': '@2', 'property': property_id,
+    raw['properties'] = [{'node': '@2', 'at_event': '@2', 'property': property_id , "category": "未分类",
         'op': 'unknown', 'value_type': 'either', 'quotes': [TEXT]}]
     result = ops.submit_extraction(sid, raw)
     assert result['status'] == 'staged', result

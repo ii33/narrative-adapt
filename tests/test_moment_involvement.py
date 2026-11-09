@@ -29,7 +29,7 @@ def install(ops):
         {"type": "action", "name": "同行停下", "event": "@10", "participants": ["@2"], "quotes": [QUOTES[0]]},
         {"type": "storyline", "name": "会合篇章", "children": ["@7"]},
     ]
-    props = [{"node": f"@{10+i}", "property": "地点", "op": "set", "value": f"@{4+i}", "value_type": "node", "scope": "world", "at_event": f"@{10+i}", "quotes": [quote]} for i, quote in enumerate(QUOTES)]
+    props = [{"node": f"@{10+i}", "property": "地点", "category": "未分类", "op": "set", "value": f"@{4+i}", "value_type": "node", "scope": "world", "at_event": f"@{10+i}", "quotes": [quote]} for i, quote in enumerate(QUOTES)]
     payload = {"nodes": nodes, "properties": props}
     result = ops.submit_extraction(sid, payload)
     assert result["status"] == "accepted", result

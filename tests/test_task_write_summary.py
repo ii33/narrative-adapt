@@ -163,16 +163,17 @@ def test_real_extraction_delta_distinguishes_create_update_and_event_change(ops)
     text = '甲在门口等乙。乙到门口见甲。'
     source = ops.import_source('交接', text)
     draft = {'nodes': [{'type': 'person', 'name': '甲', 'quotes': ['甲在门口等乙。']}, {'type': 'person', 'name': '乙', 'quotes': ['乙到门口见甲。']},
-                       {'type': 'location', 'name': '门口', 'quotes': ['甲在门口等乙。']}, {'type': 'scene', 'name': '会面', 'quotes': [text]},
+                       {'type': 'location', 'name': '门口', 'quotes': ['甲在门口等乙。']}, {'type': 'scene', 'name': '会面'},
                        {'type': 'event', 'name': '等待', 'scene': '@4', 'participants': ['@1', '@2'], 'quotes': ['甲在门口等乙。']},
-                       {'type': 'event', 'name': '会合', 'scene': '@4', 'participants': ['@1', '@2'], 'quotes': ['乙到门口见甲。']}],
-             'properties': [{'node': '@5', 'op': 'set', 'property': '地点', 'value': '@3', 'value_type': 'node', 'at_event': '@5', 'quotes': ['甲在门口等乙。']}]}
+                       {'type': 'event', 'location': '未知', 'name': '会合', 'scene': '@4', 'participants': ['@1', '@2'], 'quotes': ['乙到门口见甲。']}],
+             'properties': [{'node': '@5', 'op': 'set', 'property': '地点'  , "category": "未分类", 'value': '@3', 'value_type': 'node', 'at_event': '@5', 'quotes': ['甲在门口等乙。']},
+                            {'node': '@5', 'op': 'set', 'property': '状态' , "category": "未分类", 'value': '等待', 'value_type': 'string', 'at_event': '@5', 'quotes': ['甲在门口等乙。']}]}
     created = ops.submit_extraction(source, draft)
     assert created['status'] == 'accepted' and created['committed_changes']
     node = next(n for n in ops.graph_snapshot()['nodes'] if n['name'] == '等待')
     updated = ops.apply_changes([node | {'name': '等候乙'}], [], ops.graph_snapshot()['revision'], '更正名称')
     event = next(n for n in ops.graph_snapshot()['nodes'] if n['name'] == '会合')
-    changed = ops.record_property_change(node['id'], '地点', event['id'], 'clear', expected_revision=ops.graph_snapshot()['revision'], reason='场所记录结束')
+    changed = ops.record_property_change(node['id'], '状态', event['id'], 'clear', expected_revision=ops.graph_snapshot()['revision'], reason='场所记录结束')
     assert changed['status'] == 'accepted'
     summary = build_submission_summary([step('submit_extraction', created, {'result': draft}), step('apply_changes', updated), step('record_property_change', changed)])
     assert summary['totals']['created'] > 0 and summary['totals']['updated'] == 1

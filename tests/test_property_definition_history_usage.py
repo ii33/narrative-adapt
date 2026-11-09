@@ -15,9 +15,9 @@ def seed(ops):
     draft = {"nodes": [
         {"type": "person", "name": name, "quotes": [FIRST]} for name in ("甲", "乙")
     ] + [{"type": "scene", "name": "往来", "quotes": [TEXT]},
-         {"type": "event", "name": "建立关系", "scene": "往来", "participants": ["甲", "乙"], "quotes": [FIRST]},
-         {"type": "event", "name": "结束关系", "scene": "往来", "participants": ["甲", "乙"], "quotes": [LAST]}],
-        "properties": [{"node": "甲", "property": "朋友", "value": "乙", "value_type": "node", "at_event": "建立关系", "op": "set", "quotes": [FIRST]}]}
+         {"type": "event", "location": "未知", "name": "建立关系", "scene": "往来", "participants": ["甲", "乙"], "quotes": [FIRST]},
+         {"type": "event", "location": "未知", "name": "结束关系", "scene": "往来", "participants": ["甲", "乙"], "quotes": [LAST]}],
+        "properties": [{"node": "甲", "property": "朋友"  , "category": "未分类", "value": "乙", "value_type": "node", "at_event": "建立关系", "op": "set", "quotes": [FIRST]}]}
     assert ops.submit_extraction(sid, draft)["status"] == "accepted"
     ids = {node["name"]: node["id"] for node in ops.graph_snapshot()["nodes"]}
     row = next(record for record in ops.property_records() if record.get("kind") == "property_change")

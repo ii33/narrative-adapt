@@ -6,12 +6,13 @@ import copy
 import json
 
 import pytest
+from agent_fixtures import LOCATION_DEFINITION, location_record
 from agent_fixtures import project as project
 from test_extraction_identity import FIRST_DAY_END, Q3, draft, node, seed
 
 
 def incremental(scene=None):
-    event = {"type": "event", "name": "甲向乙点头", "quotes": [Q3], "participants": ["甲", "乙"]}
+    event = {"type": "event", "location": "未知", "name": "甲向乙点头", "quotes": [Q3], "participants": ["甲", "乙"]}
     if scene is not None:
         event["scene"] = scene
     return {"nodes": [event], "properties": []}
@@ -33,7 +34,11 @@ def test_new_event_links_existing_scene_without_relisting_it(project, reference)
     assert set(scene["events"]) == set(original["events"]) | {new["id"]}
     assert scene["evidence"] == original["evidence"]
     assert scene["disclosure"] == original["disclosure"]
-    assert scene["evidence_spans"] == original["evidence_spans"]
+    assert all(span in scene["evidence_spans"] for span in original["evidence_spans"])
+    assert any(
+        span["quote"] == Q3 and span["source_id"] == sid
+        for span in scene["evidence_spans"]
+    )
     assert len([n for n in project.graph_snapshot()["nodes"] if n["id"] == scene["id"]]) == 1
 
 
@@ -85,7 +90,9 @@ def test_invalid_scene_reference_rejects_entire_increment_without_writing(projec
         )
     before = copy.deepcopy(project.graph_snapshot())
     assert not project.preview_extraction(sid, payload, end=FIRST_DAY_END)["valid"]
-    assert project.submit_extraction(sid, payload, end=FIRST_DAY_END)["status"] == "rejected"
+    staged = project.submit_extraction(sid, payload, end=FIRST_DAY_END)
+    assert staged["status"] == "staged" and staged["problems"]
+    assert any(row.get("targets") for row in staged["problems"])
     assert project.graph_snapshot() == before
 
 
@@ -93,7 +100,8 @@ def test_event_without_scene_is_rejected_without_writing(project):
     sid = seed(project)
     before = copy.deepcopy(project.graph_snapshot())
     assert not project.preview_extraction(sid, incremental(), end=FIRST_DAY_END)["valid"]
-    assert project.submit_extraction(sid, incremental(), end=FIRST_DAY_END)["status"] == "rejected"
+    staged = project.submit_extraction(sid, incremental(), end=FIRST_DAY_END)
+    assert staged["status"] == "staged" and staged["problems"]
     assert project.graph_snapshot() == before
 
 
@@ -134,7 +142,10 @@ def seed_adjacent_big_events(project, *, same_name=False):
         )
     result = project.apply_changes(
         objects,
-        [],
+        [LOCATION_DEFINITION] + [
+            location_record(f"E{number}", sid, PARENT_TEXT.index(quote), quote)
+            for number, quote in ((1, "甲遇见乙。"), (2, "甲告别乙。"))
+        ],
         project.graph_project_info()["revision"],
         reason="合成两个相邻而不共享成员的大事件",
     )
@@ -150,7 +161,7 @@ def child_scene_payload(parent):
         "nodes": [
             {"type": "scene", "name": "点头回应", "big_event": parent, "quotes": ["甲向乙点头。"]},
             {
-                "type": "event",
+                "type": "event", "location": "未知",
                 "name": "甲向乙点头",
                 "scene": "@1",
                 "participants": ["P1", "P2"],
@@ -170,9 +181,12 @@ def test_new_scene_references_existing_big_event_without_relisting_parent(projec
     )
     updated = node(project, "相遇经过")
     assert set(updated["events"]) == set(parent["events"]) | {node(project, "点头回应")["id"]}
-    assert all(
-        updated.get(k) == parent.get(k) for k in ("evidence", "disclosure", "evidence_spans")
-    )
+    assert all(updated.get(k) == parent.get(k) for k in ("evidence", "disclosure"))
+    assert all(span in updated["evidence_spans"] for span in parent["evidence_spans"])
+    assert {
+        "source_id": sid, "start": PARENT_TEXT.index("甲向乙点头。"),
+        "end": PARENT_TEXT.index("甲向乙点头。") + len("甲向乙点头。"), "quote": "甲向乙点头。",
+    } in updated["evidence_spans"]
     assert node(project, "告别经过") == other
     assert len([n for n in project.graph_snapshot()["nodes"] if n["node_type"] == "big_event"]) == 2
 
@@ -187,7 +201,7 @@ def test_ambiguous_adjacent_existing_big_events_need_explicit_id(project):
     payload = child_scene_payload("相遇经过")
     before = copy.deepcopy(project.graph_snapshot())
     result = project.submit_extraction(sid, payload)
-    assert result["status"] == "rejected" and result["diagnostics"]
+    assert result["status"] == "staged" and result["problems"]
     assert project.graph_snapshot() == before
     payload["nodes"][0]["big_event"] = "B1"
     assert project.submit_extraction(sid, payload)["status"] == "accepted"
@@ -196,10 +210,8 @@ def test_ambiguous_adjacent_existing_big_events_need_explicit_id(project):
         node(project, "点头回应")["id"]
     }
     assert current["B2"] == parents["B2"]
-    assert all(
-        current["B1"].get(k) == parents["B1"].get(k)
-        for k in ("evidence", "disclosure", "evidence_spans")
-    )
+    assert all(current["B1"].get(k) == parents["B1"].get(k) for k in ("evidence", "disclosure"))
+    assert all(span in current["B1"]["evidence_spans"] for span in parents["B1"]["evidence_spans"])
     assert not [r for r in project.check_project()["issues"] if r["severity"] == "error"]
 
 
@@ -219,12 +231,14 @@ def test_explicit_existing_orphan_can_be_attached_without_duplicate_or_property_
         "cardinality": "one",
     }
     value = {
-        "kind": "property_value",
+        "kind": "property_change",
+        "op": "set",
         "id": "orphan_value",
         "node_id": orphan["id"],
         "event_id": orphan["id"],
         "property_id": "原有动作",
         "value": "点头",
+        "sequence": orphan["disclosure"]["start"],
         "evidence": orphan["evidence"],
         "disclosure": orphan["disclosure"],
     }
@@ -272,6 +286,6 @@ def test_cached_submission_does_not_silently_ignore_changed_declared_parent(proj
     )
     before = copy.deepcopy(project.graph_snapshot())
     result = project.submit_extraction(sid, payload, end=FIRST_DAY_END)
-    assert result["status"] == "rejected" and not result.get("reused")
-    assert result["diagnostics"]
+    assert result["status"] == "staged" and not result.get("reused")
+    assert result["problems"]
     assert project.graph_snapshot() == before

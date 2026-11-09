@@ -60,7 +60,7 @@ def test_semantic_batches_reuse_previous_nodes_and_close_later_interval(project)
         {"type": "scene", "name": "门口等候与汇合"},
         {"type": "event", "name": "等候", "scene": "@4", "participants": ["@1"],
          "location": "@3", "quotes": [first]}],
-        "properties": [{"node": "@1", "property": "等候对象", "value": "@2", "value_type": "node", "op": "set", "at_event": "@5", "quotes": [first]}]},
+        "properties": [{"node": "@1", "property": "等候对象"  , "category": "未分类", "value": "@2", "value_type": "node", "op": "set", "at_event": "@5", "quotes": [first]}]},
         start=0, end=len(first))
     assert result["status"] == "accepted"
     ids = result["node_ids"]
@@ -69,7 +69,7 @@ def test_semantic_batches_reuse_previous_nodes_and_close_later_interval(project)
     result = project.submit_extraction(sid, {"nodes": [
         {"type": "event", "name": "汇合离开", "scene": ids["@4"],
          "location": ids['@3'], "participants": [ids["@1"], ids["@2"]], "quotes": [second]}],
-        "properties": [{"node": ids["@1"], "property": "等候对象", "op": "clear", "at_event": "@1", "quotes": [second]}]},
+        "properties": [{"node": ids["@1"], "property": "等候对象"  , "category": "未分类", "op": "clear", "at_event": "@1", "quotes": [second]}]},
         start=len(first), end=len(first + second))
     assert result["status"] == "accepted"
     nodes = project.graph_snapshot()["nodes"]

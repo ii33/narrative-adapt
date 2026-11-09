@@ -25,7 +25,7 @@ def seed(ops):
         {"type": "scene", "name": "候场", "quotes": ["甲在门外稍候。"]},
         {"type": "event", "name": "开门", "scene": "开门场", "participants": ["甲"], "quotes": ["甲打开门。"]},
         {"type": "event", "name": "稍候", "scene": "候场", "participants": ["甲"], "quotes": ["甲在门外稍候。"]}],
-        "properties": [{"node": "稍候", "property": "情势", "value": "待删状态", "value_type": "string", "at_event": "稍候", "quotes": ["甲在门外稍候。"]}]})
+        "properties": [{"node": "稍候", "property": "情势"  , "category": "未分类", "value": "待删状态", "value_type": "string", "at_event": "稍候", "quotes": ["甲在门外稍候。"]}]})
     assert result["status"] == "accepted", result
     ids = {row["name"]: row["id"] for row in ops.graph_snapshot()["nodes"]}
     adaptation = ops.import_adaptation([ids["开门场"], ids["候场"]], reason="隔离验收源改编")

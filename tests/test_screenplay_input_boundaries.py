@@ -25,11 +25,11 @@ def context(tmp_path, monkeypatch):
         {"type": "scene", "name": "相隔两地的等候", "big_event": "等候", "quotes": [TEXT]},
         {"type": "event", "name": "入城", "scene": "相隔两地的等候", "participants": ["甲"], "quotes": [FIRST]},
         {"type": "event", "name": "焚图", "scene": "相隔两地的等候", "participants": ["乙"], "quotes": [HIDDEN]},
-        {"type": "event", "name": "继续等候", "scene": "相隔两地的等候", "participants": ["甲"], "quotes": [LAST]}],
+        {"type": "event", "name": "继续等候", "location": "未知", "scene": "相隔两地的等候", "participants": ["甲"], "quotes": [LAST]}],
         "properties": [
-            {"node": "入城", "property": "地点", "value": "城门", "value_type": "node", "scope": "world", "at_event": "入城", "quotes": [FIRST]},
-            {"node": "焚图", "property": "地点", "value": "密室", "value_type": "node", "scope": "world", "at_event": "焚图", "quotes": [HIDDEN]},
-            {"node": "甲", "property": "身份", "value": "来客", "value_type": "string", "scope": "world", "at_event": "入城", "quotes": [FIRST]}]}
+            {"node": "入城", "property": "地点"  , "category": "未分类", "value": "城门", "value_type": "node", "scope": "world", "at_event": "入城", "op": "set", "quotes": [FIRST]},
+            {"node": "焚图", "property": "地点", "category": "未分类", "value": "密室", "value_type": "node", "scope": "world", "at_event": "焚图", "op": "set", "quotes": [HIDDEN]},
+            {"node": "甲", "property": "身份", "category": "未分类", "value": "来客", "value_type": "string", "scope": "world", "at_event": "入城", "op": "set", "quotes": [FIRST]}]}
     result = ops.submit_extraction(sid, draft)
     assert result["status"] == "accepted", result
     source = ops.sync_adaptation()
@@ -76,5 +76,5 @@ def test_event_grounding_never_inherits_another_events_location(context):
     assert grounding[ids["入城"]]["location_ids"] == [ids["城门"]]
     assert grounding[ids["入城"]]["location_status"] == "known"
     assert grounding[ids["继续等候"]]["location_ids"] == []
-    assert grounding[ids["继续等候"]]["location_status"] == "unrecorded"
+    assert grounding[ids["继续等候"]]["location_status"] == "unknown"
     assert grounding[ids["继续等候"]]["participant_ids"] == [ids["甲"]]

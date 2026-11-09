@@ -42,9 +42,11 @@ def source(tmp_path, monkeypatch):
     raw_task = json.dumps({"prompt": "用户原话中的源路径必须保留：" + str(entry), "source_project_id": ops.graph_project_info()["project_id"]}, ensure_ascii=False).encode()
     task_file.write_bytes(raw_task)
     context = ops.read_script_unit_context(unit["id"])
-    ops.submit_script_unit(unit["id"], [{"type": "action", "payload": {"text": "不可改写的源工程正文。"}}],
-        context["expected_plan_revision"], context["expected_body_revision"], context["span_fingerprint"], context["context_fingerprint"], context["plan_fingerprint"],
-        reason="fixture正文", task_id="fixture-task", manifest_ref=str(task_file))
+    from narrative.tool_execution_context import bind_tool_execution_metadata
+    with bind_tool_execution_metadata({"task_id": "fixture-task", "manifest_ref": str(task_file)}):
+        ops.submit_script_unit(unit["id"], [{"type": "action", "payload": {"text": "不可改写的源工程正文。"}}],
+            context["expected_plan_revision"], context["expected_body_revision"], context["span_fingerprint"], context["context_fingerprint"], context["plan_fingerprint"],
+            reason="fixture正文", task_id="fixture-task", manifest_ref=str(task_file))
     library = tmp_path / "Library" / "原始参考.png"
     library.parent.mkdir()
     library.write_bytes(b"original Library file")
