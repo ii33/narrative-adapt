@@ -68,6 +68,8 @@ def span_endpoints(adaptation, selection_ids=None, start_node_id=None, end_node_
 
 class _GenerationView(_View):
     """State time survives narrative suppression; hidden narrative never does."""
+    state_time_includes_suppressed = True
+
     def __init__(self, snapshot):
         super().__init__(snapshot)
         for row in self.records:
@@ -129,7 +131,7 @@ def _state_visible(view, row, identifier):
     if row.get("holder_id") and not view.visible(row["holder_id"], cutoff, context):
         return False
     anchor = view.boundary(row.get("event_id"))
-    if not anchor or not view.active(row.get("event_id")) or anchor.get("context_id", "canon") != context or anchor["sort_id"] > cutoff:
+    if not anchor or anchor.get("context_id", "canon") != context or anchor["sort_id"] > cutoff:
         return False
     current = view.current_records(cutoff)
     if not any(row["id"] in value.get("active_change_ids", []) for value in current):
@@ -257,6 +259,9 @@ def _input(adaptation, members, effective):
         for point in points:
             node_input = _safe_node(view, nodes[point], targets)
             if node_input:
+                # 参与者域在提取草稿层已收窄为人物/群体，但显式图写入仍可能留下
+                # 旧的物品/地点参与者（graph_service.precheck 尚未收窄），所以这里
+                # 仍然按类型过滤：grounding 只认"参与事件的主体"。
                 participants.update(key for key in node_input["participants"] if nodes[key]["node_type"] in {"person", "group"})
             for row in state_rows[point]:
                 if _location_record(view, row, event_id):
@@ -268,7 +273,8 @@ def _input(adaptation, members, effective):
             "source_event_ids": source_event_ids,
             "nodes": [_safe_node(view, nodes[key], targets) for key in effective],
             "entities": [_safe_node(view, nodes[key], targets) for key in sorted(related) if key not in targets],
-            "states": [{"event_id": key, "values": [_state_projection(view, row, targets, key) for row in state_rows[key]]} for key in effective],
+            "states": [{"event_id": key, "values": [_state_projection(view, row, targets, key) for row in state_rows[key]
+                                                   if row.get("state_kind", "known") == "known"]} for key in effective],
             "definitions": [{key: copy.deepcopy(definitions[name][key]) for key in
                              ("id", "value_type", "cardinality", "target_node_types", "semantic", "symmetric") if key in definitions[name]}
                             for name in sorted(definition_ids) if name in definitions],

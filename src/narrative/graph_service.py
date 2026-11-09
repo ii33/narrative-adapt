@@ -342,8 +342,14 @@ class GraphService:
                     if not target or target["kind"] != "node":
                         issues.append(_issue("REF", "参与者须引用已有或本批节点", obj_id))
                         continue
-                    if target.get("node_type") not in {"person", "group", "item", "location"}:
-                        issues.append(_issue("PARTICIPANTS", "参与者须是人物、群体、物品或地点", obj_id))
+                    # 参与者是"参与事件的主体"，只有人和群体；地点有事件自身的地点属性、
+                    # 物品有持有者，混进来等于把同一条事实写两遍。这里只检查**本次写入**
+                    # 的对象：存量工程里遗留的物品/地点参与者仍可读出，下一次改写才会被拒。
+                    if target.get("node_type") not in {"person", "group"}:
+                        issues.append(_issue(
+                            "PARTICIPANTS",
+                            "参与者须是人物或群体节点；地点请用事件自身的地点属性，物品请用持有者属性",
+                            obj_id))
                 node_evidence = item.get("evidence")
                 if node_evidence is not None:
                     source_id = node_evidence.get("source_id")

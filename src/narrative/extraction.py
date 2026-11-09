@@ -23,11 +23,31 @@ NODE_TYPES = ("person", "group", "item", "location", "scene", "event", "action",
 
 
 VALUE_TYPES = ("string", "number", "boolean", "node", "any", "either")
-ALLOWED_PARTICIPANTS = ("person", "group", "item", "location")
+# 参与者是"参与事件的主体"，只有人和群体。地点有事件自身的地点属性、物品有持有者，
+# 二者都由各自的属性族记录，混进参与者会让同一条事实在两个地方各写一遍。
+ALLOWED_PARTICIPANTS = ("person", "group")
+PARTICIPANT_TYPE_LABELS = {"item": "物品", "location": "地点", "scene": "场景", "event": "事件",
+                           "action": "动作", "big_event": "大事件", "storyline": "主要故事"}
 
 
 def _diagnostic(issues: list[dict], path: list, name: str, reason: str, **details):
     issues.append({'name': name, 'path': path, 'reason': reason, 'message': reason, **details})
+
+
+def _batch_participant_kind(value: str, rows: list, declared: dict[str, str]) -> str:
+    """Best-effort type of a participant reference *inside this draft*.
+
+    Only the batch is visible here: ``@N`` points at the original nodes array and
+    a name is usable when this batch declares it. Anything else (a formal ID or a
+    name that only exists in the graph) is left to reference resolution, which
+    sees the stored graph.
+    """
+    if value.startswith("@") and value[1:].isdigit():
+        index = int(value[1:])
+        if 1 <= index <= len(rows) and isinstance(rows[index - 1], dict):
+            return str(rows[index - 1].get("type") or "").strip()
+        return ""
+    return declared.get(value, "")
 
 
 def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], locations: dict, lookup=None) -> list[dict]:
@@ -142,6 +162,21 @@ def _find_quote(text: str, quote: str, lookup=None) -> tuple[int, str]:
     return -1, quote
 
 
+def _participant_domain_error(participants: list, rows: list, declared: dict[str, str]):
+    """First participant that the draft itself proves is not a person/group.
+
+    Returns ``(index, reference, kind)`` or ``None``. Only the batch is inspected;
+    refereces that resolve against the stored graph are judged by reference
+    resolution, which can see their type (:mod:`narrative.extraction_refs`).
+    """
+    for index, value in enumerate(participants):
+        reference = str(value).strip()
+        kind = _batch_participant_kind(reference, rows, declared)
+        if kind and kind not in ALLOWED_PARTICIPANTS:
+            return index, reference, kind
+    return None
+
+
 def parse_nodes(payload: dict, text: str) -> dict:
     """Verify every quote and pin each node to its first appearance.
 
@@ -152,6 +187,18 @@ def parse_nodes(payload: dict, text: str) -> dict:
     rows = payload.get("nodes")
     if not isinstance(rows, list):
         raise ValueError("模型回复缺少 nodes 数组")
+    raw_rows = rows
+    # 本批声明过的名字 → 类型。同名出现多次说明名称本身证明不了身份，记空串，
+    # 由引用解析按歧义处理，不在这里猜。
+    declared_types: dict[str, str] = {}
+    for draft_row in raw_rows:
+        if not isinstance(draft_row, dict):
+            continue
+        draft_name = str(draft_row.get("name") or "").strip()
+        draft_type = str(draft_row.get("type") or "").strip()
+        if not draft_name or draft_type not in NODE_TYPES:
+            continue
+        declared_types[draft_name] = draft_type if draft_name not in declared_types else ""
 
     # 模型偶尔把属性行写进 `nodes` 里（长章节更容易）：一行有 node/property 没有 type，
     # 那就是属性，不是节点。按**形状**认，不按数组位置认——否则这些行会被当成
@@ -199,6 +246,15 @@ def parse_nodes(payload: dict, text: str) -> dict:
             _diagnostic(rejected, path + ['participants'], name,
                         '事件必须给出参与者：人物引用或本批 @索引；确无参与者或原文未交代时给空数组')
             continue
+        if node_type == 'event':
+            offender = _participant_domain_error(row.get('participants') or [], raw_rows, declared_types)
+            if offender is not None:
+                index, reference, kind = offender
+                _diagnostic(rejected, path + ['participants', index], name,
+                            f'事件参与者只能是人物或群体：{reference} 是本批的'
+                            f'{PARTICIPANT_TYPE_LABELS.get(kind, kind)}节点；地点请用事件自身的地点属性，'
+                            f'物品请用持有者属性')
+                continue
         is_container = node_type in {'scene', 'big_event', 'storyline'}
         quote_entries = [(index, str(item)) for index, item in enumerate(row.get('quotes') or []) if str(item).strip()]
         quotes = [quote for _, quote in quote_entries]

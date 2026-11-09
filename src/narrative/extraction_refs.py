@@ -6,7 +6,10 @@ import re
 from collections import defaultdict
 from copy import deepcopy
 
-ENTITY_TYPES = {'person', 'group', 'item', 'location'}
+# 事件参与者只能是"参与事件的主体"：人和群体。地点有事件自身的地点属性，
+# 物品有持有者，二者混进参与者等于把同一条事实写两遍。
+PARTICIPANT_TYPES = {'person', 'group'}
+KIND_LABELS = {'person': '人物', 'group': '群体', 'item': '物品', 'location': '地点'}
 MOMENT_TYPES = {'event', 'action'}
 ID_PATTERN = re.compile(r'[PGILEASTBN][0-9]+(?:\.[0-9]+)*\Z')
 
@@ -30,7 +33,8 @@ class References:
         for ref, row in self.current.items():
             self.names[row.get('name')].append((ref, row, False))
 
-    def resolve(self, value, *, allowed=None, context=None, optional=False, literal=False):
+    def resolve(self, value, *, allowed=None, context=None, optional=False, literal=False,
+                allowed_note=None):
         if value is None or value == '':
             if optional:
                 return ''
@@ -53,9 +57,13 @@ class References:
             if not candidates and literal:
                 return value
         valid = []
+        rejected_kinds = []
         for ref, row, local in candidates:
             kind = row.get('type') if local else row.get('node_type')
-            if row.get('retracted') or allowed is not None and kind not in allowed:
+            if row.get('retracted'):
+                continue
+            if allowed is not None and kind not in allowed:
+                rejected_kinds.append(kind)
                 continue
             if context is not None and row.get('context_id', 'canon') != context:
                 continue
@@ -70,6 +78,11 @@ class References:
         for identity, ref, _local in valid:
             unique.setdefault(identity, ref)
         if len(unique) != 1:
+            # 引用确实指向一个节点、只是类型不对时，说清是哪种类型不对，
+            # 而不是让它看起来像"引用不存在"。
+            if allowed_note and rejected_kinds and not valid:
+                kinds = '、'.join(dict.fromkeys(KIND_LABELS.get(kind, str(kind)) for kind in rejected_kinds))
+                raise ValueError(f'引用{value}是{kinds}节点：{allowed_note}')
             raise ValueError(f'引用{value}不存在、歧义或类型/语境不符；请使用正式ID或明确@索引')
         return next(iter(unique.values()))
 
@@ -104,7 +117,9 @@ def bind(data: dict, snapshot: dict, records: list[dict]) -> dict:
         child_kind = {'storyline':'big_event','big_event':'scene','scene':'event','event':'action'}.get(row['type'])
         row['children'] = [ref(value, name, path + ['children', index], allowed=({"scene", "event"} if row["type"] == "scene" else {child_kind}) if child_kind else set(), context=context)
                            for index, value in enumerate(row.get('children', []))]
-        row['participants'] = [ref(value, name, path + ['participants', index], allowed=ENTITY_TYPES) for index, value in enumerate(row.get('participants', []))]
+        row['participants'] = [ref(value, name, path + ['participants', index], allowed=PARTICIPANT_TYPES,
+                                   allowed_note='事件参与者只能是人物或群体；地点请用事件自身的地点属性，物品请用持有者属性')
+                               for index, value in enumerate(row.get('participants', []))]
         row['participants_not_in_text'] = []
     types = {row['id']: row.get('value_type') for row in records if row.get('kind') == 'property_definition'}
     for property_index, row in enumerate(result.get('properties', [])):

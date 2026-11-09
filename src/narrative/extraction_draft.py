@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-DRAFT_VERSION = "conversation-draft/19"
+DRAFT_VERSION = "conversation-draft/20"
 # How many info notices preview repeats verbatim; the rest is only counted.
 INFO_PREVIEW_LIMIT = 5
 
@@ -27,7 +27,7 @@ RESULT_SCHEMA = {
                 "new_occurrence": {"type": "boolean", "description": "同名但原文明确是另一次发生时声明"},
                 "context_id": {"type": "string"},
                 "participants": {"type": "array", "items": {"type": "string"},
-                    "description": "事件的参与者必填：原文明示出场或有实际作用的人物引用（含次要、无名人物，不含地点）；确无参与者或原文未交代时给空数组，程序据此视为无或未知"},
+                    "description": "事件的参与者必填：人物或群体节点引用（正式 ID 或本批 @索引），含次要、无名人物；地点用事件自身的地点属性、物品用持有者属性，不写进参与者；确无参与者或原文未交代时给空数组"},
                 "children": {"type": "array", "items": {"type": "string"}, "description": "容器直接子项ID/@，可归入已有子项而不重列原文；按T→B→S→E→A校验"},
                 "scene": {"type": "string", "description": "同语境场景的正式ID或本批@序号；唯一名亦可"},
                 "event": {"type": "string", "description": "action直属事件正式ID或本批@序号；唯一名亦可，仅按需动作提取使用"},

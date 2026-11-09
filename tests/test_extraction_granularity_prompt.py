@@ -27,7 +27,7 @@ def test_standard_and_fine_are_distinct_but_both_leave_actions_opt_in(project):
     assert "上层容器由成员派生人物与地点集合" in standard
     assert "场景不拥有单一地点" in standard
     assert all("标准与精细粒度都默认不提取动作" in text for text in (standard, fine))
-    assert DRAFT_VERSION == "conversation-draft/19"
+    assert DRAFT_VERSION == "conversation-draft/20"
     property_fields = RESULT_SCHEMA["properties"]["properties"]["items"]["properties"]
     node_fields = RESULT_SCHEMA["properties"]["nodes"]["items"]["properties"]
     assert "事件地点使用属性名‘地点’" in property_fields["property"]["description"]

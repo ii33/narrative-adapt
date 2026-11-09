@@ -27,7 +27,7 @@ def install(ops):
         {"type": "event", "name": "茶馆等候", "scene": "@8", "participants": ["@3"], "quotes": [QUOTES[1]]},
         {"type": "event", "name": "走入后院", "scene": "@9", "participants": ["@1"], "quotes": [QUOTES[2]]},
         {"type": "action", "name": "同行停下", "event": "@10", "participants": ["@2"], "quotes": [QUOTES[0]]},
-        {"type": "storyline", "name": "会合篇章", "closing_quote": "篇章完。", "children": ["@7"]},
+        {"type": "storyline", "name": "会合篇章", "children": ["@7"]},
     ]
     props = [{"node": f"@{10+i}", "property": "地点", "op": "set", "value": f"@{4+i}", "value_type": "node", "scope": "world", "at_event": f"@{10+i}", "quotes": [quote]} for i, quote in enumerate(QUOTES)]
     payload = {"nodes": nodes, "properties": props}
@@ -133,13 +133,21 @@ def test_related_view_keeps_item_holder_one_hop_but_never_follows_person_dossier
     from test_item_possession import SENTENCES, record, setup
     sid, names, item = setup(project)
     snapshot = project.graph_snapshot()
-    event = dict(next(row for row in snapshot["nodes"] if row["id"] == names[SENTENCES[2]]), participants=[item["id"]])
+    event = dict(next(row for row in snapshot["nodes"] if row["id"] == names[SENTENCES[2]]))
     records = record(sid, names, names["甲"], event_index=1)
     records += [{"kind": "property_definition", "id": "朋友", "value_type": "node", "cardinality": "one"},
                 {"kind": "property_change", "op": "set", "node_id": names["甲"], "property_id": "朋友", "value": names["乙"], "scope": "world",
                  "event_id": event["id"], "disclosure": event["disclosure"], "evidence": event["evidence"]}]
     result = project.apply_changes([item, event], records, snapshot["revision"], "一跳物品持有者读取fixture")
     assert result["status"] == "accepted", result
+    # 物品当参与者如今只可能留在存量资料里（新写入会被 participants 取值域拦下），
+    # 所以按 test_item_possession 的授权隔离夹具写法直接落库；读路径必须照旧工作。
+    import json
+    with project.project.store.connect(write=True) as db:
+        (data,) = db.execute("SELECT data FROM objects WHERE id=?", (event["id"],)).fetchone()
+        stored = json.loads(data)
+        stored["participants"] = [item["id"]]
+        db.execute("UPDATE objects SET data=? WHERE id=?", (json.dumps(stored, ensure_ascii=False), event["id"]))
     related = set(related_nodes(project.graph_snapshot(), event["id"], project.property_records()))
     assert item["id"] in related and names["甲"] in related
     assert names["乙"] not in related

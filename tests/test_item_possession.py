@@ -10,6 +10,9 @@ from agent_fixtures import project as project
 
 TEXT = "一块石头在地上。甲捡起石头。甲把石头交给乙。乙放下石头。"
 SENTENCES = TEXT.split("。")[:-1]
+# 逐句的参与者（事件必填）：只放原文里真的在场的人。第一句只交代石头落地，
+# 没有人物出场，给空数组即"确无参与者"。
+PARTICIPANTS = ([], ["甲"], ["甲", "乙"], ["乙"])
 
 
 def setup(project):
@@ -20,8 +23,9 @@ def setup(project):
         {"type": "person", "name": "乙", "quotes": [SENTENCES[2] + "。"]},
     ]
     nodes += [
-        {"type": "event", "name": sentence, "scene": "石头流转", "quotes": [sentence + "。"]}
-        for sentence in SENTENCES
+        {"type": "event", "name": sentence, "scene": "石头流转", "location": "未知",
+         "quotes": [sentence + "。"], "participants": list(participants)}
+        for sentence, participants in zip(SENTENCES, PARTICIPANTS, strict=True)
     ]
     assert (
         project.submit_extraction(sid, {"nodes": nodes, "properties": []})["status"] == "accepted"
@@ -182,6 +186,34 @@ def test_atomic_transfer_and_explicit_unowned_keep_reading_cuts_historical(proje
         state = project.property_state("I1", "持有者", at=ids[SENTENCES[i]])
         assert state["state"]["value"] == value
     assert project.property_state("I1", "持有者")["state"]["value"] == "无"
+
+
+def test_legacy_non_person_participant_reads_but_the_next_write_is_rejected(project):
+    """存量资料里遗留的物品参与者：读得出来，改写时才被 participants 取值域拒掉。"""
+    sid, ids, item = setup(project)
+    assert project.apply_changes(
+        [item], record(sid, ids, ids["甲"], value_type="node"),
+        project.graph_project_info()["revision"], reason="存量夹具先落物品",
+    )["status"] == "accepted"
+    event = next(row for row in project.graph_snapshot()["nodes"] if row["node_type"] == "event")
+    # Authorized isolated legacy fixture: 旧版本写下的正式资料，物品也在参与者里。
+    with project.project.store.connect(write=True) as db:
+        (data,) = db.execute("SELECT data FROM objects WHERE id=?", (event["id"],)).fetchone()
+        stored = json.loads(data) | {"participants": [ids["甲"], item["id"]]}
+        db.execute("UPDATE objects SET data=? WHERE id=?", (json.dumps(stored, ensure_ascii=False), event["id"]))
+    # 读：节点快照、当前状态、改编视图都照旧工作。
+    assert next(row for row in project.graph_snapshot()["nodes"]
+                if row["id"] == event["id"])["participants"] == [ids["甲"], item["id"]]
+    assert project.property_state(item["id"], "持有者")["state"] == {"kind": "known", "value": ids["甲"]}
+    assert any(node["id"] == event["id"] for node in project.sync_adaptation()["nodes"])
+    # 检查器只报告，不改写：存量参与者被诊断为 PARTICIPANTS，资料一个字节不动。
+    assert any(issue["code"] == "PARTICIPANTS" for issue in project.check_project()["issues"])
+    before = copy.deepcopy(project.graph_snapshot())
+    replaced = project.apply_changes(
+        [stored], [], project.graph_project_info()["revision"], reason="存量参与者改写")
+    assert replaced["status"] == "staged"
+    assert any(problem["code"] == "PARTICIPANTS" for problem in replaced["problems"])
+    assert project.graph_snapshot() == before
 
 
 def test_legacy_missing_holder_is_diagnosed_without_synthesizing_a_record(project):

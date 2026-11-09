@@ -26,7 +26,7 @@ def test_reference_prompt_is_concise_and_does_not_require_repeating_existing_nod
 
 
 def test_documented_reference_example_uses_only_current_draft_fields():
-    document=Path("docs/AGENT_API.md").read_text(encoding="utf-8")
+    document=Path("docs/features/AGENT_API.md").read_text(encoding="utf-8")
     examples=[json.loads(value) for value in re.findall(r"```json\n(.*?)\n```",document,re.S)]
     draft=next(value for value in examples if "nodes" in value and "properties" in value)
     allowed_nodes=RESULT_SCHEMA["properties"]["nodes"]["items"]["properties"]

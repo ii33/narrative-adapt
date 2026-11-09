@@ -81,6 +81,35 @@ def test_references_report_exact_participant_array_position(project):
                and '@99' in row['message'] for row in result['diagnostics'])
 
 
+@pytest.mark.parametrize('kind,name,label', [('location', '会议室', '地点'), ('item', '钥匙', '物品')])
+def test_non_subject_entities_are_rejected_as_participants_with_a_reason(project, kind, name, label):
+    """参与者的语义是"参与事件的主体"：地点与物品各有自己的属性族，不能顶替。"""
+    ops, source, text = project
+    raw = draft(text)
+    raw['nodes'].append({'type': kind, 'name': name, 'quotes': [text]})
+    raw['nodes'][3]['participants'] = ['@1', '@5']
+    result = ops.submit_extraction(source, raw)
+    assert result['status'] == 'staged'
+    problem = next(row for row in result['diagnostics']
+                   if row.get('path') == ['nodes', 3, 'participants', 1])
+    assert problem['code'] == 'EXTRACTION_CONTENT'
+    assert f'{label}节点' in problem['message'] and '人物或群体' in problem['message']
+    assert '持有者属性' in problem['message']
+    assert not ops.graph_snapshot()['nodes']
+
+
+def test_group_is_a_valid_event_participant(project):
+    ops, source, text = project
+    raw = draft(text)
+    raw['nodes'].append({'type': 'group', 'name': '与会者', 'quotes': ['宣布']})
+    raw['nodes'][3]['participants'] = ['@1', '@5']
+    result = ops.submit_extraction(source, raw)
+    assert result['status'] == 'accepted', result
+    nodes = {n['name']: n for n in ops.graph_snapshot()['nodes']}
+    event = nodes['会议结束']
+    assert set(event['participants']) == {nodes['林岚']['id'], nodes['与会者']['id']}
+
+
 def test_preview_preserves_related_paths_metadata(project):
     ops, source, text = project
     raw = draft(text)
