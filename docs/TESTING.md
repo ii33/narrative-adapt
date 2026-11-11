@@ -46,6 +46,14 @@ Start-Process .venv\Scripts\python.exe -ArgumentList '-m','pytest','-q' `
 5. **并行安全**：默认套件多进程并行，测试不得依赖执行顺序、模块级可变状态、固定端口或共享临时路径，也不要用固定 sleep 等异步结果。
 6. **提示词断言用要点**。关键词/短语组合，不逐字锁定整句；改提示词同步升 `version`，见 [PROMPT_STYLE.md](PROMPT_STYLE.md)。
 
+## 已知偶发
+
+- `tests/test_project_changes.py::test_project_runtime_registers_and_dispatches_general_writes_only_in_active_task`：
+  `-n auto` 下偶发失败（一次全量里挂在“只有活动任务才接受通用写入”的断言上）。判据：单跑该用例必过、
+  `pytest tests/test_project_changes.py -n 0` 整文件必过，只有并发跑才偶发——属测试隔离问题
+  （共享状态或时序），不是产品缺陷。**暂不修**：修法要么加 `serial` 标记、要么找出被共享的状态，
+  需要单独一轮排查。遇到它先按上面的判据复核，不要当成回归。
+
 ## 维护
 
 - 新增非数据测试文件时，把模块名加入 `tests/conftest.py::INTEGRATION_MODULES`（或让其命中 `ui`/`native` 规则），默认收集会跳过；需要时仍可显式运行。
