@@ -66,7 +66,8 @@ class PropertyStore:
     def audit(self, node_ids=None):
         from .property_audit import audit_properties
         snapshot = self.store.snapshot()
-        return audit_properties(self.accepted_records(), snapshot['nodes'], node_ids=node_ids, categories=property_categories.load(self.store))
+        return audit_properties(self.accepted_records(), snapshot['nodes'], node_ids=node_ids,
+                                categories=property_categories.load(self.store), snapshot=snapshot)
 
     def categories(self):
         return property_categories.load(self.store)

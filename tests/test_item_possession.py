@@ -502,3 +502,51 @@ def test_prepared_batch_detects_clear_of_only_current_holder(project):
     assert (
         next(r for r in project.property_records() if r["id"] == "holder0")["op"] == "set"
     )
+
+
+def _audit_codes(project, code):
+    return [row for row in project.property_audit()["issues"] if row["code"] == code]
+
+
+def test_audit_sees_a_world_holder_record_and_stays_quiet(project):
+    """防误报：有 world 持有者记录的物品，不应在属性审计里被报「必须记录持有状态」。
+
+    历史 bug：审计直接拿原始记录跑 item_possession，而它只在"投影行带 derived 标记"时
+    才认持有记录，于是每件物品都被判成没记持有者（真实工程的 13 件全中）。
+    """
+    sid, ids, item = setup(project)
+    assert project.apply_changes(
+        [item], record(sid, ids, ids["甲"], value_type="node"),
+        project.graph_project_info()["revision"], reason="有持有者记录",
+    )["status"] == "accepted"
+    assert _audit_codes(project, "ITEM_HOLDER_REQUIRED") == []
+    assert project.property_state(item["id"], "持有者")["state"] == {"kind": "known", "values": [ids["甲"]]}
+
+
+def _legacy_item(project, item, records=()):
+    """Authorized isolated legacy fixture：直接写库，模拟旧版本留下的真实状态。"""
+    revision = project.graph_project_info()["revision"]
+    with project.project.store.connect(write=True) as db:
+        db.execute("INSERT INTO objects(id,kind,data,accepted_revision) VALUES (?,?,?,?)",
+                   (item["id"], "node", json.dumps(item, ensure_ascii=False), revision))
+        for row in records:
+            db.execute("INSERT INTO property_records(id,kind,data,accepted_revision) VALUES (?,?,?,?)",
+                       (row["id"], row["kind"], json.dumps(row, ensure_ascii=False), revision))
+
+
+def test_audit_still_reports_an_item_without_any_holder_record(project):
+    """反向：真没记持有者的物品必须继续报——不能修成"永不报"。"""
+    _sid, _ids, item = setup(project)
+    _legacy_item(project, item)
+    identifiers = [row["node_id"] for row in _audit_codes(project, "ITEM_HOLDER_REQUIRED")]
+    assert identifiers == [item["id"]]
+
+
+def test_audit_still_reports_a_cognition_only_holder(project):
+    """反向：只有认知持有者不算 world 持有状态，仍然要报。"""
+    sid, ids, item = setup(project)
+    cognition = record(sid, ids, ids["甲"], value_type="node", scope="cognition")
+    _legacy_item(project, item, cognition)
+    assert project.property_records()
+    identifiers = [row["node_id"] for row in _audit_codes(project, "ITEM_HOLDER_REQUIRED")]
+    assert identifiers == [item["id"]]

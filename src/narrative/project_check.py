@@ -138,7 +138,8 @@ def check(ops) -> dict:
         categories = property_categories.normalize_vocabulary(json.loads(category_config)) if category_config else None
     except json.JSONDecodeError:
         categories = None
-    issues.extend(audit_properties(audit_rows, active_nodes, categories=categories, usage_records=records)["issues"])
+    issues.extend(audit_properties(audit_rows, active_nodes, categories=categories, usage_records=records,
+                                   snapshot=enriched)["issues"])
     objects = {row["id"]: row for row in graph["objects"]}
     sources = {row["id"]: row for row in graph["sources"]}
     located = [_locate(issue, objects, indexed, sources) for issue in issues]

@@ -94,6 +94,7 @@ def audit_properties(
     node_ids: set[str] | None = None,
     categories: dict | None = None,
     usage_records: list[dict] | None = None,
+    snapshot: dict | None = None,
 ) -> dict:
     """Audit property records, optionally limited to the given nodes.
 
@@ -438,7 +439,10 @@ def audit_properties(
 
     from .item_possession import item_possession_issues
 
-    for finding in item_possession_issues(list(names.values()), records):
+    # 持有状态必须按“当前状态投影”判断，而不是看传进来的记录行上有没有 derived 标记：
+    # 直接审计原始记录时行上没有 derived，会把**每一件物品**都判成“没记持有者”。
+    # 传 snapshot 让 item_possession 自己按事件顺序投影（读判据，不改数据）。
+    for finding in item_possession_issues(list(names.values()), records, snapshot=snapshot):
         identifier = finding.get("object_id")
         if node_ids is not None and identifier not in node_ids:
             continue
