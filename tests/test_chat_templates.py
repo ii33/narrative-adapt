@@ -11,6 +11,16 @@ from narrative.prompt_defaults import DEFAULT_PROMPTS
 from narrative.tool_loading import bind_tool_loader, load_tools
 
 
+@pytest.fixture(autouse=True)
+def _isolate_app_templates(tmp_path, monkeypatch):
+    """本文件的每个用例都把应用级模板文件指到 tmp：绝不碰真实 ~/.narrative。
+
+    xdist 下 14 个 worker 并行，若共用用户目录同一个文件，原子替换会互相打架，
+    还可能把测试写的模板留进用户真实配置里。
+    """
+    monkeypatch.setenv("NARRATIVE_CHAT_TEMPLATES_FILE", str(tmp_path / "app-templates.json"))
+
+
 @pytest.fixture
 def ops(tmp_path, monkeypatch):
     monkeypatch.setenv("NARRATIVE_PROVIDER_DB", str(tmp_path / "providers.sqlite3"))
@@ -117,8 +127,7 @@ CUSTOM = {"id": "screenplay-fast", "name": "剧本快写", "description": "只�
           "tools": ["read_source", "submit_script_unit"], "prompt_keys": ["system", "writing"]}
 
 
-def test_app_scope_template_is_listed(ops, tmp_path, monkeypatch):
-    monkeypatch.setenv("NARRATIVE_CHAT_TEMPLATES_FILE", str(tmp_path / "app-templates.json"))
+def test_app_scope_template_is_listed(ops):
     saved = save(ops, scope="app", **CUSTOM)
     rows = {row["id"]: row for row in chat_templates.list_all(ops)}
     assert rows["screenplay-fast"]["scope"] == "app"
@@ -126,8 +135,7 @@ def test_app_scope_template_is_listed(ops, tmp_path, monkeypatch):
     assert saved["system_prompt"].startswith(DEFAULT_PROMPTS["system"]["text"].strip()[:20])
 
 
-def test_project_scope_overrides_the_same_app_template(ops, tmp_path, monkeypatch):
-    monkeypatch.setenv("NARRATIVE_CHAT_TEMPLATES_FILE", str(tmp_path / "app-templates.json"))
+def test_project_scope_overrides_the_same_app_template(ops):
     save(ops, scope="app", **CUSTOM)
     save(ops, scope="project", **{**CUSTOM, "name": "工程里的剧本快写"})
     resolved = chat_templates.resolve("screenplay-fast", ops)
@@ -136,8 +144,7 @@ def test_project_scope_overrides_the_same_app_template(ops, tmp_path, monkeypatc
     assert len(rows) == 1 and rows[0]["scope"] == "project"
 
 
-def test_builtins_cannot_be_deleted_or_overwritten(ops, tmp_path, monkeypatch):
-    monkeypatch.setenv("NARRATIVE_CHAT_TEMPLATES_FILE", str(tmp_path / "app-templates.json"))
+def test_builtins_cannot_be_deleted_or_overwritten(ops):
     with pytest.raises(ValueError, match="内置模板不可覆盖"):
         save(ops, scope="app", **{**CUSTOM, "id": "extract"})
     from narrative.chat_templates import delete_custom
@@ -161,8 +168,7 @@ def test_unknown_prompt_key_is_rejected(ops):
                                      "system_prompt": "你是快写助手。"})["system_prompt"] == "你是快写助手。"
 
 
-def test_chat_built_from_a_custom_template_freezes_its_prompt_and_tools(ops, tmp_path, monkeypatch):
-    monkeypatch.setenv("NARRATIVE_CHAT_TEMPLATES_FILE", str(tmp_path / "app-templates.json"))
+def test_chat_built_from_a_custom_template_freezes_its_prompt_and_tools(ops):
     saved = save(ops, scope="app", **CUSTOM)
     chat = store(ops).create("自定义会话", template=chat_templates.snapshot("screenplay-fast", ops))
     frozen = store(ops).template(chat["id"])

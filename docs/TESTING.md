@@ -54,6 +54,15 @@ Start-Process .venv\Scripts\python.exe -ArgumentList '-m','pytest','-q' `
   （共享状态或时序），不是产品缺陷。**暂不修**：修法要么加 `serial` 标记、要么找出被共享的状态，
   需要单独一轮排查。遇到它先按上面的判据复核，不要当成回归。
 
+- 全量并发收集偶发 `Different tests were collected between gwN and gwM`（差异集合通常是某一个测试文件）：
+  xdist 只有在**某个 worker 的收集阶段出错**时才会这么报，所以先按"import 期副作用"排查。已知的排查结论与复现条件：
+  `src/narrative/chat_templates.py` 与 `tests/test_chat_templates.py` 在 import 期**没有任何 I/O**（模块顶层只有常量赋值，
+  应用级模板文件是惰性读取，写只在保存时发生）；该文件曾有一个真实的并发隐患——用例把模板写进真实
+  `~/.narrative/chat-templates.json`，14 个 worker 同时原子替换同一个用户文件会互相打架，现已改为每个用例
+  `monkeypatch.setenv("NARRATIVE_CHAT_TEMPLATES_FILE", tmp_path/...)` 隔离。复现条件：让多个 worker 写同一个应用级配置文件。
+  判据：`pytest --co -q -n 8` 连跑收集数一致、`pytest -q` 连跑不出现该消息，即为已消除；若再现，先查该轮是否有 worker
+  报告过 `ERROR`/导入异常（`--tb=short -n 0` 复收集该文件），不要当成随机性。
+
 ## 维护
 
 - 新增非数据测试文件时，把模块名加入 `tests/conftest.py::INTEGRATION_MODULES`（或让其命中 `ui`/`native` 规则），默认收集会跳过；需要时仍可显式运行。
