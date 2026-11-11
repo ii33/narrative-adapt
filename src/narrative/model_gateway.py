@@ -28,6 +28,14 @@ COMPACTION_MODEL = "__narrative_compaction__"
 RUNTIME_EFFORTS = {"low", "medium", "high"}
 
 
+def _tools_signature(tools):
+    """本轮实际发出的工具数与顺序指纹（名字按发送顺序用 `,` 连接后取 sha1 前 8 位）。"""
+    if not isinstance(tools, list):
+        return None, None
+    names = [str((tool.get("function") or {}).get("name") or "") for tool in tools if isinstance(tool, dict)]
+    return len(names), hashlib.sha1(",".join(names).encode()).hexdigest()[:8]
+
+
 def adapt_request(body: dict, settings) -> dict:
     body = dict(body)
     output_limit = (
@@ -298,6 +306,7 @@ class ModelGateway:
                         choice = payload.get("tool_choice")
                         if isinstance(choice, dict) and (choice.get("function") or {}).get("name") not in allowed:
                             raise ValueError("当前任务未授权所指定的工具")
+                    tools_count, tools_hash = _tools_signature(payload.get("tools"))
                     body = json.dumps(adapt_request(payload, settings), ensure_ascii=False).encode()
                     headers = gateway._upstream_headers()
                     url = urlsplit(settings.base_url)
@@ -316,6 +325,10 @@ class ModelGateway:
                         gateway._connection_epochs[connection] = turn_epoch
                         usage_record = {
                             "request_id": f"request-{len(gateway._usage_records) + 1}",
+                            # 工具数组是 prompt 的一部分：变了就会让其后所有 token 失效。
+                            # 记下数量与顺序指纹，排查缓存回退时不用再靠推断。
+                            "tools_count": tools_count,
+                            "tools_hash": tools_hash,
                             "usage_sampled_at": None,
                             "usage": None,
                             "complete": False,
@@ -617,6 +630,8 @@ class ModelGateway:
                         key: record[key]
                         for key in (
                             "request_id",
+                            "tools_count",
+                            "tools_hash",
                             "usage_sampled_at",
                             "purpose",
                             "max_tokens",

@@ -10,10 +10,41 @@
 | Qt UI | `ui` | QML 页面、交互、渲染、桌面启动 | `pytest -m ui -n 4` |
 | 真实运行时 | `native` | 真实 SDK/HTTP、宿主进程、会话、安全隔离 | `pytest -m native` |
 | 非数据集成 | `integration` | 传输与协议、运行时、媒体等重而偏管线/展示的用例 | `pytest -m integration` |
+| 慢用例 | `slow` | 单例 >8s、setup 过半、真实图像/音频/文档 IO 或启动子进程的用例 | `pytest --slow`（默认排除） |
 
-默认 `addopts` 排除三类标记并启用 `-n auto` 并行；标记与非数据模块清单在 `tests/conftest.py`。默认运行还会跳过这些模块的收集，避免为 PySide6/SDK 付导入成本。
+默认 `addopts` 排除 ui／native／integration／slow 四类标记并启用 `-n auto` 并行；标记与非数据模块清单在 `tests/conftest.py`。默认运行还会跳过这些模块的收集，避免为 PySide6/SDK 付导入成本。
 
 **边界原则**：默认套件只回答“数据是否被正确读写、推导和拒绝”。UI、传输、日志、统计等不产生数据错误的区域不进默认套件，靠显式错误与人工冒烟判断。提示词却是数据的一部分：提示词断言留在默认套件，但只校验要点，不逐字锁整句。非默认测试不删除，保持可运行。
+
+## 快速门禁与全量
+
+日常提交只跑**门禁**，需要时再跑**全量**：
+
+```
+pytest            # 门禁：排除 ui / native / integration / slow
+pytest --slow      # 全量：默认集 + slow（仍不含 ui / native / integration）
+```
+
+`pytest -m "not ui and not native and not integration"` 与 `--slow` 等价，留作显式写法。
+
+**什么时候标 `slow`**（判据，避免随手标，也避免该标不标）：
+
+- 单例耗时 **>8s**；或
+- 该用例的 **setup 占自身耗时 >50%**（典型是每个用例重建工程/数据库）；或
+- 涉及**真实图像、音频、文档编解码**，或要**启动子进程**；或
+- 整文件平均 **>5s/例**且文件里没有可拆出来的纯函数用例（整模块标）。
+
+**谁来保证不漏网**：`tests/test_slow_marking.py`。它是可判定的，不靠人记：
+
+1. `slow` 必须注册在 `pyproject.toml` 的 `markers` 里；
+2. 清单里的慢模块必须带模块级 `pytestmark = pytest.mark.slow`；
+3. `test_storyboard_*.py` 一律算慢模块；
+4. 默认集里导入重库（`subprocess`／`PIL`／`pypdf`／`reportlab`／`docx`／`mutagen`／`imageio`／`fontTools`／`wave`）的模块，必须标慢或在 `EXCEPTIONS` 登记理由；
+5. `EXCEPTIONS` 不许腐坏：文件要存在、确实导入重库、理由非空、且没有被同时标慢。
+
+新增重用例时，先问一句「它会不会把门禁拖慢 8 秒以上」；会就标 `slow`，否则第五条规则不会放过它。
+
+**当前实测**（16 核本机）：门禁 __GATE__；全量 `--slow` __FULL__。
 
 ## 运行方式
 
@@ -63,10 +94,22 @@ Start-Process .venv\Scripts\python.exe -ArgumentList '-m','pytest','-q' `
   判据：`pytest --co -q -n 8` 连跑收集数一致、`pytest -q` 连跑不出现该消息，即为已消除；若再现，先查该轮是否有 worker
   报告过 `ERROR`/导入异常（`--tb=short -n 0` 复收集该文件），不要当成随机性。
 
+- UI 用例的滚动等待超时 `tests/test_chat_scroll.py` 抛 `AssertionError: Transcript did not settle: y=… height=…`：
+  出现在**高负载/并行**的全量里（实测那一轮全量 774s，平时约 310s；同机器上另有任务在跑），等的是"内容滚到底"
+  这个可观察条件，超时前 `y` 仍小于 `contentHeight`。判据：`pytest tests/test_moment_involvement.py -n 0` 必过、
+  `-n auto` 单文件也过，只有全量高负载时才偶发——属时序/资源竞争，不是产品缺陷。复核步骤：先单跑该文件；
+  全量再复现时看日志里的 `y/height` 是否只差一屏（说明是等待窗口不够，而不是渲染错位），必要时把等待上限调大，
+  不要改成固定 sleep。
+
+
 ## 维护
 
 - 新增非数据测试文件时，把模块名加入 `tests/conftest.py::INTEGRATION_MODULES`（或让其命中 `ui`/`native` 规则），默认收集会跳过；需要时仍可显式运行。
 - 不通过删除既有测试来提速；先判断它属于哪一层，再决定是否移出默认。
 - 测试产物放用例自己的 `tmp_path`；不要写入仓库或用户目录，也不要依赖上一次运行留下的数据。
 - 默认套件保持分钟级（并行）；明显变慢时先查是否又引入了“每例建库”“真实等待”或未分层的重集成用例。
+- 排查「缓存命中率低」时，先看任务审计 `metadata-*.json` 的 `model_requests[].tools_hash` 与 `tools_count`：
+  这两个字段是每条请求实际发出的工具数组的顺序指纹。**`tools_hash` 变了就说明工具数组变了**，其后所有 token 都要重算，
+  缓存回退通常就发生在这一刻（`load_tools` 扩容、模板会话冻结名单与实际允许集合不一致等）；哈希不变却仍回退，才去看历史重写
+  （compaction）或会话重启。
 - 文档引用代码只写 `文件.py::符号`，不写 `文件.py:行号`：行号随改动失效，符号名由 `tests/test_doc_consistency.py` 校验存在。
