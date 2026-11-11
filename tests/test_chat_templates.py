@@ -101,3 +101,73 @@ def test_override_applies_to_the_next_send_then_expires():
     assert router.route("storyboard") == "storyboard"
     with pytest.raises(ValueError):
         router.override("screenplay", "not-a-template")
+
+
+# ---------------------------------------------------------------- 阶段 2：助手编辑模板
+def save(ops, **kwargs):
+    from narrative.chat_templates import save_custom, validate
+
+    scope = kwargs.pop("scope")
+    payload = validate(kwargs)
+    save_custom(scope, payload["id"], payload, ops)
+    return payload
+
+
+CUSTOM = {"id": "screenplay-fast", "name": "剧本快写", "description": "只写正文",
+          "tools": ["read_source", "submit_script_unit"], "prompt_keys": ["system", "writing"]}
+
+
+def test_app_scope_template_is_listed(ops, tmp_path, monkeypatch):
+    monkeypatch.setenv("NARRATIVE_CHAT_TEMPLATES_FILE", str(tmp_path / "app-templates.json"))
+    saved = save(ops, scope="app", **CUSTOM)
+    rows = {row["id"]: row for row in chat_templates.list_all(ops)}
+    assert rows["screenplay-fast"]["scope"] == "app"
+    assert rows["screenplay-fast"]["tool_count"] == 2
+    assert saved["system_prompt"].startswith(DEFAULT_PROMPTS["system"]["text"].strip()[:20])
+
+
+def test_project_scope_overrides_the_same_app_template(ops, tmp_path, monkeypatch):
+    monkeypatch.setenv("NARRATIVE_CHAT_TEMPLATES_FILE", str(tmp_path / "app-templates.json"))
+    save(ops, scope="app", **CUSTOM)
+    save(ops, scope="project", **{**CUSTOM, "name": "工程里的剧本快写"})
+    resolved = chat_templates.resolve("screenplay-fast", ops)
+    assert resolved["scope"] == "project" and resolved["name"] == "工程里的剧本快写"
+    rows = [row for row in chat_templates.list_all(ops) if row["id"] == "screenplay-fast"]
+    assert len(rows) == 1 and rows[0]["scope"] == "project"
+
+
+def test_builtins_cannot_be_deleted_or_overwritten(ops, tmp_path, monkeypatch):
+    monkeypatch.setenv("NARRATIVE_CHAT_TEMPLATES_FILE", str(tmp_path / "app-templates.json"))
+    with pytest.raises(ValueError, match="内置模板不可覆盖"):
+        save(ops, scope="app", **{**CUSTOM, "id": "extract"})
+    from narrative.chat_templates import delete_custom
+
+    with pytest.raises(ValueError, match="内置模板不可删除"):
+        delete_custom("app", "extract", ops)
+    # 内置仍然只读可用
+    assert chat_templates.resolve("extract", ops)["builtin"] is True
+
+
+def test_unknown_tool_names_are_rejected_and_listed(ops):
+    with pytest.raises(ValueError, match="不存在的工具.*read_nothing"):
+        save(ops, scope="app", **{**CUSTOM, "tools": ["read_source", "read_nothing"]})
+
+
+def test_unknown_prompt_key_is_rejected(ops):
+    with pytest.raises(ValueError, match="不存在的提示词条目.*no_such_prompt"):
+        save(ops, scope="app", **{**CUSTOM, "prompt_keys": ["system", "no_such_prompt"]})
+    # 自由文本形态允许：不需要 prompt_keys。
+    assert save(ops, scope="app", **{**CUSTOM, "id": "free-text", "prompt_keys": None,
+                                     "system_prompt": "你是快写助手。"})["system_prompt"] == "你是快写助手。"
+
+
+def test_chat_built_from_a_custom_template_freezes_its_prompt_and_tools(ops, tmp_path, monkeypatch):
+    monkeypatch.setenv("NARRATIVE_CHAT_TEMPLATES_FILE", str(tmp_path / "app-templates.json"))
+    saved = save(ops, scope="app", **CUSTOM)
+    chat = store(ops).create("自定义会话", template=chat_templates.snapshot("screenplay-fast", ops))
+    frozen = store(ops).template(chat["id"])
+    assert frozen["system_prompt"] == saved["system_prompt"]
+    assert frozen["tools"] == saved["tools"]
+    # 改了自定义模板，已建会话仍不变（冻结语义对自定义模板同样成立）。
+    save(ops, scope="app", **{**CUSTOM, "tools": ["read_source"]})
+    assert store(ops).template(chat["id"]) == frozen

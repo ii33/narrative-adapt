@@ -21,7 +21,11 @@
 
 from __future__ import annotations
 
+import json
+import os
+import re
 from copy import deepcopy
+from pathlib import Path
 
 # 页面 → 模板。依据：原文页做提取、剧本页写剧本、分镜页做分镜。
 # 「原文页」在前端有多个入口（原文/浏览），都给到提取模板，宁可多一个别名也不留空路由。
@@ -98,10 +102,12 @@ def list_templates() -> list[dict]:
     return [template(template_id) for template_id in TEMPLATE_META]
 
 
-def snapshot(template_id: str) -> dict:
-    """新建会话时抄进会话元数据的冻结快照：提示词全文 + 工具名单 + 版本。"""
-    frozen = deepcopy(template(template_id))
-    frozen.pop("builtin", None)
+def snapshot(template_id: str, ops=None) -> dict:
+    """新建会话时抄进会话元数据的冻结快照：提示词全文 + 工具名单 + 来源。"""
+    frozen = deepcopy(resolve(template_id, ops))
+    for key in ("builtin", "scope"):
+        frozen.pop(key, None)
+    frozen.setdefault("tools", [])
     return frozen
 
 
@@ -117,6 +123,162 @@ def route_for_page(page_id: str | None, overrides: dict[str, str] | None = None)
         value = overrides.get(page_id)
         return value if value in TEMPLATE_META else None
     return PAGE_TEMPLATE_ROUTES.get(str(page_id or ""))
+
+
+# ---------------------------------------------------------------- 自定义模板存储
+# 三层解析：project 覆盖 app，app 覆盖内置；内置是代码常量，只读、不可删、不可被永久覆盖。
+APP_FILE_ENV = "NARRATIVE_CHAT_TEMPLATES_FILE"
+PROJECT_META_KEY = "chat_templates"
+ID_PATTERN = re.compile(r"\A[a-z][a-z0-9-]{0,47}\Z")
+
+
+def app_path() -> Path:
+    override = os.environ.get(APP_FILE_ENV)
+    if override:
+        return Path(override)
+    return Path.home() / ".narrative" / "chat-templates.json"
+
+
+def _read_json(target: Path) -> dict:
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _write_json(payload: dict, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(target.name + ".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(target)
+
+
+def load_custom(scope: str, ops=None) -> dict[str, dict]:
+    """一层自定义模板（app 级文件 / 工程 meta）；坏数据当空表，不让一个坏文件挡住列表。"""
+    if scope == "app":
+        rows = _read_json(app_path()).get("templates")
+    elif scope == "project":
+        if ops is None:
+            return {}
+        raw = ops.project.store.meta(PROJECT_META_KEY)
+        try:
+            rows = json.loads(raw)["templates"] if raw else {}
+        except (ValueError, KeyError, TypeError):
+            rows = {}
+    else:
+        raise ValueError("模板作用域须为app或project")
+    return {str(key): dict(value) for key, value in (rows or {}).items() if isinstance(value, dict)}
+
+
+def save_custom(scope: str, template_id: str, payload: dict, ops=None) -> dict:
+    if scope not in {"app", "project"}:
+        raise ValueError("模板作用域须为app或project")
+    rows = load_custom(scope, ops)
+    rows[template_id] = payload
+    if scope == "app":
+        current = _read_json(app_path())
+        current["templates"] = rows
+        _write_json(current, app_path())
+    else:
+        if ops is None:
+            raise ValueError("工程级模板需要当前工程")
+        ops.project.store.set_meta(PROJECT_META_KEY, json.dumps({"templates": rows}, ensure_ascii=False))
+    return payload
+
+
+def delete_custom(scope: str, template_id: str, ops=None) -> bool:
+    if template_id in TEMPLATE_META:
+        raise ValueError(f"内置模板不可删除：{template_id}")
+    rows = load_custom(scope, ops)
+    if template_id not in rows:
+        return False
+    rows.pop(template_id)
+    if scope == "app":
+        current = _read_json(app_path())
+        current["templates"] = rows
+        _write_json(current, app_path())
+    else:
+        if ops is None:
+            raise ValueError("工程级模板需要当前工程")
+        ops.project.store.set_meta(PROJECT_META_KEY, json.dumps({"templates": rows}, ensure_ascii=False))
+    return True
+
+
+def system_prompt_for(definition: dict) -> str:
+    """两种形态：引用 prompt_defaults 的 key 列表（推荐）或自由文本。"""
+    keys = definition.get("prompt_keys")
+    if keys:
+        from .prompt_defaults import DEFAULT_PROMPTS
+
+        missing = [key for key in keys if key not in DEFAULT_PROMPTS]
+        if missing:
+            raise ValueError("引用了不存在的提示词条目：" + "、".join(missing))
+        parts = [DEFAULT_PROMPTS[key]["text"].strip() for key in keys]
+        return "\n\n".join(part for part in parts if part)
+    text = definition.get("system_prompt")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("模板须给出prompt_keys或非空system_prompt")
+    return text.strip()
+
+
+def validate(definition: dict) -> dict:
+    """保存前校验：id 规则、工具都在注册表、提示词引用有效。任一不满足即拒绝并列出。"""
+    from .tool_api import TOOLS
+
+    template_id = str(definition.get("id") or "").strip()
+    if not ID_PATTERN.fullmatch(template_id):
+        raise ValueError("模板id须为小写字母开头、只含小写字母/数字/短横线，长度不超过48")
+    if template_id in TEMPLATE_META:
+        raise ValueError(f"内置模板不可覆盖：{template_id}；请另存为自定义模板")
+    tools = definition.get("tools")
+    if not isinstance(tools, list) or not tools or any(not isinstance(name, str) for name in tools):
+        raise ValueError("模板tools须为非空工具名数组")
+    unknown = sorted(set(tools) - set(TOOLS))
+    if unknown:
+        raise ValueError("模板引用了不存在的工具：" + "、".join(unknown))
+    name = str(definition.get("name") or "").strip()
+    if not name:
+        raise ValueError("模板须有名称")
+    prompt = system_prompt_for(definition)
+    payload = {"id": template_id, "name": name, "description": str(definition.get("description") or "").strip(),
+               "tools": [name_ for name_ in TOOLS if name_ in set(tools)], "system_prompt": prompt}
+    if definition.get("prompt_keys"):
+        payload["prompt_keys"] = [key for key in definition["prompt_keys"]]
+    return payload
+
+
+def resolve(template_id: str, ops=None) -> dict:
+    """按 project → app → 内置 的顺序解析一个模板。"""
+    if template_id in TEMPLATE_META:
+        return template(template_id)
+    for scope in ("project", "app"):
+        rows = load_custom(scope, ops)
+        if template_id in rows:
+            stored = rows[template_id]
+            return {**deepcopy(stored), "id": template_id, "builtin": False, "scope": scope,
+                    "system_prompt": stored.get("system_prompt") or system_prompt_for(stored)}
+    raise ValueError(f"未知会话模板：{template_id}")
+
+
+def list_all(ops=None) -> list[dict]:
+    """项目级 + 应用级 + 内置；同 id 只列解析后生效的那一条。"""
+    seen = dict.fromkeys(TEMPLATE_META)
+    rows = []
+    for scope in ("project", "app"):
+        for template_id, stored in load_custom(scope, ops).items():
+            if template_id in seen:
+                continue
+            seen[template_id] = True
+            rows.append({"id": template_id, "name": stored.get("name") or template_id,
+                         "description": stored.get("description") or "", "scope": scope, "builtin": False,
+                         "tool_count": len(stored.get("tools") or []),
+                         "prompt_summary": (stored.get("system_prompt") or "")[:80]})
+    for template_id in TEMPLATE_META:
+        rows.append({"id": template_id, "name": TEMPLATE_META[template_id][0], "scope": "builtin", "builtin": True,
+                     "description": TEMPLATE_META[template_id][1], "tool_count": len(template_tool_names(template_id)),
+                     "prompt_summary": compose_system_prompt(template_id)[:80]})
+    return rows
 
 
 class Router:

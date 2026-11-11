@@ -1195,6 +1195,53 @@ _register(Tool('check_project_api_key', '向当前服务和模型发送一次最
 }, _check_project_api_key, writes=True, scope='configuration'))
 
 
+def _list_chat_templates(ops, args):
+    from .chat_templates import list_all
+
+    return {'templates': list_all(ops)}
+
+
+def _save_chat_template(ops, args):
+    from .chat_templates import save_custom, validate
+
+    scope = str(args.get('scope') or '').strip()
+    if scope not in {'app', 'project'}:
+        raise ToolError('模板作用域须为app或project')
+    payload = validate({key: value for key, value in args.items() if key != 'scope'})
+    save_custom(scope, payload['id'], payload, ops)
+    return {'template': payload, 'scope': scope}
+
+
+def _delete_chat_template(ops, args):
+    from .chat_templates import delete_custom
+
+    scope = str(args.get('scope') or '').strip()
+    if args.get('confirm') is not True:
+        raise ToolError('删除自定义模板须显式传confirm=true；内置模板不可删除')
+    if delete_custom(scope, str(args.get('id') or '').strip(), ops):
+        return {'deleted': True, 'id': args['id'], 'scope': scope}
+    raise ToolError('该作用域下没有这个自定义模板')
+
+
+_register(Tool('list_chat_templates', '列出会话模板：内置与自定义、作用域、工具数与系统提示词摘要。不返回完整提示词。', {},
+               _list_chat_templates, scope='configuration'))
+_register(Tool('save_chat_template', '保存会话模板（新建或更新）：scope=app写应用级配置文件、scope=project写进本工程，随工程走。'
+               '工具名须都在注册表里；提示词用prompt_keys引用既有条目（推荐）或给出自由文本；内置模板不可覆盖。', {
+    'id': {'type': 'string', 'required': True, 'description': '小写字母开头，只含小写字母/数字/短横线'},
+    'name': {'type': 'string', 'required': True},
+    'description': {'type': 'string'},
+    'scope': {'type': 'string', 'enum': ['app', 'project'], 'required': True},
+    'tools': {'type': 'array', 'items': {'type': 'string'}, 'required': True},
+    'prompt_keys': {'type': 'array', 'items': {'type': 'string'}, 'description': '按顺序拼接的提示词条目名，推荐'},
+    'system_prompt': {'type': 'string', 'description': '未用prompt_keys时的自由文本'},
+}, _save_chat_template, writes=True, scope='configuration'))
+_register(Tool('delete_chat_template', '删除自定义会话模板；内置模板不可删除，删除须显式confirm=true。', {
+    'id': {'type': 'string', 'required': True},
+    'scope': {'type': 'string', 'enum': ['app', 'project']},
+    'confirm': {'type': 'boolean', 'required': True},
+}, _delete_chat_template, writes=True, scope='configuration'))
+
+
 def _register_loading_tools():
     from .tool_loading import register
     register(Tool, _register)
