@@ -4,7 +4,7 @@
 
 表中「域」用代码 `EXT`（提取）／`PROP`（属性）／`SCR`（剧本）／`UI`（界面）／`ENG`（工程），与 Excel 版的「分类」列一一对应。
 
-本表是全项目需求总览（人读）；`docops` 的 `requirements/*.yaml` 是可机器校验的子集，按需逐步回填，两者不要求逐条对应。
+需求条目若需机器校验，由独立工具 `narrative-docops` 维护；本表只作人读总览。
 
 概念与规则编号以 [MODEL.md](../MODEL.md)（`M-xx`）与 [INVARIANTS.md](../INVARIANTS.md)（`I-xx`）为准；术语以 [GLOSSARY.md](../GLOSSARY.md)（`G-xx`）为准。证据锚点一律写「文件」或「文件::符号」，不写行号——行号会随改动失效。
 
@@ -27,7 +27,7 @@
 | PROP | P6 | 描述性内容可多项并存：`many` 记同一事件点同时成立的多项（外貌要点、忌讳清单、随身物品） | implemented | `src/narrative/prompt_defaults.py`（`extraction` v26）；`src/narrative/property_categories.py` | 与 P4 相反的一侧：多项在同一记录内 |
 | PROP | P7 | 容器写入的属性若与下属事件同组则让位：丢弃并回一条 `info` | implemented | `src/narrative/property_core.py::container_property_duplicate`；`docs/INVARIANTS.md` 的 `I-09`；`docs/MODEL.md` 的 `M-16` | `info` 附 `duplicate_of` 指向胜出的事件记录 |
 | PROP | P8 | 分类词表末项固定为「未分类」，缺分类不静默归位 | implemented | `src/narrative/property_categories.py::UNCLASSIFIED` | 末项固定；缺省来源记为 `default_unclassified` |
-| SCR | S1 | 剧本层一律写「场次」，提取层一律写「场景」，两者不混用 | implemented | `docs/GLOSSARY.md` 的 `G-19`、`G-04`；`docs/features/docops-traceability.md` | 「场次」＝`script_unit`，「场景」＝`scene` 节点 |
+| SCR | S1 | 剧本层一律写「场次」，提取层一律写「场景」，两者不混用 | implemented | `docs/GLOSSARY.md` 的 `G-19`、`G-04`；`narrative-docops`（独立仓库） | 「场次」＝`script_unit`，「场景」＝`scene` 节点 |
 | SCR | S2 | 一个场次由场表字段 `plan` 与一串正文块 `block` 组成，可被镜头引用 | implemented | `src/narrative/screenplay_writing.py::submit_scene_table`；`src/narrative/screenplay_writing.py::submit_script_unit` | 场头信息在场表字段里，不在正文块重复 |
 | SCR | S3 | 场由场景 S 与事件重组而来，可合并、拆分、重排 | implemented | `src/narrative/screenplay_scene_policy.py::prepare_generated_scene_table`；`src/narrative/screenplay_writing.py::apply_scene_table_changes` | 合并复用一个场次 ID，其余停用，正文保留 |
 | SCR | S4 | 写作与修改只动显式目标，非目标场次与正文保持原样 | implemented | `src/narrative/screenplay_writing.py::validate_script_writing_tool_call` | 冻结目标清单之外的写入被拒 |
@@ -37,7 +37,7 @@
 | ENG | O1 | 提示词按原则优先撰写，且文本变更必须同时升版本（版本快照强制） | implemented | `tests/test_prompt_version_snapshot.py`；`docs/PROMPT_STYLE.md` | 只升版本不改文本、或改文本不升版本都红 |
 | ENG | O2 | 文档体系分层：概念单一事实源、不变量表、开发手册、ADR | implemented | `docs/MODEL.md`；`docs/INVARIANTS.md`；`docs/DEVELOPER_GUIDE.md`；`docs/adr/` | 概念冲突时先改 MODEL，再改代码与提示词 |
 | ENG | O3 | 文档一致性六项检查在默认套件里跑；运行产物按 7 天清理 | implemented | `tests/test_doc_consistency.py`；`scripts/prune_artifacts.py::DEFAULT_DAYS` | 链接、行号、符号、诊断码、术语、停用句式 |
-| ENG | O4 | 需求可追溯：`REQ` 层 + 签名 + 三条硬门禁，产物为生成视图 | partial | `docs/features/docops-traceability.md`；`docs/features/docops-project-design.md` | M2（需求层）完成、M3（渲染）进行中；实现在同级的 `narrative-docops` 仓库，M4 切换未开始 |
+| ENG | O4 | 需求可追溯：`REQ` 层 + 签名 + 三条硬门禁，产物为生成视图 | partial | `narrative-docops`（独立仓库） | M2（需求层）完成、M3（渲染）进行中；实现在同级的 `narrative-docops` 仓库，M4 切换未开始 |
 
 ## 状态统计
 
