@@ -52,11 +52,17 @@ class NativeBridge(QObject):
 
     themeModeChanged = Signal()
     darkModeChanged = Signal()
+    layoutModeChanged = Signal()
 
     @Property(str, notify=themeModeChanged)
     def themeMode(self) -> str:
         """当前外观模式：system / light / dark。"""
         return self._appearance_mode
+
+    @Property(str, notify=layoutModeChanged)
+    def layoutMode(self) -> str:
+        """当前主框构：compact（默认）或 islands。"""
+        return self._appearance_layout
 
     @Property(bool, notify=darkModeChanged)
     def darkMode(self) -> bool:
@@ -116,6 +122,7 @@ class NativeBridge(QObject):
 
         # 外观偏好在界面起来前读一次；未读取前按浅色渲染，不碰磁盘。
         self._appearance_mode = appearance.DEFAULT_MODE
+        self._appearance_layout = appearance.DEFAULT_LAYOUT
         self._appearance_dark = False
         self._appearance_watching = False
         self._workerDone.connect(self._on_worker_done)
@@ -129,8 +136,26 @@ class NativeBridge(QObject):
     def load_appearance(self) -> None:
         """启动时读一次外观偏好并应用；跟随系统时还要跟着系统深浅色变化。"""
         self._appearance_mode = appearance.load()
+        self._appearance_layout = appearance.load_layout()
+        self.layoutModeChanged.emit()
         self._watch_system_scheme()
         self._apply_appearance()
+
+    @Slot(str)
+    def setLayoutMode(self, layout: str) -> None:
+        """切换主框构（紧凑／岛屿）：立刻生效，并记住选择。保存失败不拦着切换。"""
+        if layout not in appearance.LAYOUTS:
+            self.errorOccurred.emit("appearance", f"未知布局：{layout}")
+            return
+        failure = ""
+        try:
+            appearance.save_layout(layout)
+        except (OSError, ValueError) as exc:
+            failure = str(exc)
+        self._appearance_layout = layout
+        self.layoutModeChanged.emit()
+        if failure:
+            self.errorOccurred.emit("appearance", f"布局选择没有保存：{failure}")
 
     @Slot(str)
     def setThemeMode(self, mode: str) -> None:

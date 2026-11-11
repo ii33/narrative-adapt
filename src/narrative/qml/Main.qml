@@ -30,6 +30,12 @@ ApplicationWindow {
     // 整张表被替换，所有绑定自动重算；页面只认令牌名，不认具体颜色。
     readonly property var theme: bridge.theme
 
+    // 主框构：紧凑（默认，各区域共边）或岛屿（各区域浮成独立卡片，卡片间留缝）。
+    // 岛屿只是加一层留白与圆角：所有 inset 在紧凑模式下都是 0，渲染与改动前一致。
+    readonly property bool islandsMode: bridge.layoutMode === "islands"
+    readonly property real islandInset: islandsMode ? theme.island_gap / 2 : 0
+    readonly property real islandRadius: islandsMode ? theme.island_radius : 0
+
     // 懒创建组件的宿主别名：在 Component 里写 `app: app` 会解析成页面自己的 app
     // 属性（那是 undefined），必须通过只指向窗口的别名传进去。
     readonly property var windowRoot: app
@@ -249,6 +255,7 @@ ApplicationWindow {
                         anchors.centerIn: parent
                         width: 2
                         height: parent.height
+                        visible: !app.islandsMode
                         color: SplitHandle.pressed || SplitHandle.hovered
                             ? app.theme.accent : app.theme.line
                     }
@@ -260,11 +267,21 @@ ApplicationWindow {
                     SplitView.minimumWidth:app.navigationCollapsed?56:150
                     SplitView.maximumWidth:app.navigationCollapsed?56:320
                     SplitView.fillHeight: true
-                    color: app.theme.card
-                    border.color: app.theme.line
+                    // 卡片画在内层矩形上：岛屿模式它比外框小一圈，紧凑模式下贴边即与原样一致。
+                    color: "transparent"
+                    border.width: 0
+
+                    Rectangle {
+                        id: sidebarCard
+                        anchors.fill: parent
+                        anchors.margins: app.islandInset
+                        color: app.theme.card
+                        border.color: app.theme.line
+                        radius: app.islandRadius
+                    }
 
                     ColumnLayout {
-                        anchors.fill: parent
+                        anchors.fill: sidebarCard
                         anchors.margins:app.navigationCollapsed?6:14
                         spacing: 4
 
@@ -381,8 +398,12 @@ ApplicationWindow {
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 54
+                        Layout.leftMargin: app.islandInset
+                        Layout.rightMargin: app.islandInset
+                        Layout.topMargin: app.islandInset
                         color: app.theme.card
                         border.color: app.theme.line
+                        radius: app.islandRadius
 
                         RowLayout {
                             anchors.fill: parent
@@ -425,7 +446,20 @@ ApplicationWindow {
                         }
                     }
 
-                    StackLayout {
+                    // 岛屿模式：页面内容也浮成一张卡片；紧凑模式边距与圆角都为 0，等于原样。
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.leftMargin: app.islandInset
+                        Layout.rightMargin: app.islandInset
+                        Layout.bottomMargin: app.islandInset
+                        color: app.islandsMode ? app.theme.card : "transparent"
+                        border.width: app.islandsMode ? 1 : 0
+                        border.color: app.theme.line
+                        radius: app.islandRadius
+
+                        StackLayout {
+                        anchors.fill: parent
                         SplitView.fillWidth: true
                         SplitView.minimumWidth: 520
                         SplitView.fillHeight: true
@@ -448,30 +482,48 @@ ApplicationWindow {
                         Loader { active: app.pageVisited("static_check") || app.currentPage === "static_check"; sourceComponent: staticCheckPageComponent }
                         Loader { active: app.pageVisited("project_settings") || app.currentPage === "project_settings"; sourceComponent: projectSettingsPageComponent }
                     }
+                    }
                 }
 
                 // 常驻协作者：挂在页面右边，切页面不消失。
-                AssistantPanel {
-                    app: app
+                // 岛屿模式下它比面板多留一圈缝，面板自己就成了一张独立卡片。
+                Item {
                     visible: app.assistantOpen
-                    SplitView.preferredWidth: 360
+                    SplitView.preferredWidth: 360 + (app.islandsMode ? app.theme.island_gap : 0)
                     SplitView.minimumWidth: 280
                     SplitView.fillHeight: true
-                    onCloseRequested: app.assistantOpen = false
+
+                    AssistantPanel {
+                        anchors.fill: parent
+                        anchors.margins: app.islandInset
+                        app: app
+                        visible: app.assistantOpen
+                        onCloseRequested: app.assistantOpen = false
+                    }
                 }
             }
         }
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 30
-            color: app.theme.card
-            border.color: app.theme.line
+            Layout.preferredHeight: 30 + (app.islandsMode ? app.theme.island_gap : 0)
+            // 卡片同样画在内层：岛屿模式下状态栏也浮起来，紧凑模式贴边即原样。
+            color: "transparent"
+            border.width: 0
+
+            Rectangle {
+                id: statusCard
+                anchors.fill: parent
+                anchors.margins: app.islandInset
+                color: app.theme.card
+                border.color: app.theme.line
+                radius: app.islandRadius
+            }
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 20
-                anchors.rightMargin: 20
+                anchors.leftMargin: app.islandInset + 20
+                anchors.rightMargin: app.islandInset + 20
                 Label {
                     objectName: "statusLine"
                     Layout.fillWidth: true

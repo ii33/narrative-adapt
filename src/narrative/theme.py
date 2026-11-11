@@ -49,7 +49,13 @@ TOKENS: dict[str, tuple[str, str]] = {
     # 版式
 }
 
-LAYOUT = {"radius": 8, "gap": 12}
+LAYOUT = {
+    "radius": 8,
+    "gap": 12,
+    # 岛屿布局：每个区域浮成一张独立卡片，卡片之间留缝。紧凑布局不用这两个值。
+    "island_gap": 10,
+    "island_radius": 12,
+}
 
 
 def tokens(dark: bool) -> dict:

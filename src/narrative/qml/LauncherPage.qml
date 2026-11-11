@@ -31,6 +31,18 @@ Item {
         return 0
     }
 
+    // 主框构两档：紧凑（默认，各区域共边）与岛屿（各区域浮成独立卡片，卡片间留缝）。
+    readonly property var layoutModes: [
+        {key: "compact", label: "紧凑"},
+        {key: "islands", label: "岛屿"}
+    ]
+
+    function layoutIndex(layout) {
+        for (var i = 0; i < layoutModes.length; ++i)
+            if (layoutModes[i].key === layout) return i
+        return 0
+    }
+
     ListModel { id: projectRows }
     // 没有「工程目录」这回事：列表就是打开过的那些工程包。
     property var recentItems: []
@@ -501,6 +513,32 @@ Item {
                     Label {
                         Layout.fillWidth: true
                         text: "跟随系统时随 Windows 深浅色自动切换；选浅色或深色后固定，不再跟系统。"
+                        color: t.muted
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Label {
+                            text: "主框构"
+                            color: t.muted
+                            font.pixelSize: 11
+                        }
+                        Item { Layout.fillWidth: true }
+                        ComboBox {
+                            objectName: "layoutMode"
+                            Layout.preferredWidth: 140
+                            model: page.layoutModes
+                            textRole: "label"
+                            currentIndex: page.layoutIndex(bridge.layoutMode)
+                            // 立刻生效并记住选择；不需要按「保存全局设置」。
+                            onActivated: bridge.setLayoutMode(page.layoutModes[index].key)
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: "紧凑：各区域共边，占满窗口（默认）。岛屿：导航、页面、协作者与状态栏各成一张圆角卡片，卡片之间留缝。"
                         color: t.muted
                         font.pixelSize: 11
                         wrapMode: Text.Wrap
