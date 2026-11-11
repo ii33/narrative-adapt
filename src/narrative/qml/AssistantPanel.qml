@@ -231,6 +231,75 @@ Rectangle {
     property string requestedChatId: ""
     property string progressText: ""
     property string draft: ""
+    // 会话模板：清单与「这一页发往哪」都由后端给（chat_templates），界面只读不改路由。
+    property var templates: []
+    property string pageId: ""
+    property string routeTemplateId: ""     // 本页的临时覆盖（后端 Router）
+    property string routeDefaultId: ""      // 本页的默认路由
+    // 在「发往」里直接点了某个已开会话：这一次发送就不再按页面路由走。
+    property string sendToChatId: ""
+    property string templateChoice: ""
+    readonly property var builtinTemplates: (panel.templates || []).filter(function (row) { return row.builtin === true })
+    readonly property var customTemplates: (panel.templates || []).filter(function (row) { return row.builtin !== true })
+    // 「发往」如实显示当前目标：临时覆盖 > 当前会话自己的模板 > 还没会话时的页面默认路由。
+    // 规则（用户裁决）：用户已打开的会话优先，切页不会把他选的会话换掉；要换只能显式点「改」。
+    readonly property string routeText: {
+        if (panel.routeTemplateId.length > 0)
+            return "发往：" + panel.templateName(panel.routeTemplateId) + "会话（临时，发送后恢复）"
+        if (panel.chatTemplateName.length > 0) return "发往：" + panel.chatTemplateName + "会话"
+        if (panel.chatId.length === 0 && panel.routeDefaultId.length > 0)
+            return "发往：" + panel.templateName(panel.routeDefaultId) + "会话"
+        return "发往：当前会话"
+    }
+    readonly property string chatTemplateName: {
+        for (var i = 0; i < panel.sessions.length; ++i)
+            if (panel.sessions[i].id === panel.chatId) return panel.sessions[i].template_name || ""
+        return ""
+    }
+    function templateName(templateId) {
+        for (var i = 0; i < panel.templates.length; ++i)
+            if (panel.templates[i].id === templateId) return panel.templates[i].name || templateId
+        return templateId || ""
+    }
+    function refreshRoute() {
+        panel.routeTemplateId = panel.pageId.length > 0 ? bridge.chatRouteTemplate(panel.pageId) : ""
+        panel.routeDefaultId = panel.pageId.length > 0 ? bridge.chatDefaultTemplate(panel.pageId) : ""
+    }
+    function sessionText(row) {
+        var title = (row && row.title) || "新会话"
+        return (row && row.template_name) ? title + " · " + row.template_name : title
+    }
+    function openNewChatPicker() {
+        // 默认选中「当前页面对应的模板」：有临时覆盖就先按覆盖。
+        panel.templateChoice = panel.routeTemplateId.length > 0 ? panel.routeTemplateId : panel.routeDefaultId
+        newChatPicker.open()
+    }
+    function createChatWithChoice() {
+        if (panel.busy) return
+        panel.syncMessages([], true)
+        bridge.newChatWithTemplate(panel.templateChoice)
+        newChatPicker.close()
+    }
+    function pickRoute(templateId) {
+        bridge.overrideChatTemplate(panel.pageId, templateId)
+        panel.sendToChatId = ""
+        panel.refreshRoute()
+        routePicker.close()
+    }
+    function pickSession(chatId) {
+        // 直接选一个已开会话：切过去，并且这一次发送不按页面路由改道。
+        panel.sendToChatId = chatId
+        panel.open(chatId)
+        routePicker.close()
+    }
+    // 模板交给助手编辑：往输入框塞一句草稿，不覆盖已经写好的内容。
+    function insertTemplateDraft() {
+        var line = "请新建一个会话模板：名称（），工具（），用途（）"
+        var current = panel.draft
+        panel.draft = current.length === 0 ? line : (current.slice(-1) === "\n" ? current + line : current + "\n" + line)
+        newChatPicker.close()
+        routePicker.close()
+    }
     property var attachments: []
     property bool steeringPending:false
     property string steeringNotice:""
@@ -256,7 +325,12 @@ Rectangle {
         panel.draft = ""
         panel.attachments = []
         panel.busy = true
-        bridge.assistantTurnWithAttachments(text,JSON.stringify(files))
+        // 有「发往」的去向就按它送（后端消费覆盖、发送后回到自动路由）。
+        if (panel.sendToChatId.length > 0) {
+            panel.sendToChatId = ""
+            bridge.assistantTurnWithAttachments(text, JSON.stringify(files))
+        } else bridge.assistantTurnOnPage(text, JSON.stringify(files), panel.pageId)
+        Qt.callLater(panel.refreshRoute)
     }
     function fileName(path){var parts=String(path).replace(/\\/g,"/").split("/");try{return decodeURIComponent(parts[parts.length-1])}catch(ignored){return parts[parts.length-1]}}
     function attach(paths){var next=panel.attachments.slice();(typeof paths!=="string"&&paths&&paths.length!==undefined?Array.from(paths):[paths]).forEach(function(path){path=String(path);if(path&&next.indexOf(path)<0)next.push(path)});panel.attachments=next}
@@ -286,8 +360,9 @@ Rectangle {
     }
 
     function load() {
-        if (app.mode === "workspace") bridge.loadChats()
+        if (app.mode === "workspace") { bridge.loadChats(); bridge.listChatTemplates(); Qt.callLater(panel.refreshRoute) }
     }
+    onPageIdChanged: panel.refreshRoute()
 
     function applyIndex(items, current) {
         panel.sessions = items || []
@@ -591,14 +666,25 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
                 font.pixelSize: 11
-                model: panel.sessions.map(function (row) { return row.title })
+                // 会话名后面带上模板标记，一眼看出它是提取/剧本/分镜/自定义。
+                model: panel.sessions.map(function (row) { return panel.sessionText(row) })
                 displayText: panel.sessions.length === 0 ? "还没有会话"
                     : (currentIndex >= 0 && currentIndex < panel.sessions.length
-                        ? panel.sessions[currentIndex].title : panel.chatTitle)
+                        ? panel.sessionText(panel.sessions[currentIndex]) : panel.chatTitle)
                 onActivated: function (index) {
                     if (index >= 0 && index < panel.sessions.length)
                         panel.open(panel.sessions[index].id)
                 }
+            }
+            Label {
+                objectName: "assistantChatTemplate"
+                text: panel.chatTemplateName
+                visible: text.length > 0
+                color: t.accent
+                font.pixelSize: 9
+                padding: 3
+                leftPadding: 5; rightPadding: 5
+                background: Rectangle { radius: 3; color: t.accentSoft }
             }
             Label {
                 objectName: "assistantNew"
@@ -609,7 +695,7 @@ Rectangle {
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: panel.reset()
+                    onClicked: panel.openNewChatPicker()
                 }
             }
             Label {
@@ -854,6 +940,38 @@ Rectangle {
             }
         }
 
+        // 发往哪一类会话：默认跟着页面路由走；点它可以临时改，发送后自动复原。
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 6
+            Label {
+                objectName: "assistantRoute"
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                text: panel.routeText
+                color: panel.routeTemplateId.length > 0 ? t.accent : t.muted
+                font.pixelSize: 10
+                elide: Text.ElideRight
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: routePicker.open()
+                }
+            }
+            Label {
+                objectName: "assistantRouteChange"
+                text: "改"
+                color: t.muted
+                font.pixelSize: 10
+                font.underline: true
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: routePicker.open()
+                }
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             spacing: 6
@@ -896,6 +1014,191 @@ Rectangle {
                 font.pixelSize: 11
                 enabled: !panel.steeringPending && (panel.draft.trim().length > 0||panel.attachments.length>0) && (!panel.busy||!!panel.activeTaskIds[panel.chatId])
                 onClicked: panel.send()
+            }
+        }
+    }
+
+    // 新建会话：先选模板（内置三个 + 自定义），默认选中当前页路由到的那个。
+    Popup {
+        id: newChatPicker
+        objectName: "assistantNewChatPicker"
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(360, Overlay.overlay ? Overlay.overlay.width - 32 : 340)
+        padding: 10
+        background: Rectangle { color: t.card; border.color: t.line; radius: t.radius }
+
+        contentItem: ColumnLayout {
+            spacing: 6
+            Label { text: "新建会话 · 选模板"; color: t.ink; font.pixelSize: 12; font.weight: Font.DemiBold }
+            Label {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: "模板决定这个会话的系统提示词与工具集合，建好就冻结。"
+                color: t.muted; font.pixelSize: 9
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(300, pickerList.implicitHeight)
+                contentWidth: availableWidth
+                clip: true
+                ColumnLayout {
+                    id: pickerList
+                    width: parent.width
+                    spacing: 4
+                    Repeater {
+                        model: panel.templates
+                        delegate: Rectangle {
+                            required property var modelData
+                            readonly property bool chosen: panel.templateChoice === modelData.id
+                            Layout.fillWidth: true
+                            implicitHeight: rowText.implicitHeight + 12
+                            radius: 4
+                            color: chosen ? t.accentSoft : (pickerHover.hovered ? t.hover : "transparent")
+                            border.color: chosen ? t.accent : t.line
+                            ColumnLayout {
+                                id: rowText
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                spacing: 1
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: (modelData.builtin ? "内置" : (modelData.scope === "project" ? "工程" : "应用"))
+                                        + " · " + (modelData.name || modelData.id) + " · 工具 " + (modelData.tool_count || 0)
+                                    color: t.ink
+                                    font.pixelSize: 10
+                                    elide: Text.ElideRight
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: modelData.description || ""
+                                    color: t.muted
+                                    font.pixelSize: 9
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            HoverHandler { id: pickerHover }
+                            TapHandler { onTapped: panel.templateChoice = modelData.id }
+                        }
+                    }
+                    Label {
+                        visible: panel.templates.length === 0
+                        text: "还没有模板清单，稍等或先跑一次检查。"
+                        color: t.muted; font.pixelSize: 9
+                    }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                Label {
+                    objectName: "assistantTemplateDraftInNew"
+                    text: "让助手编辑模板"
+                    color: t.accent
+                    font.pixelSize: 10
+                    font.underline: true
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: panel.insertTemplateDraft()
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                Button { objectName: "assistantNewChatCancel"; text: "取消"; flat: true; onClicked: newChatPicker.close() }
+                Button {
+                    objectName: "assistantNewChatConfirm"
+                    text: "新建"
+                    highlighted: true
+                    onClicked: panel.createChatWithChoice()
+                }
+            }
+        }
+    }
+
+    // 这一页发送去哪：自动路由 / 换个模板（临时）/ 直接切到某个已开会话。
+    Popup {
+        id: routePicker
+        objectName: "assistantRoutePicker"
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(360, Overlay.overlay ? Overlay.overlay.width - 32 : 340)
+        padding: 10
+        background: Rectangle { color: t.card; border.color: t.line; radius: t.radius }
+
+        contentItem: ColumnLayout {
+            spacing: 6
+            Label { text: "这一页的发送去向"; color: t.ink; font.pixelSize: 12; font.weight: Font.DemiBold }
+            Label {
+                Layout.fillWidth: true; wrapMode: Text.Wrap
+                text: "改过的去向只对下一次发送有效，发送后回到自动路由。"
+                color: t.muted; font.pixelSize: 9
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(320, routeList.implicitHeight)
+                contentWidth: availableWidth
+                clip: true
+                ColumnLayout {
+                    id: routeList
+                    width: parent.width
+                    spacing: 2
+                    Label { text: "自动"; color: t.muted; font.pixelSize: 9 }
+                    Button {
+                        objectName: "assistantRouteAuto"
+                        Layout.fillWidth: true
+                        flat: true
+                        text: "自动路由" + (panel.routeDefaultId.length > 0
+                            ? "（" + panel.templateName(panel.routeDefaultId) + "）" : "")
+                        onClicked: panel.pickRoute("")
+                    }
+                    Repeater {
+                        model: panel.templates
+                        delegate: Button {
+                            required property var modelData
+                            objectName: "assistantRouteChoice_" + modelData.id
+                            Layout.fillWidth: true
+                            flat: true
+                            highlighted: panel.routeTemplateId === modelData.id
+                            text: (modelData.name || modelData.id) + "会话 · 工具 " + (modelData.tool_count || 0)
+                            onClicked: panel.pickRoute(modelData.id)
+                        }
+                    }
+                    Label {
+                        visible: panel.sessions.length > 0
+                        text: "或切到已开会话"
+                        color: t.muted; font.pixelSize: 9
+                    }
+                    Repeater {
+                        model: panel.sessions
+                        delegate: Button {
+                            required property var modelData
+                            objectName: "assistantRouteChat_" + modelData.id
+                            Layout.fillWidth: true
+                            flat: true
+                            text: panel.sessionText(modelData)
+                            onClicked: panel.pickSession(modelData.id)
+                        }
+                    }
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                Label {
+                    objectName: "assistantTemplateDraft"
+                    text: "让助手编辑模板"
+                    color: t.accent
+                    font.pixelSize: 10
+                    font.underline: true
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: panel.insertTemplateDraft()
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                Button { text: "关闭"; flat: true; onClicked: routePicker.close() }
             }
         }
     }
@@ -973,6 +1276,7 @@ Rectangle {
                 panel.progressText = ""
                 panel.applyIndex(payload.items, payload.chat ? payload.chat.id : "")
             }
+            else if (kind === "chat_templates") panel.templates = payload.templates || []
         }
         function onErrorOccurred(kind, message) {
             if(kind==="assistant_steer"){panel.steeringPending=false;panel.steeringNotice="插话未发送："+message}

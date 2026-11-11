@@ -119,6 +119,8 @@ class NativeBridge(QObject):
         self._assistant_chat = ""
         self._assistant_resumed: set[str] = set()
         self._assistant_lock = threading.Lock()
+        # 页面 → 会话模板的临时覆盖（Router 自己只管内存里的一次性意图）。
+        self._chat_template_router = None
 
         # 外观偏好在界面起来前读一次；未读取前按浅色渲染，不碰磁盘。
         self._appearance_mode = appearance.DEFAULT_MODE
@@ -1512,16 +1514,17 @@ class NativeBridge(QObject):
             store = self._chats(ops)
             chat = store.active(create=False)
             self._assistant_chat = chat["id"] if chat else ""
-            return {"items": store.list(), "current": self._assistant_chat}
+            return {"items": self._chat_rows(store), "current": self._assistant_chat}
 
         self._project_task("chats", work)
 
     @Slot(str)
     def openChat(self, chat_id: str) -> None:
         def work(ops) -> dict:
-            chat = self._chats(ops).set_active(chat_id)
+            store = self._chats(ops)
+            chat = store.set_active(chat_id)
             self._assistant_chat = chat["id"]
-            return {"chat": chat, "items": self._chats(ops).list()}
+            return {"chat": chat, "items": self._chat_rows(store)}
 
         self._project_task("chat", work)
 
@@ -1531,16 +1534,113 @@ class NativeBridge(QObject):
             store = self._chats(ops)
             chat = store.create()
             self._assistant_chat = chat["id"]
-            return {"chat": chat, "items": store.list()}
+            return {"chat": chat, "items": self._chat_rows(store)}
 
         self._project_task("chat", work)
+
+    # -- 会话模板（UI 接线）------------------------------------------------
+    # 这里**只是接线**：模板清单、快照、路由、临时覆盖的实现全在 chat_templates.py，
+    # 会话落盘在 chat_store.py。桥里不存第二套状态（Router 只有一个实例，就是
+    # chat_templates.Router）；名字若与将来的工具 API 冲突，以 Python 侧为准改这里一处。
+
+    def _chat_rows(self, store) -> list[dict]:
+        """会话清单带上模板标记：界面一眼看出它是提取/剧本/分镜/自定义。"""
+        rows = store.list()
+        for row in rows:
+            frozen = store.template(row.get("id") or "") or {}
+            row["template_id"] = str(frozen.get("id") or "")
+            row["template_name"] = str(frozen.get("name") or "")
+        return rows
+
+    def _chat_router(self):
+        if self._chat_template_router is None:
+            from .chat_templates import Router
+
+            self._chat_template_router = Router()
+        return self._chat_template_router
+
+    @Slot()
+    def listChatTemplates(self) -> None:
+        """可用模板：内置三个 + 工程级/应用级自定义，带工具数与提示词摘要。"""
+
+        def work(ops) -> dict:
+            from .chat_templates import list_all
+
+            return {"templates": list_all(ops), "project_path": str(self._project_path or "")}
+
+        self._project_task("chat_templates", work)
+
+    @Slot(str)
+    def newChatWithTemplate(self, template_id: str) -> None:
+        """新建会话；template_id 为空表示不绑定模板。"""
+
+        def work(ops) -> dict:
+            from .chat_templates import snapshot
+
+            store = self._chats(ops)
+            chat = store.create(template=snapshot(template_id, ops)) if template_id else store.create()
+            self._assistant_chat = chat["id"]
+            return {"chat": chat, "items": self._chat_rows(store), "template_id": template_id}
+
+        self._project_task("chat", work)
+
+    @Slot(str, result=str)
+    def chatRouteTemplate(self, page_id: str) -> str:
+        """这一页当前的临时覆盖（不含自动路由）；空串表示没有覆盖。"""
+        return self._chat_router().override_for(page_id) or ""
+
+    @Slot(str, result=str)
+    def chatDefaultTemplate(self, page_id: str) -> str:
+        """这一页的默认路由（还没开会话时新会话用它）。"""
+        from .chat_templates import route_for_page
+
+        return route_for_page(page_id) or ""
+
+    @Slot(str, str)
+    def overrideChatTemplate(self, page_id: str, template_id: str) -> None:
+        """临时覆盖本页的去向；template_id 为空表示回到自动路由。"""
+        router = self._chat_router()
+        if template_id:
+            router.override(page_id, template_id)
+        else:
+            router.clear(page_id)
+
+    def _chat_for_route(self, page_id: str) -> str:
+        """按去向挑会话：临时覆盖消费即失效；没有会话时才按页面默认开一个。
+
+        规则（用户裁决，别顺手改成「每次发送都按页面路由」）：**用户已打开的会话优先**。
+        页面路由只是「默认发给对应会话」；用户刚在下拉里显式挑了一个会话，是比页面更强的
+        意图。强制路由会造成两种坏结果：翻页悄悄换掉他挑的会话；消息落在他没看的会话里。
+        所以这里只有三种情况走路由：有临时覆盖（那一次）、或当前还没有任何会话。
+        """
+        from .chat_templates import route_for_page, snapshot
+
+        router = self._chat_router()
+        override_id = router.override_for(page_id)
+        if override_id:
+            router.clear(page_id)
+            template_id = override_id
+        elif self._assistant_chat:
+            # 已经在某个会话里就发在那个会话——切页不会把用户选好的会话抢走。
+            template_id = ""
+        else:
+            template_id = route_for_page(page_id) or ""
+        if not template_id:
+            return ""
+        ops = project_catalog.open_graph_project(self._project())
+        store = self._chats(ops)
+        for row in store.list():
+            frozen = store.template(row.get("id") or "") or {}
+            if frozen.get("id") == template_id:
+                return row["id"]
+        return store.create(template=snapshot(template_id, ops))["id"]
 
     @Slot(str, str)
     def renameChat(self, chat_id: str, title: str) -> None:
         def work(ops) -> dict:
             store = self._chats(ops)
             chat = store.rename(chat_id, title)
-            return {"chat": chat, "items": store.list()}
+            return {"chat": chat, "items": self._chat_rows(store)}
 
         self._project_task("chat", work)
 
@@ -1551,7 +1651,7 @@ class NativeBridge(QObject):
             store.delete(chat_id)
             active = store.active(create=False)
             self._assistant_chat = active["id"] if active else ""
-            items = store.list()
+            items = self._chat_rows(store)
             chat = active or {"id": "", "session": "", "title": "新会话", "messages": []}
             return {"chat": chat, "items": items, "removed": chat_id}
 
@@ -1583,6 +1683,21 @@ class NativeBridge(QObject):
             self.errorOccurred.emit('assistant', str(error))
             return
         self._assistant_turn(text, '', self._assistant_chat, attachment_paths=paths)
+
+    @Slot(str, str, str)
+    def assistantTurnOnPage(self, text: str, attachments_json: str, page_id: str) -> None:
+        """按当前页的去向发一句话：有路由（含临时覆盖）就用那个模板的会话。"""
+        try:
+            paths = self._attachment_paths(attachments_json)
+        except (ValueError, TypeError) as error:
+            self.errorOccurred.emit('assistant', str(error))
+            return
+        try:
+            chat_id = self._chat_for_route(page_id)
+        except (ValueError, OSError) as error:
+            self.errorOccurred.emit('assistant', str(error))
+            return
+        self._assistant_turn(text, '', chat_id or self._assistant_chat, attachment_paths=paths)
 
     @Slot(str, str, str, str)
     def assistantSteer(self, text: str, attachments_json: str, chat_id: str, task_id: str) -> None:

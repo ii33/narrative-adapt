@@ -497,6 +497,7 @@ ApplicationWindow {
                         anchors.fill: parent
                         anchors.margins: app.islandInset
                         app: app
+                        pageId: app.currentPage
                         visible: app.assistantOpen
                         onCloseRequested: app.assistantOpen = false
                     }

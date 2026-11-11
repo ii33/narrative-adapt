@@ -304,6 +304,10 @@ class Router:
     def route(self, page_id: str | None) -> str | None:
         return route_for_page(page_id, self._overrides)
 
+    def override_for(self, page_id: str | None) -> str | None:
+        """这一页当前的临时覆盖（不含自动路由）；没有覆盖返回 None。"""
+        return self._overrides.get(str(page_id))
+
     def consume(self, page_id: str | None) -> str | None:
         """取这次发送该用的模板，并让它失效（切页后回到自动路由）。"""
         template_id = self.route(page_id)
