@@ -25,6 +25,8 @@ Item {
     property int chunkStart: 0
     readonly property int chunkSize: 40000
     readonly property string previewText: fullText.substr(chunkStart, chunkSize)
+    // 只有整篇超过一段时才显示分页导航与页码。
+    readonly property bool hasChunks: fullText.length > chunkSize
 
     // 仅在页面可见时取数（页面由 Loader 首次进入才创建），同一轮只请求一次。
     function refresh() {
@@ -81,6 +83,57 @@ Item {
         notice = ""
         app.assistantOpen = true
         bridge.runSourceTask(selectedId, selectedSliceId, review)
+    }
+
+    // 顶栏两个动作只把「待补全的指令草稿」插进协作者输入框：不弹框、不直接发消息。
+    // 示例数字取当前段范围，用户当下看到的那一段就是他能直接引用的范围。
+    function windowRangeLabel() {
+        if (!page.fullText.length) return ""
+        var stop = Math.min(page.fullText.length, page.chunkStart + page.previewText.length)
+        return "第 " + (page.chunkStart + 1) + "–" + stop + " 字"
+    }
+
+    function insertInstruction(kind) {
+        var review = kind === "review"
+        var range = page.windowRangeLabel() || "第 120001–160000 字"
+        var example = review ? ("第 3 章，或 " + range) : (range + "，或 第 3 段到第 5 段")
+        var head = (review ? "复核范围：" : "提取范围：") + "（在此填写，例如 "
+        page.insertIntoAssistant(head + example + "）", head.length)
+    }
+
+    // QML 没有 findChild：从窗口根节点按 objectName 递归找控件（Loader 要下钻 item）。
+    function findItem(node, name) {
+        if (!node) return null
+        if (node.objectName === name) return node
+        var kids = node.children
+        if (kids) {
+            for (var i = 0; i < kids.length; ++i) {
+                var hit = page.findItem(kids[i], name)
+                if (hit) return hit
+            }
+        }
+        if (node.item) return page.findItem(node.item, name)
+        return null
+    }
+
+    function insertIntoAssistant(line, exampleOffset) {
+        app.assistantOpen = true   // 面板可能是收起的，先展开
+        Qt.callLater(function() {
+            var panel = page.findItem(app.contentItem, "assistantPanel")
+            if (!panel) return
+            var existing = panel.draft || ""
+            // 已有内容一律保留，另起一行追加。
+            if (existing.length && existing.charAt(existing.length - 1) !== "\n") existing += "\n"
+            var base = existing.length
+            panel.draft = existing + line + "\n"
+            Qt.callLater(function() {
+                var prompt = page.findItem(panel, "assistantPrompt")
+                if (!prompt) return
+                prompt.forceActiveFocus()
+                // 选中「例如 …」那一段，用户直接打字即可替换。
+                prompt.select(base + exampleOffset, base + line.length - 1)
+            })
+        })
     }
 
     function textPosition(codepointOffset) {
@@ -327,61 +380,71 @@ Item {
                 color: page.t.card
                 border.color: page.t.line
                 radius: page.t.radius
+                clip: true
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 12
-                    Label {
-                        Layout.fillWidth: true
-                        text: page.selectedSliceId ? (page.currentSlice.title || "加载切片…") : (page.current.title || "请选择文件")
-                        elide: Text.ElideRight
-                        color: page.t.ink
-                        font.pixelSize: 14
-                        font.weight: Font.DemiBold
-                    }
+                    // 顶栏：动作按钮靠左，分页导航与页码靠右，同一行内左右分布。
+                    // Fusion 风格给按钮留 80px 下限，一行放不下，这里给四个按钮钉死紧凑宽度。
                     RowLayout {
                         Layout.fillWidth: true
                         visible: page.selectedId.length > 0
+                        spacing: 8
                         Button {
                             objectName: "sourceSliceExtract"
-                            text: page.selectedSliceId ? "提取" : "提取全文"
+                            text: "提取"
+                            font.pixelSize: 11
+                            padding: 4
+                            Layout.minimumWidth: 48
+                            Layout.preferredWidth: 48
                             enabled: !app.busy
-                            onClicked: page.runTask(false)
+                            onClicked: page.insertInstruction("extract")
                         }
                         Button {
                             objectName: "sourceSliceReview"
-                            text: page.selectedSliceId ? "复核" : "复核全文"
-                            enabled: !app.busy
-                            onClicked: page.runTask(true)
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: "任务在当前协作者会话中执行，核对后自动入库"
-                            color: page.t.muted
+                            text: "复核"
                             font.pixelSize: 11
-                            wrapMode: Text.Wrap
+                            padding: 4
+                            Layout.minimumWidth: 48
+                            Layout.preferredWidth: 48
+                            enabled: !app.busy
+                            onClicked: page.insertInstruction("review")
                         }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        visible: page.fullText.length > page.chunkSize
+                        Item { Layout.fillWidth: true; Layout.preferredWidth: 0 }
                         Button {
                             objectName: "sourceChunkPrev"
                             text: "上一段"
+                            font.pixelSize: 11
+                            padding: 4
+                            Layout.minimumWidth: 56
+                            Layout.preferredWidth: 56
+                            visible: page.hasChunks
                             enabled: page.chunkStart > 0
                             onClicked: page.shiftChunk(-1)
                         }
                         Label {
-                            Layout.fillWidth: true
-                            horizontalAlignment: Text.AlignHCenter
+                            objectName: "sourceChunkLabel"
+                            visible: page.hasChunks
                             text: "第 " + (page.chunkStart + 1) + "–"
                                   + Math.min(page.fullText.length, page.chunkStart + page.previewText.length)
                                   + " 字 / 共 " + page.fullText.length + " 字"
                             color: page.t.muted
-                            font.pixelSize: 11
+                            font.pixelSize: 10
+                            horizontalAlignment: Text.AlignHCenter
+                            // 页码吃掉中间剩余空间；窄窗口时先省略，两侧按钮不被挤出卡片。
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            Layout.preferredWidth: 200
+                            elide: Text.ElideMiddle
                         }
                         Button {
                             objectName: "sourceChunkNext"
                             text: "下一段"
+                            font.pixelSize: 11
+                            padding: 4
+                            Layout.minimumWidth: 56
+                            Layout.preferredWidth: 56
+                            visible: page.hasChunks
                             enabled: page.chunkStart + page.previewText.length < page.fullText.length
                             onClicked: page.shiftChunk(1)
                         }

@@ -66,6 +66,12 @@ def shell(tmp_path, monkeypatch):
                          button.mapToScene(QPointF(button.width() / 2, button.height() / 2)).toPoint())
         app.processEvents()
 
+    def start_task(review):
+        """顶栏按钮现在只插草稿，真正发起任务走 runTask（本用例守的是任务侧语义）。"""
+        from PySide6.QtCore import Q_ARG
+        page.metaObject().invokeMethod(page, 'runTask', Q_ARG('QVariant', bool(review)))
+        app.processEvents()
+
     try:
         invoke('project', lambda: bridge.openProject(str(tmp_path / 'source-buttons.nproj')))
         window.setProperty('assistantOpen', False)
@@ -76,14 +82,15 @@ def shell(tmp_path, monkeypatch):
         wait(lambda: not window.property('busy'))
         yield SimpleNamespace(ops=ops, text=text, sid=sid, part=part, app=app, bridge=bridge,
                               results=results, errors=errors, window=window, page=page, chat=chat,
-                              wait=wait, invoke=invoke, click=click)
+                              wait=wait, invoke=invoke, click=click, start_task=start_task)
     finally:
         bridge.close()
         engine.deleteLater()
         app.processEvents()
 
 
-def test_full_and_selected_slice_buttons_use_current_chat_and_block_duplicate_clicks(tmp_path, monkeypatch):
+def test_full_and_selected_slice_tasks_use_current_chat_and_block_duplicate_clicks(tmp_path, monkeypatch):
+    """顶栏按钮改为插草稿后，任务侧语义仍由 page.runTask 守住（范围、会话、防重复点击）。"""
     from narrative import native_bridge
 
     requests = []
@@ -111,7 +118,7 @@ def test_full_and_selected_slice_buttons_use_current_chat_and_block_duplicate_cl
     monkeypatch.setattr(native_bridge, 'HarnessRunner', Runner)
     with shell(tmp_path, monkeypatch) as ui:
         ui.window.setProperty('assistantOpen', False)
-        ui.click('sourceSliceExtract')
+        ui.start_task(False)
         ui.wait(entered.is_set)
         assert ui.window.property('assistantOpen')
         assert ui.window.property('busy')
@@ -124,7 +131,7 @@ def test_full_and_selected_slice_buttons_use_current_chat_and_block_duplicate_cl
         ui.bridge.loadSourceSlices(ui.sid)
         assert 'assistant' in ui.bridge.pendingOperations()
         assert not ui.errors, ui.errors
-        ui.click('sourceSliceReview')
+        ui.start_task(True)
         assert len(requests) == 1
         assert f'start=0, end={len(ui.text)}' in requests[0][0]
         assert '（全文）' in requests[0][0]
@@ -136,7 +143,7 @@ def test_full_and_selected_slice_buttons_use_current_chat_and_block_duplicate_cl
         ui.page.selectSlice(ui.part['id'])
         ui.wait(lambda: ui.page.property('previewText') == ui.text[ui.part['start']:ui.part['end']])
         ui.results.clear()
-        ui.click('sourceSliceReview')
+        ui.start_task(True)
         ui.wait(lambda: any(k == 'assistant' for k, _ in ui.results))
         assert len(requests) == 2
         assert f"start={ui.part['start']}, end={ui.part['end']}" in requests[1][0]
@@ -170,7 +177,7 @@ def test_project_switch_discards_delayed_source_task_before_it_can_start_a_model
             return original(ops, source_id)
 
         monkeypatch.setattr(GraphOperations, 'source', delayed_source)
-        ui.click('sourceSliceExtract')
+        ui.start_task(False)
         ui.wait(entered.is_set)
         other = tmp_path / 'other.nproj'
         target = Operations.create_graph_project(other)

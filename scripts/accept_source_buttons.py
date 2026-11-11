@@ -19,7 +19,7 @@ def main():
     directory = parser.parse_args().output.resolve()
     directory.mkdir(parents=True, exist_ok=False)
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-    from PySide6.QtCore import QPointF, Qt, QUrl
+    from PySide6.QtCore import Q_ARG, QPointF, Qt, QUrl
     from PySide6.QtGui import QFont, QFontDatabase
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtQuick import QQuickItem
@@ -114,6 +114,14 @@ def main():
         chat = next(payload['chat'] for kind, payload in reversed(results) if kind == 'chat')
         for index, button_name in enumerate(('sourceSliceExtract', 'sourceSliceReview'), 1):
             assert wait(lambda: not window.property('busy'))
+            # 顶栏按钮现在只把指令草稿插进协作者输入框，任务仍由 page.runTask 发起。
+            click(window.findChild(object, button_name))
+            draft = window.findChild(object, 'assistantPrompt').property('text')
+            expected_prefix = '提取范围：' if index == 1 else '复核范围：'
+            assert expected_prefix in draft, draft
+            panel.setProperty('draft', '')
+            page.metaObject().invokeMethod(page, 'runTask', Q_ARG('QVariant', index == 2))
+            app.processEvents()
             start = len(results)
             error_start = len(errors)
             began = time.monotonic()
