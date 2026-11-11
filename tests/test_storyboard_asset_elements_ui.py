@@ -10,7 +10,7 @@ def seed(ops):
         {"type": "person", "name": "甲", "quotes": ["甲在门口停下。"]},
         {"type": "location", "name": "门口", "quotes": ["门口"]},
         {"type": "scene", "name": "门口停步"},
-        {"type": "event", "name": "停步", "scene": "@3", "location": "@2", "quotes": ["甲在门口停下。"]},
+        {"type": "event", "name": "停步", "scene": "@3", "location": "@2", "participants": ["@1"], "quotes": ["甲在门口停下。"]},
     ], "properties": []})
     assert saved["status"] == "accepted", saved
     event = next(n["id"] for n in ops.graph_snapshot()["nodes"] if n["node_type"] == "event")

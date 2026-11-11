@@ -98,8 +98,8 @@ def test_screenplay_manual_workflow_repeated_body_edit_and_export(tmp_path, monk
         assert plain(page.property("workspace"))["timeline"]["nodes"] == []
         click(ui, page.findChild(object, "scriptTimelineImport"))
         ui.wait(lambda: page.findChild(object, "scriptTimelineImportDialog").property("opened"))
-        # 等待候选行物化：弹层首帧还没有确定高度，ListView 此时不建行
-        # （见 TimelineImportColumns.qml），先等行真的挂到树上再抓 handle。
+        # 等待候选行物化：ListView 只在弹层显示后才建行（见 TimelineImportColumns.qml），
+        # 先等行真的挂到树上再抓 handle。
         # 等的是「行数 == 候选数」这个可观察条件，不是 sleep。
         ui.wait(lambda: len([b for b in visuals(page.findChild(object, "scriptTimelineImportDialog").property("contentItem"))
                              if b.objectName() == "scriptTimelineImportChoice"]) == len(plain(page.property("timelineImportCandidates"))))

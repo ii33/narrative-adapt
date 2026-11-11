@@ -135,9 +135,9 @@ Item {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 clip: true
-                                // 高度还没确定时不建 delegate：否则首批行会以 0 高度建出来，
-                                // 下一帧拿到真实高度再整批销毁重建，外部持有的行项就成了悬空对象。
-                                model: height > 0 ? picker.rowsByLevel[level] : []
+                                // 弹层没显示时不建 delegate：首帧尺寸未定时建出来的那批会在拿到
+                                // 真实尺寸后整批销毁重建，外部持有的行项就成了悬空对象。
+                                model: visible ? picker.rowsByLevel[level] : []
                                 spacing: 2
                                 Label { anchors.centerIn: parent; width: parent.width - 12; visible: parent.count === 0; text: Object.keys(picker.focused).length ? "当前范围无匹配" + picker.labels[level] : "暂无" + picker.labels[level]; wrapMode: Text.Wrap; horizontalAlignment: Text.AlignHCenter; color: picker.t.muted; font.pixelSize: 11 }
                                 ScrollBar.vertical: ScrollBar {}

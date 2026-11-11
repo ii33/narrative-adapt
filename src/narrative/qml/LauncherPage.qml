@@ -720,7 +720,7 @@ Item {
         padding: 16
 
         background: Rectangle {
-            color: page.t.color
+            color: page.t.card
             border.color: page.t.line
             radius: page.t.radius
         }
