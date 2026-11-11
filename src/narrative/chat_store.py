@@ -166,7 +166,7 @@ class ChatStore:
 
     # -- 会话 ----------------------------------------------------------
 
-    def create(self, title: str = "") -> dict:
+    def create(self, title: str = "", *, template: dict | None = None) -> dict:
         chat_id = _new_id()
         chat = self._save({
             "id": chat_id,
@@ -176,6 +176,9 @@ class ChatStore:
             "access_mode": "standard",
             "access_revision": 0,
             "messages": [],
+            # 会话模板在创建时冻结：系统提示词全文与工具名单是快照，
+            # 之后改模板不影响这个会话（工具数组不变，提示词缓存才稳）。
+            **({"chat_template": template} if template else {}),
         })
         self.set_active(chat_id)
         return chat
@@ -206,6 +209,14 @@ class ChatStore:
         # 时间戳相同（同一毫秒）时用 id 兜底，列表顺序才不会跟着文件枚举顺序变。
         rows.sort(key=lambda row: (row["updated_at"], row["created_at"], row["id"]), reverse=True)
         return rows
+
+    def template(self, chat_id: str) -> dict | None:
+        """会话创建时冻结的模板快照；没有模板的旧会话返回 None。"""
+        try:
+            frozen = self.load(chat_id).get("chat_template")
+        except (OSError, json.JSONDecodeError, KeyError):
+            return None
+        return frozen if isinstance(frozen, dict) else None
 
     @_locked_chat
     def rename(self, chat_id: str, title: str) -> dict:

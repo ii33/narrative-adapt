@@ -113,8 +113,14 @@ class ProjectConversation:
                 if self._binding is not None:
                     raise ValueError("工程对话正在执行另一个任务")
                 allowed = {row["name"] for row in catalog} & mode_allowed
-                core = initial_tool_names([row["name"] for row in catalog if row["name"] in allowed])
-                visible = core + [name for name in self._visible_by_chat.get(chat_id, []) if name in allowed and name not in core]
+                # 会话模板在创建时冻结了工具集：整场会话的 tools 数组就是这份快照，
+                # 不再按需增长（工具数组一变，模型侧的提示词缓存就整段失效）。
+                frozen = self._frozen_tool_names(chat_id)
+                if frozen is not None:
+                    visible = [name for name in frozen if name in allowed]
+                else:
+                    core = initial_tool_names([row["name"] for row in catalog if row["name"] in allowed])
+                    visible = core + [name for name in self._visible_by_chat.get(chat_id, []) if name in allowed and name not in core]
                 self._visible_by_chat[chat_id] = visible
                 task_id = task_id or f"host-task-{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}"
                 self._binding = {"chat_id": chat_id, "session_id": session_id or chat_id,
@@ -124,6 +130,7 @@ class ProjectConversation:
                                  "cancel_event": cancel_event if cancel_event is not None else threading.Event(),
                                  "secrets_to_redact": tuple(secrets_to_redact), "calls_active": 0, "calls_settled": threading.Event(),
                                  "dispatch": dispatch, "context": copy_context()}
+                self._binding["template_frozen"] = frozen is not None
                 self._binding["calls_settled"].set()
                 return
 
@@ -210,10 +217,25 @@ class ProjectConversation:
         with self._lock:
             return tuple(name for name in binding["visible"] if name in binding["allowed"]) if self._binding is binding and not binding["cancelled"] and not self.closed else ()
 
+    def _frozen_tool_names(self, chat_id):
+        """该会话创建时冻结的工具名单；没有模板的会话返回 None（保持原按需加载行为）。"""
+        from .chat_store import ChatStore
+
+        try:
+            frozen = ChatStore(self.project_path).template(chat_id)
+        except Exception:  # noqa: BLE001 - 读不到就按无模板处理，不阻断发送
+            return None
+        tools = (frozen or {}).get("tools")
+        return list(tools) if isinstance(tools, list) and tools else None
+
     def _load_tools(self, binding, requested):
         with self._lock:
             if self.closed or self._binding is not binding or binding["cancelled"]:
                 raise ValueError("工具加载不属于当前活动任务")
+            if binding.get("template_frozen"):
+                # 记进 binding 供审计：工具调用本身已经落在会话 history 里。
+                binding.setdefault("load_tool_refusals", []).append(sorted(set(requested)))
+                raise ValueError("本会话工具集在创建时固定；需要更多工具请新建会话")
             names = set(requested)
             if not names <= binding["allowed"]:
                 raise ValueError("不能加载当前任务未授权的工具")

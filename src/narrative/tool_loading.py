@@ -52,6 +52,8 @@ class _Binding:
     visible_names: Callable[[], Iterable[str]] | None
     allowed_names: frozenset[str] | None
     access_mode: str
+    # 会话模板在创建时冻结了工具集：load_tools 只回提示，不增长工具数组。
+    template_frozen: bool = False
 
 
 _BINDING: ContextVar[_Binding | None] = ContextVar('tool_loading_binding', default=None)
@@ -119,10 +121,12 @@ def initial_tool_names(available_names: Iterable[str]) -> list[str]:
 
 @contextmanager
 def bind_tool_loader(loader: Callable[[list[str]], Iterable[str]], *, visible_names: Callable[[], Iterable[str]] | None = None,
-                     allowed_names: Iterable[str] | None = None, access_mode: str = 'standard'):
+                     allowed_names: Iterable[str] | None = None, access_mode: str = 'standard',
+                     template_frozen: bool = False):
     if access_mode not in {'standard', 'full'} or not callable(loader) or visible_names is not None and not callable(visible_names):
         raise ValueError('无效的运行时工具加载绑定')
-    token = _BINDING.set(_Binding(loader, visible_names, frozenset(allowed_names) if allowed_names is not None else None, access_mode))
+    token = _BINDING.set(_Binding(loader, visible_names, frozenset(allowed_names) if allowed_names is not None else None,
+                                  access_mode, template_frozen))
     try:
         yield
     finally:
@@ -247,6 +251,11 @@ def load_tools(names=None, families=None, *, ops=None) -> dict[str, Any]:
         return {**({'workflow_guidance': guidance} if guidance else {}), 'runtime_loaded': False, 'resolved_tools': selected, 'loaded_tools': [],
                 'message': '当前未绑定助手运行时；返回精确合同。CLI/MCP服务器保留完整工具注册，无需激活，未改变任何业务数据。',
                 'tools': [{'name': name, 'description': registry[name].summary, 'inputSchema': model_tool_schema(registry[name])} for name in selected]}
+    if binding.template_frozen:
+        # 模板会话的工具集在创建时固定：不改变工具数组，把「还需要什么」如实回给模型。
+        refused = sorted(set(names or []) | {name for name in registry if families and tool_family(name) in set(families)})
+        raise ValueError('本会话工具集在创建时固定；需要更多工具请新建会话。被拒绝的请求：'
+                         + '、'.join(refused or ['（按业务组请求）']))
     before = set(binding.visible_names()) if binding.visible_names else set()
     guidance = tool_guidance(ops, [name for name in selected if name not in before])
     loaded = before if set(selected) <= before else set(binding.loader(selected))
