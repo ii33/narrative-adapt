@@ -39,6 +39,7 @@
 ```
 
 - 工程数据在 `data/`（非可信运行产物，**不要从里面 import 代码**，见 `AGENTS.md`）。
+- 启动链只走 **PowerShell 7（`pwsh`）**：`.cmd` 入口先探测 `pwsh`，找不到就报错退出（`winget install Microsoft.PowerShell`），不静默回退 Windows PowerShell 5.1；`start-desktop.cmd` → `pwsh` → `start-desktop.ps1` → `pythonw` 是唯一路径（`tests/test_desktop_first_launch.py` 也按 `pwsh` 起）。
 - 模型配置走应用内的供应商设置；密钥不进版本库、不进验收报告。
 
 ---
@@ -218,6 +219,8 @@ UI 侧约定：所有颜色走主题令牌（`theme.py` 的 `TOKENS` / `LAYOUT`�
 | **缓存归因** | 别凭感觉；看 `tools_hash` |
 | **夹具依赖跨模块**：`from test_x import some_fixture` 只带过来一个名字，它的参数按**提出请求的模块**解析 | 共享模板夹具放 `tests/conftest.py`（`writing_template`、`sources_template`）；非共享的依赖在被 import 的模块里一并显式 import（`facts_template`） |
 | **`ruff` 假绿** | 一律 `--no-cache` |
+| **低完整性 = 写不了用户目录（事故级）**：**代理/沙箱会话在低完整性下跑环境准备**（`uv sync`、`setup-environment`、`localize_python.py`）→ 它创建/覆写的**解释器文件被打上 Low 完整性标签**（`.venv\Scripts\python.exe`、`pythonw.exe`、`.runtime\python`）→ **Windows 对带 Low 标签的 exe 一律以 Low 启动，父进程是不是 Medium 都不算数，资源管理器双击也一样** → 进程写不了 `%USERPROFILE%\.narrative` → SQLite 报 `SQLITE_READONLY`「attempt to write a readonly database」，最近工程/模型设置静默失败。另一条独立成因是**令牌继承**：从受限终端/沙箱启动时父进程的 Low 令牌一路传给 `cmd → powershell → pythonw`，这条修标签也救不了。**发现方法**（10 秒现场识别法）：`icacls .venv\Scripts\pythonw.exe | findstr /I Mandatory` 出现 `Low Mandatory Level` 就是它；`whoami /groups | findstr /I Mandatory` 看当前进程是中还是低（`S-1-16-8192` = Medium，`S-1-16-4096` = Low）；`scripts\check_runtime.py` 现在每次运行都会打印 `integrity_label … level=Medium|Low|absent`。**父进程是什么都救不回来**——`-S`/`-I -S`、换启动方式、从资源管理器双击，一律 Low。**不要**把仓库树本身的标签当原因（目录上的 Low 标签只是低完整性进程创建文件的痕迹），也不要把仓库根改成 Medium（低完整性会话会立刻失去写权限） | ①`start-desktop.ps1` 在任何检查之前先调 `python scripts\check_runtime.py --fix-integrity-labels`（判定与 `icacls /setintegritylevel (OI)(CI)Medium` 只写在这一处），带 Low 标签就自动改回 Medium：`.venv` 全量 `/T`，`.runtime\python` 只打目录与 `python.exe`/`pythonw.exe`（那棵树带完整 CPython 文档，全量 `/T` 会让启动慢到不可接受）；修过/修不动都按 `integrity_label path=… status=…` 记进 `.runtime\logs\launch.log`，`localize_python` 会重写可执行文件所以起 `pythonw` 前再修一次。**低完整性进程抬不高标签**：受限会话里这次修复必然失败，脚本随后硬拦并指路。手动入口是 `scripts/fix_venv_integrity.ps1`（默认已含 `.runtime\python`）。②`setup-environment.ps1` 检测到低完整性会话先大声警告，收尾再跑一次同样的修复；`scripts/localize_python.py` 收尾同样警告 + 修复。③每次启动把完整性、父进程 PID/映像/命令行、启动命令行原文写进 `launch.log`。④脚本自己是 Low 就硬拦（退出码 4，`decision=blocked`）；**不再**走「经 explorer 重启动」那招——exe 带着 Low 标签时它照样 Low，只会白启动两次。⑤`native_app.main` 进 UI 前再查一次，低完整性直接硬失败：渲染日志写 `integrity_level=0x1000` / `startup_refused=low_integrity`、弹明确错误框、退出码 3。⑥逃生口 `-AllowLowIntegrity` / `NARRATIVE_ALLOW_LOW_INTEGRITY=1` 才放行，放行时状态栏常驻「低完整性进程：改动不会写进用户目录」（`bridge.integrityWarning`）。⑦`AGENTS.md` 有硬规则：禁止在低完整性会话里跑环境准备 |
+| **便利记录拖死业务动作**：点「移出工程」时最近工程清单写失败（同一个低完整性原因，SQLite 报 readonly），原实现直接 `return`，于是工程没关、条目没消失，用户只看到一句「无法保存最近工程列表」 | 最近工程列表是**下次启动的便利记录，不是业务数据**：写失败只发一条提示（`bridge.noticeRaised`，文案含原因 + 怎么办），动作照做——内存里移除（`_recent_removed` 覆盖层，刷新列表不再捡回来）、关工程、按选择删自有文件；`_remember_project` 失败也不阻断打开工程 |
 
 ---
 

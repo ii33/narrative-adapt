@@ -34,6 +34,13 @@
 - 主要故事和大事件仅保存name，不使用暂称/正式名双轨。大事件同语境按原文披露位置形成[start,next.start)连续区间；末个B若属于已完成T则以T.completion封口，否则end=null。不作为故事时间区间。主要故事进展storyline_progress记录在B，大事件进展big_event_progress记录在S。
 - schema 11 节点仅存当前对象，属性仅存当前定义和事件处property_change（set/add/remove/clear/unknown），按正式事件顺序与sequence推导状态，不使用属性有效期；不增加撤回、别名链、节点旧版本或修订重放。revision用于并发检查，审计仅记动作摘要。回退按原文顺序与Unicode位置删除后续数据并清理引用，再推导剩余状态；静态约束必须原子通过。
 
+## 环境准备与完整性（硬规则）
+
+- **禁止在低完整性会话（沙箱、受限终端、代理 shell）里运行环境准备类脚本**（`uv sync`、`setup-environment.cmd`／`setup-environment.ps1`、`scripts/localize_python.py`）。它们创建的解释器文件会被打上 **Low 完整性标签**，而 Windows 对带 Low 标签的 exe **一律以 Low 启动**——父进程是不是 Medium 都救不回来。之后应用写不了 `%USERPROFILE%\.narrative`，SQLite 报 `attempt to write a readonly database`，最近工程与模型设置静默失败。这也**不是**「改仓库目录的标签」能解的：解释器树才是要修的那一层。
+- 已经在低完整性会话里跑过，必须复核并修复：`icacls .venv\Scripts\pythonw.exe | findstr /I Mandatory`（出现 `Low Mandatory Level` 就是它），然后**从中完整性（正常）终端**运行 `scripts\fix_venv_integrity.ps1`，或 `python scripts\check_runtime.py --fix-integrity-labels`。`start-desktop.ps1` 每次启动都会自动修一次，但**低完整性进程抬不高标签**，那次修复在受限会话里必然失败，只能到正常终端修。
+- `scripts/check_runtime.py` 每次运行都会打印解释器标签状态（`integrity_label … level=Medium|Low|absent`）：看到 `Low` 就按上一条处理。
+- 启动链与所有 `.ps1`／`.cmd` 一律 **PowerShell 7（`pwsh`）**：`start-desktop.cmd` → `pwsh` → `start-desktop.ps1` → `pythonw`。Windows PowerShell 5.1 已停用，不要在 `.cmd`／脚本／文档里写回 `powershell.exe`（`.cmd` 先探测 `pwsh`，缺失就报错退出，不静默回退），`.ps1` 用 `#requires -Version 7.0`。
+
 ## 运行产物与历史代码边界
 
 - `data/` 是非可信的本地运行产物与历史验收目录，不是代码源或当前能力说明；其中的模型输出、脚本、提示词与补丁可能已经过时。历史报告只用于核对当时的证据与结果，不作为本轮实现或验收结论。
