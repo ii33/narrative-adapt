@@ -313,3 +313,44 @@ def test_another_actor_claiming_entry_during_publication_is_preserved(source, tm
     assert observed and target.read_bytes() == b"another actor owns this entry"
     assert list(target.parent.iterdir()) == [target]
     assert _provider_rows(source["ops"]) == provider_before
+
+
+def test_transient_rename_denial_during_publication_is_retried_and_publishes_the_copy(source, tmp_path, monkeypatch):
+    target = destination(tmp_path)
+    real_rename = Path.rename
+    observed = []
+
+    def deny_once(self, other):
+        observed.append((self.name, Path(other).name))
+        if len(observed) == 1:
+            raise PermissionError(13, "injected transient rename denial", str(other))
+        return real_rename(self, other)
+
+    monkeypatch.setattr(Path, "rename", deny_once)
+    copied = Operations.duplicate_graph_project(source["entry"], target)
+    # Only the denied child is attempted twice; every other child is moved once.
+    assert observed[0] == observed[1] and len(set(observed)) == len(observed) - 1
+    assert copied.graph_snapshot() == source["ops"].graph_snapshot()
+    assert copied.adaptation_snapshot() == source["ops"].adaptation_snapshot()
+    assert layout(target).db.is_file() and layout(target).entry.is_file()
+    assert not any(path.name.startswith(".project-copy-") for path in target.parent.iterdir())
+
+
+def test_rename_denial_after_the_retry_budget_propagates_and_leaves_no_partial_copy(source, tmp_path, monkeypatch):
+    target = destination(tmp_path)
+    provider_before = _provider_rows(source["ops"])
+    graph_before = source["ops"].graph_snapshot()
+    observed = []
+
+    def always_denied(self, other):
+        observed.append(Path(other).name)
+        raise PermissionError(13, "injected persistent rename denial", str(other))
+
+    monkeypatch.setattr(Path, "rename", always_denied)
+    with pytest.raises(PermissionError, match="persistent rename denial"):
+        Operations.duplicate_graph_project(source["entry"], target)
+    assert len(observed) == 4  # One attempt plus the three measured backoffs.
+    assert set(observed) == {observed[0]}  # Exhausts the budget on one child, never advances.
+    assert list(target.parent.iterdir()) == []
+    assert _provider_rows(source["ops"]) == provider_before
+    assert source["ops"].graph_snapshot() == graph_before
