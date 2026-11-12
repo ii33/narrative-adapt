@@ -18,6 +18,14 @@ Item {
     AdaptationAdapter { id: adaptationAdapter; host: page }
     readonly property var t: app.theme
 
+    // 三栏宽度契约全在 theme.LAYOUT 里；这里只做算术，不写死数字。
+    // 把手宽度也参与等式：三栏全展开 = 分类最小宽 + 列表最小宽 + 详情最小宽 + 两条把手。
+    readonly property int columnHandleWidth: 12
+    readonly property real fullColumnsWidth: t.browse_category_min_width + t.browse_list_min_width
+        + t.browse_detail_min_width + 2 * columnHandleWidth
+    // 比「三栏全展开」还窄时，分类栏收成窄条：腾出的宽度给列表与详情。
+    readonly property bool categoryRail: columns.width < fullColumnsWidth
+
     property var nodes: []
     property var steps: []
     property var events: []
@@ -1124,11 +1132,16 @@ Item {
             objectName: "browseColumns"
             Layout.fillWidth: true
             Layout.fillHeight: true
+            // 岛屿模式下三列整体从页面卡片边框内缩半缝，别贴边；
+            // 紧凑模式三个方向都是 0，几何与原样一致。
+            Layout.leftMargin: app.islandsMode ? t.island_gap / 2 : 0
+            Layout.rightMargin: app.islandsMode ? t.island_gap / 2 : 0
+            Layout.bottomMargin: app.islandsMode ? t.island_gap / 2 : 0
             orientation: Qt.Horizontal
 
             handle: Rectangle {
                 objectName: "browseColumnHandle"
-                implicitWidth: 12
+                implicitWidth: page.columnHandleWidth
                 color: "transparent"
 
                 // 只负责把光标变成左右箭头；按键留给 SplitView 自己处理。
@@ -1143,20 +1156,25 @@ Item {
                     width: 2
                     height: parent.height
                     radius: 1
+                    // 岛屿模式下缝隙由把手宽度形成，竖线不画——和主框构的把手一致。
+                    visible: !app.islandsMode
                     color: SplitHandle.pressed || SplitHandle.hovered ? t.accent : t.line
                 }
             }
 
             // -- categories ---------------------------------------------
             Rectangle {
-                SplitView.preferredWidth: 190
-                SplitView.minimumWidth: 140
+                objectName: "browseCategories"
+                // 窄条形态：分类收成竖条，宽度让给列表与详情。
+                SplitView.preferredWidth: page.categoryRail ? t.browse_rail_width : 190
+                SplitView.minimumWidth: page.categoryRail ? t.browse_rail_width : t.browse_category_min_width
                 SplitView.fillHeight: true
                 color: t.card
                 border.color: t.line
                 radius: t.radius
 
                 ColumnLayout {
+                    visible: !page.categoryRail
                     anchors.fill: parent
                     anchors.margins: 10
                     spacing: 2
@@ -1208,12 +1226,63 @@ Item {
 
                     Item { Layout.fillHeight: true }
                 }
+
+                // 窄条形态：竖排「分类」+ 弹出菜单（分类与计数），点选行为与原列表一致。
+                Item {
+                    objectName: "browseCategoryRail"
+                    visible: page.categoryRail
+                    anchors.fill: parent
+                    anchors.margins: 4
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 2
+
+                        Label {
+                            Layout.alignment: Qt.AlignHCenter
+                            text: "分\n类"
+                            color: t.muted
+                            font.pixelSize: 11
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        Item { Layout.fillHeight: true }
+                        Label {
+                            Layout.alignment: Qt.AlignHCenter
+                            text: "▾"
+                            color: t.muted
+                            font.pixelSize: 12
+                        }
+                    }
+
+                    Menu {
+                        id: categoryMenu
+                        objectName: "browseCategoryMenu"
+                        Repeater {
+                            model: categories
+                            delegate: MenuItem {
+                                required property var modelData
+                                text: (page.selectedType === modelData.key ? "✓ " : "")
+                                    + modelData.label + "  " + modelData.count
+                                onTriggered: page.pickType(modelData.key)
+                            }
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: categoryMenu.popup()
+                    }
+                }
             }
 
             // -- node list ----------------------------------------------
             Rectangle {
+                // 中列容器（列宽用这个量）；`browseNodeList` 仍是里面那个 ListView——
+                // scripts/probe_*.py 与 test_browse_detail_sync 都在按 ListView 找它。
+                objectName: "browseListColumn"
                 SplitView.fillWidth: true
-                SplitView.minimumWidth: 240
+                SplitView.minimumWidth: t.browse_list_min_width
                 SplitView.fillHeight: true
                 color: t.card
                 border.color: t.line
@@ -1319,8 +1388,9 @@ Item {
 
             // -- detail --------------------------------------------------
             Rectangle {
+                objectName: "browseDetail"
                 SplitView.preferredWidth: 500
-                SplitView.minimumWidth: 360
+                SplitView.minimumWidth: t.browse_detail_min_width
                 SplitView.fillHeight: true
                 color: t.card
                 border.color: t.line

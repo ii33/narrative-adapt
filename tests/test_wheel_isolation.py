@@ -30,7 +30,16 @@ def test_graph_and_chat_wheels_are_isolated_including_chat_boundaries(tmp_path, 
             actual = rect(item)
             assert item.property("visible"), name
             assert bounds[0] <= actual[0] < actual[2] <= bounds[2], (name, bounds, actual)
-        assert rect(canvas)[2] < rect(ui.panel)[0]
+        # 协作者有两种形态，画布与面板的关系也分两种：
+        # 宽窗口（≥ assistant_dock_min_width）停靠成独立一列，页面让出宽度，画布不能
+        # 伸到面板底下；窄窗口改成压在页面区上的抽屉，页面不再让宽度，画布本来就在
+        # 面板底下——这时守「覆盖」这条形态：面板右贴页面区、左边界落在页面内部。
+        if ui.window.property("assistantDocked"):
+            assert rect(canvas)[2] < rect(ui.panel)[0]
+        else:
+            panel = rect(ui.panel)
+            assert panel[2] == pytest.approx(bounds[2], abs=1)
+            assert bounds[0] < panel[0]
 
         def graph_state():
             return page.property("zoom"), page.property("panX"), page.property("panY")

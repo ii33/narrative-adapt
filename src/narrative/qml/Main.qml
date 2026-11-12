@@ -13,7 +13,7 @@ ApplicationWindow {
     objectName: "nativeRoot"
     width: 1440
     height: 900
-    minimumWidth: 1100
+    minimumWidth: theme.window_min_width
     minimumHeight: 680
     visible: true
     title: mode === "workspace" && project.title
@@ -78,6 +78,9 @@ ApplicationWindow {
     property var screenplaySelection: ({})
     // 常驻协作者：面板跨页面保留，收起后状态还在（消息不丢）。
     property bool assistantOpen: false
+    // 宽窗口停靠成独立一列，窄窗口改成覆盖在页面区上的抽屉（不占列）。
+    // 阈值只认令牌：见 theme.LAYOUT 的停靠态等式。
+    readonly property bool assistantDocked: app.width >= theme.assistant_dock_min_width
     property bool navigationCollapsed:false
     property real navigationExpandedWidth:196
     function toggleNavigation(){if(!navigationCollapsed)navigationExpandedWidth=Math.max(150,sidebar.width);navigationCollapsed=!navigationCollapsed;sidebar.SplitView.preferredWidth=navigationCollapsed?56:navigationExpandedWidth}
@@ -387,13 +390,20 @@ ApplicationWindow {
                     }
                 }
 
-                ColumnLayout {
-                    // 页面这一列吃掉剩下的宽度：协作者展开时只让出它自己的 360。
+                // 页面区：窄窗口下协作者要覆盖在它上面，所以外面包一层 Item——
+                // 抽屉和页面列共用同一块几何，SplitView 只认这一层的最小宽度。
+                Item {
+                    id: workspacePageArea
+                    objectName: "workspacePageArea"
                     SplitView.fillWidth: true
-                    SplitView.minimumWidth: 520
+                    SplitView.minimumWidth: app.theme.workspace_min_width
                     Layout.fillHeight: true
-                    spacing: 0
                     clip: true
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    // 页面这一列吃掉剩下的宽度：协作者展开时只让出它自己的 360。
+                    spacing: 0
 
                     Rectangle {
                         Layout.fillWidth: true
@@ -446,17 +456,19 @@ ApplicationWindow {
                         }
                     }
 
-                    // 岛屿模式：页面内容也浮成一张卡片；紧凑模式边距与圆角都为 0，等于原样。
+                    // 页面内容区只是容器，自己不画卡片：岛屿模式下让窗口底色 paper 从
+                    // 各页面自己的列/卡片之间露出来——页面里的 card 才是岛屿，缝隙才有
+                    // 层次。紧凑模式的边距本来就是 0、颜色本来就是透明，渲染与改动前一致。
                     Rectangle {
+                        id: pageCard
+                        objectName: "pageCard"
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         Layout.leftMargin: app.islandInset
                         Layout.rightMargin: app.islandInset
                         Layout.bottomMargin: app.islandInset
-                        color: app.islandsMode ? app.theme.card : "transparent"
-                        border.width: app.islandsMode ? 1 : 0
-                        border.color: app.theme.line
-                        radius: app.islandRadius
+                        color: "transparent"
+                        border.width: 0
 
                         StackLayout {
                         anchors.fill: parent
@@ -485,17 +497,58 @@ ApplicationWindow {
                     }
                 }
 
-                // 常驻协作者：挂在页面右边，切页面不消失。
+                // 窄窗口的协作者抽屉：不占 SplitView 列，覆盖在页面内容卡之上。
+                // 顶栏（标题、路径、「协作者」按钮）不盖：遮罩压上去按钮就点不到了。
+                // 遮罩用令牌色加透明度，不新增颜色；点遮罩或再点「协作者」收起。
+                Item {
+                    id: assistantOverlay
+                    objectName: "assistantOverlay"
+                    anchors.fill: parent
+                    // pageCard 与这里不是兄弟，只能借它的 y 当上边距；这个值已经含
+                    // 顶栏高度与岛屿内缩，绑定会跟着布局变，不写死 54。
+                    anchors.topMargin: pageCard.y
+                    visible: app.assistantOpen && !app.assistantDocked
+                    z: 100
+
+                    Rectangle {
+                        objectName: "assistantScrim"
+                        anchors.fill: parent
+                        color: app.theme.ink
+                        opacity: 0.18
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: app.assistantOpen = false
+                        }
+                    }
+                    // 面板本身在下面的停靠位里声明：只有一份实例，按模式换 parent。
+                }
+                }
+
+                // 宽窗口：协作者停靠成独立一列，切页面不消失。
                 // 岛屿模式下它比面板多留一圈缝，面板自己就成了一张独立卡片。
                 Item {
-                    visible: app.assistantOpen
+                    id: assistantDockSlot
+                    objectName: "assistantDock"
+                    visible: app.assistantOpen && app.assistantDocked
                     SplitView.preferredWidth: 360 + (app.islandsMode ? app.theme.island_gap : 0)
                     SplitView.minimumWidth: 280
                     SplitView.fillHeight: true
 
+                    // 一份面板、两个位置：停靠时是 SplitView 第三列，窄窗口时 parent
+                    // 换到页面区上的抽屉里。同一实例，宽度跨过阈值时对话内容不丢。
                     AssistantPanel {
-                        anchors.fill: parent
+                        id: assistantPanel
+                        parent: app.assistantDocked ? assistantDockSlot : assistantOverlay
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        anchors.right: parent.right
                         anchors.margins: app.islandInset
+                        width: app.assistantDocked
+                            ? parent.width - 2 * app.islandInset
+                            : Math.min(360 + (app.islandsMode ? app.theme.island_gap : 0),
+                                       parent.width - 2 * app.islandInset)
                         app: app
                         pageId: app.currentPage
                         visible: app.assistantOpen

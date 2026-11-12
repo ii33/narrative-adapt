@@ -55,6 +55,24 @@ LAYOUT = {
     # 岛屿布局：每个区域浮成一张独立卡片，卡片之间留缝。紧凑布局不用这两个值。
     "island_gap": 10,
     "island_radius": 12,
+    # 窄窗口响应式契约：QML 只用这几个名字判断形态，不自己散落阈值。
+    # 三条等式（左边是布局算出来的需求，右边是下面的取值）：
+    # ① 协作者停靠态不挤压：nav 最小宽 150 + workspace_min_width 640
+    #    + 协作者列 360 + island_gap 10 + 两条 SplitView 把手 2×6 = 1172
+    #    ≤ assistant_dock_min_width 1370。窗口更窄就改抽屉，不占列。
+    #    为什么是 1370 而不是 1172：停靠态还得留够浏览页三栏（724）加上岛屿多花的
+    #    island_gap，实测 1360 停靠时三栏只剩 722，差 2px 就把分类栏挤成窄条。
+    # ② 收窄后三栏仍立得住：browse_rail_width 44 + browse_list_min_width 240
+    #    + browse_detail_min_width 320 + 两条列把手 2×12 = 628 ≤ workspace_min_width 640。
+    # ③ 三栏全展开所需宽度：140 + 240 + 320 + 2×12 = 724；SplitView 比它窄时
+    #    分类栏收成 44 的窄条。
+    "window_min_width": 1100,
+    "workspace_min_width": 640,
+    "assistant_dock_min_width": 1370,
+    "browse_category_min_width": 140,
+    "browse_list_min_width": 240,
+    "browse_detail_min_width": 320,
+    "browse_rail_width": 44,
 }
 
 

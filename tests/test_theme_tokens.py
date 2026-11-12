@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from narrative.theme import LAYOUT, TOKENS
 
 QML_DIR = Path(__file__).resolve().parents[1] / "src" / "narrative" / "qml"
@@ -108,6 +110,64 @@ def test_every_token_reference_exists_in_theme():
 def test_no_hard_coded_colors_inside_popups():
     problems = popup_color_problems(qml_sources())
     assert not problems, "弹层里写了固定颜色，深色下不会跟随主题：\n" + "\n".join(problems)
+
+
+# 响应式契约的三条不等式。每条形如「左边是布局算出来的需求，右边是令牌取值」，
+# 改任何一个宽度令牌都可能让某条不再成立——报错时必须说得出是哪一条。
+LAYOUT_CONTRACT = (
+    (
+        "第 1 条 协作者停靠态不挤压：assistant_dock_min_width ≥ "
+        "150(nav) + workspace_min_width + 360(协作者列) + island_gap + 12(把手×2)",
+        lambda layout: layout["assistant_dock_min_width"]
+        >= 150 + layout["workspace_min_width"] + 360 + layout["island_gap"] + 12,
+    ),
+    (
+        "第 2 条 收窄后三栏仍立得住：workspace_min_width ≥ "
+        "browse_rail_width + browse_list_min_width + browse_detail_min_width + 24(列把手×2)",
+        lambda layout: layout["workspace_min_width"]
+        >= layout["browse_rail_width"]
+        + layout["browse_list_min_width"]
+        + layout["browse_detail_min_width"]
+        + 24,
+    ),
+    (
+        "第 3 条 窗口最小宽容得下导航：window_min_width ≥ "
+        "150(nav) + workspace_min_width + 6(主构把手)",
+        lambda layout: layout["window_min_width"]
+        >= 150 + layout["workspace_min_width"] + 6,
+    ),
+)
+
+
+def layout_contract_problems(layout):
+    """逐条检查响应式等式，返回「第几条 + 式子」；空列表表示三条都成立。"""
+    return [formula for formula, holds in LAYOUT_CONTRACT if not holds(layout)]
+
+
+def test_layout_tokens_are_mutually_consistent():
+    """宽度令牌之间必须自洽：某条被破坏时 QML 的阈值判断就会自相矛盾。"""
+    problems = layout_contract_problems(LAYOUT)
+    assert not problems, "响应式令牌不自洽，破坏的是：\n" + "\n".join(problems)
+
+
+@pytest.mark.parametrize(
+    ("index", "token", "value"),
+    [
+        # 把停靠阈值拉低 200：停靠时三栏会被挤到 722，分类栏在两形态间跳变。
+        (0, "assistant_dock_min_width", LAYOUT["assistant_dock_min_width"] - 200),
+        # 把工作区最小宽压到 600：窄条(44)+列表(240)+详情(320)+把手(24)=628 已经装不下。
+        (1, "workspace_min_width", 600),
+        # 把窗口最小宽压到 800：导航(150)+工作区(640)+主构把手(6)=796 之外没有余量。
+        (2, "window_min_width", 790),
+    ],
+    ids=["dock-threshold", "workspace-floor", "window-floor"],
+)
+def test_broken_layout_contract_names_the_rule(index, token, value):
+    """正向用例：每条不等式单独破坏时，报错必须点名是第几条。"""
+    broken = dict(LAYOUT, **{token: value})
+    problems = layout_contract_problems(broken)
+    assert len(problems) == 1, problems
+    assert problems[0].startswith(f"第 {index + 1} 条"), problems[0]
 
 
 def test_unknown_token_is_reported():
