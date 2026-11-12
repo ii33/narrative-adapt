@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from . import version
+from . import runtime_security, version
 
 QML_PATH = Path(__file__).with_name("qml") / "Main.qml"
 
@@ -134,6 +134,25 @@ def main(argv: list[str] | None = None) -> int:
     record(f"startup pid={os.getpid()} qml={QML_PATH}")
     record(f"requested_render_loop={os.environ.get('QSG_RENDER_LOOP', '<Qt platform default>')}")
     record(f"requested_backend={os.environ.get('QSG_RHI_BACKEND', '<Qt platform default>')}")
+    # 兜底：脚本层的拦截可以被绕过（直接跑 pythonw、或从别的宿主拉起）。进 UI 之前
+    # 再查一次完整性。低完整性进程写不了用户目录，与其让用户点几下才发现存不下来，
+    # 不如在这里硬失败：写渲染日志 + 一个说得清的对话框 + 非 0 退出码。
+    # 确实要在受限终端里跑，就设 NARRATIVE_ALLOW_LOW_INTEGRITY=1；那时界面会一直
+    # 挂着「改动不会写进用户目录」的提示（bridge.integrityWarning）。
+    integrity = runtime_security.current_integrity_level()
+    record("integrity_level=" + ("unknown" if integrity is None else f"0x{integrity:04x}"))
+    allowed = runtime_security.allow_low_integrity_requested()
+    refusal = runtime_security.startup_refusal(integrity, allow=allowed)
+    if refusal is not None:
+        record("startup_refused=low_integrity")
+        record(refusal.replace("\n", " "))
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen" or args.qa_exit_after_seconds is not None:
+            print(f"{refusal}\n渲染日志：{render_log}", file=sys.stderr)
+        else:
+            _show_startup_error(app, f"无法启动：{refusal}")
+        return 3
+    if runtime_security.low_integrity_blocks(integrity):
+        record("integrity_override=allow_low_integrity notice_shown=true")
     bridge = NativeBridge()
     # 外观要在加载 QML 之前定下来：否则第一帧先按浅色画一遍，再跳成深色。
     bridge.load_appearance()

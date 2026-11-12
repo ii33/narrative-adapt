@@ -8,7 +8,16 @@ instead of creating a project from scratch.
 """
 from __future__ import annotations
 
+import os
+
 import pytest
+
+# UI 测试一律离屏：QApplication 的平台在**第一次创建时**定死，谁先建谁决定整进程
+# 用哪个平台。以前各 ui 文件在夹具里各自设 env，结果一个没设的文件（直接在真 Windows
+# 平台上建了 QApplication）会把后面所有文件的窗口卡在屏幕可用宽度里（实测 1360/1500
+# 宽的用例变成 1282）。在收集期就把默认值钉住，谁先建都一样。
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
 UI_SUFFIX = "_ui.py"
 NATIVE_HINTS = (

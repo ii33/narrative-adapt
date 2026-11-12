@@ -1,4 +1,4 @@
-#requires -Version 5.1
+#requires -Version 7.0
 <#
 .SYNOPSIS
     Create or repair the isolated Microsoft GraphRAG environment.

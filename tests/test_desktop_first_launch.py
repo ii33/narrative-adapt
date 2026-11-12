@@ -49,7 +49,7 @@ def launcher(tmp_path):
 
     def run(*args):
         return subprocess.run(
-            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(root / "start-desktop.ps1"), *args],
+            ["pwsh", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(root / "start-desktop.ps1"), *args],
             cwd=root, text=True, capture_output=True, timeout=30,
         )
 
@@ -151,7 +151,7 @@ def test_setup_runs_locked_sync_before_preparation(tmp_path):
     env = os.environ.copy()
     env["PATH"] = str(tmp_path) + os.pathsep + env.get("PATH", "")
     result = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(tmp_path / "setup-environment.ps1")],
+        ["pwsh", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(tmp_path / "setup-environment.ps1")],
         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stderr

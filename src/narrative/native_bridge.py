@@ -26,6 +26,7 @@ from . import (
     project_catalog,
     project_package,
     providers,
+    runtime_security,
     theme,
     version,
 )
@@ -62,6 +63,11 @@ class NativeBridge(QObject):
     darkModeChanged = Signal()
     layoutModeChanged = Signal()
     versionChanged = Signal()
+    # 非致命提示（「事已经按你说的办好了，只是有个附带动作没成」）。界面当提示显示，
+    # 不当错误：最近工程列表这类便利记录写不进去，不该把一个做完的动作染成失败。
+    noticeRaised = Signal(str)
+    # 进程完整性不变，所以 integrityChanged 从不发射；它只是让 Property 有 notify。
+    integrityChanged = Signal()
 
     @Property(str, notify=themeModeChanged)
     def themeMode(self) -> str:
@@ -95,6 +101,12 @@ class NativeBridge(QObject):
         """不带构建身份的版本标签，例如 ``v0.2.0-dev.islands``。"""
         return version.tag()
 
+    # 低完整性进程写不了用户目录（最近工程、模型设置都在那儿）。这不是致命错误，
+    # 但必须常驻可见：状态栏按这条串决定要不要一直挂着那条警告。正常启动是空串。
+    @Property(str, notify=integrityChanged)
+    def integrityWarning(self) -> str:
+        return runtime_security.current_integrity_notice()
+
     # 一个操作最多等这么久。超过就放弃它并把「处理中」清掉：
     # 结果要是永远不回来，界面就会一直卡在「处理中」，什么都点不动。
     STALE_AFTER_SECONDS = 10.0
@@ -120,6 +132,8 @@ class NativeBridge(QObject):
         self._epoch = 0
         self._query_epoch = 0
         self._recent_generation = 0
+        # 清单写不进去时，也得让它在内存里消失：否则刷新列表又把它捡回来。
+        self._recent_removed: set[str] = set()
         self._query_spec: dict = {}
         self._query_canvas: dict | None = None
         self._unified_active = False
@@ -624,7 +638,25 @@ class NativeBridge(QObject):
             return []
         if strict and not isinstance(rows, list):
             raise ValueError("最近工程列表格式无效")
-        return [row for row in rows if isinstance(row, str)] if isinstance(rows, list) else []
+        if not isinstance(rows, list):
+            return []
+        return [row for row in rows
+                if isinstance(row, str) and self.recentProjectKey(row) not in self._recent_removed]
+
+    def _warn_recent_write(self, action: str, exc: Exception) -> None:
+        """清单写不进去只发一条提示，绝不让动作失败。
+
+        最近工程列表是「下次启动的便利记录」，不是业务数据：写不进去不影响这个工程和
+        它的数据。常见原因只有一个——当前进程写不了用户目录（低完整性、受限终端或
+        沙箱启动），所以提示里必须写清「怎么办」。
+        """
+        self.noticeRaised.emit(
+            f"{action}：{exc}。"
+            "最近工程列表只是下次启动的便利记录，不影响工程本身和它的数据；"
+            "写不进去通常是这个进程没有用户目录（C:\\Users\\<用户名>\\.narrative）的写权限，"
+            "常见原因是从受限终端、沙箱或代理里启动。关闭后从桌面/资源管理器双击 "
+            "start-desktop.cmd 重新启动即可。"
+        )
 
     def _remember_project(self, path: Path) -> None:
         text = str(path)
@@ -636,8 +668,11 @@ class NativeBridge(QObject):
                 "recent_projects",
                 json.dumps(rows[: self.RECENT_LIMIT], ensure_ascii=False),
             )
-        except Exception:  # 记不住不影响打开
-            pass
+        except Exception as exc:  # 记不住不影响打开
+            self._warn_recent_write("已打开工程，但没能写进最近工程列表", exc)
+        else:
+            # 写成功了，就别再拿内存里的「已移除」压着它：重新打开就是重新记住。
+            self._recent_removed.discard(self.recentProjectKey(text))
 
     @Slot(str)
     def openProjectUrl(self, url: str) -> None:
@@ -711,7 +746,12 @@ class NativeBridge(QObject):
 
     @Slot(str, bool)
     def removeProject(self, path: str, delete_files: bool) -> None:
-        """Forget the entry; explicit deletion only removes its validated owned files."""
+        """Forget the entry; explicit deletion only removes its validated owned files.
+
+        清单写失败不放弃动作：先按用户意图做完（内存里移除、关工程、删自有文件、刷新
+        列表），最后只发一条能看懂的提示。最近工程列表是下次启动的便利记录，不是业务
+        数据——它写不进去，不该让「移出工程」整段失败。
+        """
         from PySide6.QtCore import QUrl
 
         target = Path(QUrl(path).toLocalFile() or path).resolve()
@@ -719,12 +759,18 @@ class NativeBridge(QObject):
         try:
             rows = [row for row in self._recent_paths(strict=True)
                     if self.recentProjectKey(row) != key]
+        except Exception:
+            # 读坏了也要能移除：读不出来的条目本来就不在列表里。
+            rows = [row for row in self._recent_paths() if self.recentProjectKey(row) != key]
+        write_error: Exception | None = None
+        try:
             ProviderStore().put(
                 GLOBAL_SCOPE, "recent_projects", json.dumps(rows, ensure_ascii=False)
             )
         except Exception as exc:
-            self.errorOccurred.emit("project", f"无法保存最近工程列表：{exc}")
-            return
+            write_error = exc
+            # 写不进去就在内存里也当它已移除，否则下面的刷新会把它捡回列表。
+            self._recent_removed.add(key)
         self._recent_generation += 1
         if self._project_path is not None and self.recentProjectKey(str(self._project_path)) == key:
             self.closeProject()
@@ -780,6 +826,9 @@ class NativeBridge(QObject):
             "deletion_error": deletion_error,
         })
         self.loadRecentProjects()
+        if write_error is not None:
+            # 动作已经做完了，只是清单没写进去：一条提示，且要在刷新列表之后发。
+            self._warn_recent_write("已移出工程，但没能写进最近工程列表", write_error)
 
     @Slot(str)
     def forgetRecentProject(self, path: str) -> None:

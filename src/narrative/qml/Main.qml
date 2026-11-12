@@ -206,6 +206,11 @@ ApplicationWindow {
             // A failed open leaves the launcher in place; never a half-entered project.
             if (kind === "project" && mode !== "workspace") project = ({})
         }
+        // 非致命提示：动作已经照用户的意思做完了，只是附带记录（如最近工程列表）没写进去。
+        // 用提示色而不是错误色——染成红色会让人以为操作失败了。
+        function onNoticeRaised(message) {
+            notice = message
+        }
         function onBusyChanged(value) {
             busy = value
         }
@@ -589,6 +594,18 @@ ApplicationWindow {
                         : app.notice.length > 0 ? app.notice
                         : app.diagnosticLine
                     color: app.errorText.length > 0 ? app.theme.bad : app.theme.muted
+                }
+                // 低完整性/降级运行的常驻警告：只在真的低完整性时出现（正常会话里是空串，
+                // 不占宽度也不改布局）。它会一直挂着，直到进程换成中完整性启起来——
+                // 「点一下就消失」的提示救不了「改动根本没写进用户目录」这件事。
+                Label {
+                    objectName: "integrityWarningLabel"
+                    visible: bridge.integrityWarning.length > 0
+                    text: bridge.integrityWarning
+                    color: app.theme.warn
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                    Layout.maximumWidth: 320
                 }
                 // 构建身份：截图与 bug 报告靠这一行指回具体代码（真源 narrative/version.py）。
                 Label {

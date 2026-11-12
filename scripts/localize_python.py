@@ -89,7 +89,45 @@ def main() -> int:
         if not Path(result[name]).resolve().is_relative_to(root):
             raise RuntimeError(f"Python still uses an external {name}: {result[name]!r}; project: {str(root)!r}")
     print(json.dumps(result, indent=2))
+    _guard_integrity_labels(root, env)
     return 0
+
+
+def _project_python(root: Path, arguments: list[str], env: dict) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(root / ".venv/Scripts/python.exe"), "-I", *arguments],
+        cwd=root, env=env, capture_output=True, text=True, check=False,
+    )
+
+
+def _guard_integrity_labels(root: Path, env: dict) -> None:
+    """收尾警告 + 自愈：本脚本复制整个 CPython 并重写 venv 重定向器，正是打 Low 标签的时机。
+
+    低完整性进程创建的文件会被打上 Low 标签，而 Windows 对带 Low 标签的 exe 一律以
+    Low 启动（父进程 Medium 也救不回来），应用就写不了用户目录。修复本身必须由中
+    完整性进程做：低完整性会话里只能拦下来并说明。
+    """
+    level = _project_python(
+        root,
+        ["-c", "from narrative.runtime_security import current_integrity_level as f; "
+               "v=f(); print(0 if v is None else v)"],
+        env,
+    )
+    text = (level.stdout or "").strip()
+    if level.returncode == 0 and text.isdigit() and int(text) < 0x2000:
+        print(
+            "WARNING: this session is Low integrity. The interpreter files just created or "
+            "rewritten carry a Low integrity label, and Windows will always start such exes "
+            "as Low - the desktop app would then fail to write %USERPROFILE%\\.narrative "
+            "(SQLite: \"attempt to write a readonly database\"). "
+            "Run scripts\\fix_venv_integrity.ps1 from a normal (Medium) terminal; the repair "
+            "cannot be done from a Low process.",
+            file=sys.stderr,
+        )
+    repair = _project_python(root, [str(root / "scripts/check_runtime.py"), "--fix-integrity-labels"], env)
+    for stream in (repair.stdout, repair.stderr):
+        if stream:
+            print(stream, end="", file=sys.stderr if stream is repair.stderr else sys.stdout)
 
 
 if __name__ == "__main__":

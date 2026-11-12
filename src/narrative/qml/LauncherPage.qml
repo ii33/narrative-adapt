@@ -698,6 +698,22 @@ Item {
             }
         }
 
+        // 启动器自己的提示行：移除工程、清单没写进去这类事就发生在这一页，而底部
+        // 状态栏只在工作区显示。文案与状态栏同源（app.errorText / app.notice）；
+        // 空串时 visible=false，不占高度，紧凑模式的观感与改动前一致。
+        Label {
+            objectName: "launcherStatus"
+            Layout.fillWidth: true
+            Layout.leftMargin: 24
+            Layout.rightMargin: 24
+            visible: app.errorText.length > 0 || app.notice.length > 0
+            text: app.errorText.length > 0 ? app.errorText : app.notice
+            color: app.errorText.length > 0 ? t.bad : t.muted
+            font.pixelSize: 10
+            wrapMode: Text.Wrap
+            maximumLineCount: 4
+        }
+
         // 版本与代号：截图、日志、bug 报告靠这一行指回具体构建（真源 narrative/version.py）。
         Label {
             objectName: "launcherVersion"
