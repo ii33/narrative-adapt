@@ -94,6 +94,13 @@ Start-Process .venv\Scripts\python.exe -ArgumentList '-m','pytest','-q' `
   判据：`pytest --co -q -n 8` 连跑收集数一致、`pytest -q` 连跑不出现该消息，即为已消除；若再现，先查该轮是否有 worker
   报告过 `ERROR`/导入异常（`--tb=short -n 0` 复收集该文件），不要当成随机性。
 
+- `tests/test_project_copy_boundaries.py` 偶发 `PermissionError: [WinError 5] 拒绝访问`，位置在
+  `project_copy.py::duplicate_graph_project` 把暂存目录改名到最终路径那一步（`.project-copy-*` 下的数据目录 →
+  目标数据目录）。实测同一天 6 次运行里出现 2 次，其中一次发生在**未改动的基线代码**上，两次挂的还不是同一条用例。
+  判据：单跑该整文件必过、原地重跑即过，且失败点始终是 `os.rename` 的目录改名而非断言。看着像本机杀毒/索引
+  还占着刚关闭的目录句柄（Windows 目录改名要求无任何打开句柄），不是路径语义或复制逻辑缺陷。
+  **遇到先重跑**；别为了让它变绿去改断言或给复制流程加 sleep。
+
 - UI 用例的滚动等待超时 `tests/test_chat_scroll.py` 抛 `AssertionError: Transcript did not settle: y=… height=…`：
   出现在**高负载/并行**的全量里（实测那一轮全量 774s，平时约 310s；同机器上另有任务在跑），等的是"内容滚到底"
   这个可观察条件，超时前 `y` 仍小于 `contentHeight`。判据：`pytest tests/test_moment_involvement.py -n 0` 必过、
@@ -108,6 +115,12 @@ Start-Process .venv\Scripts\python.exe -ArgumentList '-m','pytest','-q' `
 - 不通过删除既有测试来提速；先判断它属于哪一层，再决定是否移出默认。
 - 测试产物放用例自己的 `tmp_path`；不要写入仓库或用户目录，也不要依赖上一次运行留下的数据。
 - 默认套件保持分钟级（并行）；明显变慢时先查是否又引入了“每例建库”“真实等待”或未分层的重集成用例。
+- 重夹具链一律「module 级模板 + 每例副本」：整条链（原文→提取→改编→剧本→时间线→选区→段落）按模块建一次，
+  用例侧 `shutil.copytree` 到自己的 `tmp_path` 再 `Operations.open`（现成例子：`tests/conftest.py::writing_template`、
+  `tests/conftest.py::sources_template`、`test_event_property_state.py::facts_template`）。实测整链重建约 1 秒，
+  复制一份工程约 0.06 秒；副本沿用原工程名并落在 `tmp_path` 根下，用例里的路径断言不必改。
+  **模板夹具放 `tests/conftest.py`**，不要放在定义它的测试模块里：pytest 按“提出请求的模块”解析夹具参数，
+  放在测试模块里，那些 `from test_x import some_fixture` 的模块会报 `fixture '…' not found`。
 - 排查「缓存命中率低」时，先看任务审计 `metadata-*.json` 的 `model_requests[].tools_hash` 与 `tools_count`：
   这两个字段是每条请求实际发出的工具数组的顺序指纹。**`tools_hash` 变了就说明工具数组变了**，其后所有 token 都要重算，
   缓存回退通常就发生在这一刻（`load_tools` 扩容、模板会话冻结名单与实际允许集合不一致等）；哈希不变却仍回退，才去看历史重写
