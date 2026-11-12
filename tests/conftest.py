@@ -131,3 +131,22 @@ def project_template(tmp_path_factory):
     root = tmp_path_factory.mktemp("project-template")
     Operations.create_graph_project(root / "unified.nproj")
     return root
+
+
+# 重夹具链的「模板」放在这里而不是各自的测试模块：pytest 按提出请求的模块解析
+# 夹具参数，模板只有放在 conftest 才能被 `from test_x import fixture` 借用它的模块
+# 解析到。模板按模块作用域建一次，用例侧一律 copytree 到自己的 tmp_path 再打开。
+@pytest.fixture(scope="module")
+def writing_template(tmp_path_factory):
+    """剧本链条模板（原文→提取→改编→剧本→时间线→选区→段落），构造在 test_screenplay_writing。"""
+    from test_screenplay_writing import build_writing_template
+
+    return build_writing_template(tmp_path_factory)
+
+
+@pytest.fixture(scope="module")
+def sources_template(tmp_path_factory):
+    """来源标注链条模板（原文→提取→改编→剧本→时间线→选区→段落），构造在 test_screenplay_source_references。"""
+    from test_screenplay_source_references import build_sources_template
+
+    return build_sources_template(tmp_path_factory)

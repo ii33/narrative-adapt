@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import shutil
 
 import pytest
 from agent_fixtures import TEXT, draft_result
@@ -11,10 +12,27 @@ from narrative.screenplay_store import read_context
 from narrative.screenplay_writing import validate_script_writing_tool_call
 
 
-@pytest.fixture
-def project(tmp_path, monkeypatch):
-    monkeypatch.setenv("NARRATIVE_PROVIDER_DB", str(tmp_path / "providers.sqlite3"))
-    ops = Operations.create_graph_project(tmp_path / "writing.nproj")
+def build_writing_template(tmp_path_factory):
+    """整套剧本链条只建一次，每个用例复制目录再打开。
+
+    链条（原文→提取→改编→剧本→时间线→选区→段落）每例重放约 1 秒，是这些
+    文件 setup 的最大开销。夹具 `writing_template` 放在 `conftest.py`：pytest
+    按「提出请求的模块」解析夹具参数，放在本模块里，那些
+    `from test_screenplay_writing import project` 的模块会报
+    `fixture 'writing_template' not found`。
+    """
+    mp = pytest.MonkeyPatch()
+    root = tmp_path_factory.mktemp("screenplay-writing")
+    mp.setenv("NARRATIVE_PROVIDER_DB", str(root / "providers.sqlite3"))
+    try:
+        ids = _build_writing(root)
+    finally:
+        mp.undo()
+    return {"root": root, "ids": ids}
+
+
+def _build_writing(root):
+    ops = Operations.create_graph_project(root / "writing.nproj")
     source = ops.import_source("合成", TEXT)
     draft = draft_result(ended=False)
     result = ops.submit_extraction(source, draft)
@@ -28,7 +46,20 @@ def project(tmp_path, monkeypatch):
     span = ops.create_adaptation_span(screenplay["id"], "选区", start_node_id=events[0]["id"], end_node_id=events[-1]["id"],
         expected_timeline_revision=timeline["revision"], reason="测试选区")
     segment = ops.create_script_segment(screenplay["id"], span["span"]["id"], "接人", screenplay["structure_revision"], reason="测试建段")
-    return ops, screenplay["id"], segment["id"]
+    return screenplay["id"], segment["id"]
+
+
+@pytest.fixture
+def project(writing_template, tmp_path, monkeypatch):
+    """每例一份独立副本：这些用例都会写库，共享一个可写工程必然串味。
+
+    副本仍叫 `writing.nproj` 且落在 tmp_path 根下，用例里 `Operations.open_graph_project(
+    tmp_path / 'writing.nproj')` 之类的路径断言照旧成立。
+    """
+    monkeypatch.setenv("NARRATIVE_PROVIDER_DB", str(tmp_path / "providers.sqlite3"))
+    shutil.copytree(writing_template["root"], tmp_path, dirs_exist_ok=True)
+    screenplay_id, segment_id = writing_template["ids"]
+    return Operations.open(tmp_path / "writing.nproj"), screenplay_id, segment_id
 
 
 def table(ops, segment_id, units=None):

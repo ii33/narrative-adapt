@@ -1,4 +1,5 @@
 """Every scene traces current local timeline IDs through the shared Operations view."""
+import shutil
 from copy import deepcopy
 
 import pytest
@@ -6,10 +7,25 @@ import pytest
 from narrative.operations import Operations
 
 
-@pytest.fixture
-def prepared(tmp_path, monkeypatch):
-    monkeypatch.setenv('NARRATIVE_PROVIDER_DB', str(tmp_path / 'providers.sqlite3'))
-    ops = Operations.create_graph_project(tmp_path / 'sources.nproj')
+def build_sources_template(tmp_path_factory):
+    """整套来源标注工程只建一次，每个用例复制目录再打开。
+
+    夹具 `sources_template` 放在 `conftest.py`：pytest 按「提出请求的模块」解析
+    夹具参数，放在本模块里，那些 `from test_screenplay_source_references import
+    prepared` 的模块会报 `fixture 'sources_template' not found`。
+    """
+    mp = pytest.MonkeyPatch()
+    root = tmp_path_factory.mktemp('screenplay-sources')
+    mp.setenv('NARRATIVE_PROVIDER_DB', str(root / 'providers.sqlite3'))
+    try:
+        ids = _build_sources(root)
+    finally:
+        mp.undo()
+    return {'root': root, 'ids': ids}
+
+
+def _build_sources(root):
+    ops = Operations.create_graph_project(root / 'sources.nproj')
     text = '甲在车站收到通知。甲在车站确认新安排。'
     source = ops.import_source('来源标注', text)
     result = ops.submit_extraction(source, {'nodes': [
@@ -29,7 +45,19 @@ def prepared(tmp_path, monkeypatch):
     span = ops.create_adaptation_span(script['id'], '通知与安排', selection_ids=events,
         expected_timeline_revision=local['revision'], reason='指定范围')['span']
     segment = ops.create_script_segment(script['id'], span['id'], '通知段落', script['structure_revision'], '创建段落')
-    return ops, script['id'], segment['id'], events
+    return script['id'], segment['id'], events
+
+
+@pytest.fixture
+def prepared(sources_template, tmp_path, monkeypatch):
+    """每例一份独立副本：用例都会写库，共享一个可写工程必然串味。
+
+    副本仍叫 `sources.nproj` 且落在 tmp_path 根下，用例里的路径写法照旧成立。
+    """
+    monkeypatch.setenv('NARRATIVE_PROVIDER_DB', str(tmp_path / 'providers.sqlite3'))
+    shutil.copytree(sources_template['root'], tmp_path, dirs_exist_ok=True)
+    script_id, segment_id, events = sources_template['ids']
+    return Operations.open(tmp_path / 'sources.nproj'), script_id, segment_id, events
 
 
 def submit(ops, segment, plans):
