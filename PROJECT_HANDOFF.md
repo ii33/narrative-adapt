@@ -85,6 +85,32 @@ property_audit.audit_properties   → 物品持有、地点覆盖等覆盖类
   - 路由：原文页→提取、剧本页→剧本、分镜页→分镜；**用户手选的会话优先**，只有"有临时覆盖"或"还没有任何会话"时才走路由。
   - 自定义模板作用域：`app`（`~/.narrative/chat-templates.json`）与 `project`（工程 meta 表）；解析顺序 `project → app → 内置`；内置不可删、不可覆盖。
 
+### 3.5 版本号与构建身份
+
+**唯一真源是 `src/narrative/version.py`**；`pyproject.toml` 的 `version` 必须与它相等（`tests/test_version.py` 拦）。
+
+| 对外串 | 例子 | 用在哪里 |
+|---|---|---|
+| `version_number()` | `0.2.0` | `pyproject.toml`、MCP `SERVER_VERSION`、`app.setApplicationVersion` |
+| `tag()` | `v0.2.0-dev.islands` | 启动页底栏（`bridge.appVersionTag`） |
+| `build_id()` | `20261112.ac8d5af` | 日期 + 7 位短哈希；dirty 追加 `.dirty`；读不到 git 时 `unknown` |
+| `display_version()` | `v0.2.0-dev.islands+20261112.ac8d5af` | 状态栏 `appVersionLabel`、`bridge.appVersion`、启动日志 |
+| `banner()` | `叙事图工作台 v0.2.0-dev.islands+20261112.ac8d5af` | `python -m narrative.cli --version` |
+
+- 构建身份运行时从 git 读（`rev-parse HEAD`、`log -1 --format=%cd`、`status --porcelain`、`rev-parse --abbrev-ref HEAD`），**按进程缓存一次、不走网络**；没有 `.git`（装了 wheel）或 git 不可用时整体降级为 `unknown`，**不抛异常**。对外串的形状由 `tests/test_version.py` 的正则锁住：`v<主>.<次>.<修>-dev.<代号>+(<8 位日期>.<7 位哈希>[.dirty]|unknown)`。
+- `dirty` = 工作区有未提交改动：版本串带 `.dirty`，banner 追加「（工作区有未提交改动）」。**带 `.dirty` 的截图不能当某条提交的验收证据。**
+- 代号随 minor 换：`0.2` → `islands`（岛屿布局 / 窄窗响应式）。历史只记在这张表里。
+
+**升版规则**
+
+| 改了什么 | 动哪里 |
+|---|---|
+| 一次功能闭环落地 | 升 minor，换 `CODENAME` |
+| 修 bug | 升 patch |
+| 纯测试 / 文档 / 重构 | 不动版本 |
+
+开发者约定：**改版本只改 `version.py`（必要时连 `CODENAME` 一起换），`pyproject.toml` 跟着改**；`tests/test_version.py` 拦下两边不一致，`tests/test_app_version_ui.py` 拦下界面没露出。
+
 ---
 
 ## 4 代码地图
