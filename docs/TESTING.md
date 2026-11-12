@@ -107,6 +107,12 @@ Start-Process .venv\Scripts\python.exe -ArgumentList '-m','pytest','-q' `
   （覆盖测试：`test_transient_rename_denial_during_publication_is_retried_and_publishes_the_copy` 与
   `test_rename_denial_after_the_retry_budget_propagates_and_leaves_no_partial_copy`）。
 
+- `pytest -m ui -n 4` 下有两条**存量红**，与布局改动无关（在 `HEAD` 的另一棵 worktree 上同样红）：
+  `tests/test_reading_position_picker.py` 的 `[browse-…]` 那条（懒加载让 relation 页的 popup 不存在，早于本轮），
+  以及 `tests/test_event_merge_native.py`（需要真实模型服务，拿不到就 HTTP 500）。判据：两棵树逐条比对，
+  交集才是存量红；`-n 4` 下还会看到 `test_chat_scroll`、`test_lazy_pages_ui`、`test_storyboard_*`、
+  `test_static_check_ui` 等并行 flake，串行重跑即绿。
+
 - UI 用例的滚动等待超时 `tests/test_chat_scroll.py` 抛 `AssertionError: Transcript did not settle: y=… height=…`：
   出现在**高负载/并行**的全量里（实测那一轮全量 774s，平时约 310s；同机器上另有任务在跑），等的是"内容滚到底"
   这个可观察条件，超时前 `y` 仍小于 `contentHeight`。判据：`pytest tests/test_moment_involvement.py -n 0` 必过、

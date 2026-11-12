@@ -129,6 +129,7 @@ UI 侧约定：所有颜色走主题令牌（`theme.py` 的 `TOKENS` / `LAYOUT`�
 | `tests/test_project_changes.py::test_project_runtime_registers_and_dispatches_general_writes_only_in_active_task` | 并行 + 高负载；单跑 `-n 0` 通过 |
 | `tests/test_project_copy_boundaries.py`（换不同用例挂） | `PermissionError [WinError 5]` 出现在 `duplicate_graph_project` 的目录改名；单跑该文件必过、重跑即过，**未改动的基线代码上也会出现** |
 | `tests/test_chat_scroll.py` | 高负载下 `Transcript did not settle` 超时；单文件单跑通过 |
+| `pytest -m ui -n 4` 的两条**存量红**（与布局改动无关，`HEAD` 上也红） | `tests/test_reading_position_picker.py`（懒加载使 relation 页 popup 不在，`[browse-…]` 那条）、`tests/test_event_merge_native.py`（需要真实模型服务，拿不到就 HTTP 500）。另有 `test_chat_scroll` / `test_storyboard_asset_elements_ui` / `test_lazy_pages_ui` / `test_static_check_ui` 等在 `-n 4` 下的并行 flake，串行全绿 |
 
 另：并行下偶见 `ConnectionAbortedError [WinError 10053]` 栈打印，属服务端关连接噪声，无对应用例失败。
 
@@ -157,6 +158,8 @@ UI 侧约定：所有颜色走主题令牌（`theme.py` 的 `TOKENS` / `LAYOUT`�
 | `3f6b7b8`、`024376f`、`43e75e1`、`b3d74ff` | 测试成本治理：本机 HTTP 超时 2s→60s、`slow` 分层与 `--slow` 入口、事件事实工程只建一次（该文件 60s→14s）、修跨模块 import 夹具的依赖丢失 |
 | `df42a97`、`aaac87b` | **两条重夹具链改成「module 级模板 + 每例副本」**：`test_screenplay_writing.project` 与 `test_screenplay_source_references.prepared`（那二十来个 `from test_x import project` 的模块共用它们）。模板夹具放 `tests/conftest.py`——pytest 按「提出请求的模块」解析夹具参数，放测试模块里会报 `fixture '...' not found`。实测（`-n 0 --slow`）：剧本链 34 例 **62.4s→43.9s**、setup 合计 **34.2s→9.0s**；来源链 44 例 **58.7s→35.6s**、setup **41.5s→17.8s**；默认门禁 **50.4s→40.6s**。并行全量几乎不动（56.8s→55.5s）——并行墙钟由各 worker 的聚合吞吐决定，不是单个文件 |
 | `1190161` | 测试文档：登记 `project_copy` 的 `WinError 5` 目录改名偶发（当天 6 次跑出现 2 次，未改动代码上也会出现），并写下模板夹具必须放 conftest 的约定 |
+| `ac8d5af`、`4eb3843` | `project_copy` 发布阶段改名加有界重试（只吃 `PermissionError`，10/50/200ms，总预算 0.26s；实测 9 轮里 5 次拒绝，最坏连续 2 次、25ms 恢复） |
+| `f36423a` | **岛屿布局窄窗响应式**：协作者窄窗改抽屉（不盖顶栏）、浏览页三栏自适应（分类栏收 44 窄条）、岛屿缝隙分层（页面内容区不再画卡片，`paper` 从缝里露出）。1127px 预览列 53→431px；新增 47 条 ui 用例 + 3 条令牌不等式守卫 |
 
 ### 缓存这件事的结论（别再重查）
 
@@ -170,7 +173,7 @@ UI 侧约定：所有颜色走主题令牌（`theme.py` 的 `TOKENS` / `LAYOUT`�
 ## 7 未完成
 
 1. ~~夹具作用域剩 4 个文件~~（已完成，见 `aaac87b`）：`test_screenplay_writing`、`test_storyboard_assets`（带 `sketch_style`）、`test_storyboard_camera`、`test_storyboard_camera_overlays` 已通过两条模板链受益。**仍有一处没动**：`test_project_copy_boundaries`（14 例、单文件 40~67 秒）。它的 `source` 夹具把源工程的绝对路径写进任务正文与 SDK 历史（断言 `copied_task.read_bytes() == raw_task`），改成"模板 + 副本"就得改动这些断言，按原约定放弃；并行下它也不是瓶颈（14 worker 里每例 setup 1.7 秒）。
-2. **岛屿布局下窄窗口挤压**：1127px + 协作者面板全开时，浏览器内部三列 SplitView 把预览列压到 53px。岛屿只在外层加缝，不解决内层。三种做法待选：折叠一列 / 缩小内部列 `minimumWidth` / 设最小窗宽。
+2. ~~岛屿布局下窄窗口挤压~~（已完成，见 `f36423a`）：现状是"协作者在窄窗改成抽屉 + 浏览页三栏自适应 + 缝隙分层"。1127px + 协作者全开时预览列 53px→431px。契约全在 `theme.LAYOUT`（`window_min_width` / `workspace_min_width` / `assistant_dock_min_width` 1370 / `browse_*_min_width` / `browse_rail_width` 44），三条自洽不等式由 `tests/test_theme_tokens.py::layout_contract_problems` 守着；`tests/test_layout_responsive_ui.py` 覆盖 1000/1127/1360/1380/1500 × 紧凑/岛屿。**遗留**：次要文字 `muted` 在 `paper` 上对比度 3.81:1（改前 4.10，两档都低于 AA 4.5，属既有设计档位）；`screenplay` / `storyboard` 空态整页 `paper`、岛屿感弱于 browse/source（A 方案的固有取舍）；44px 窄条里的分类菜单点选只能人工探针（离屏抓不到 popup）。
 3. **模板会话的真实缓存样本**：只跑过一次（副本工程、62 字短原文），长任务样本还没有。
 4. **顶层概念文档**：`docs/CONCEPT.md` 已删。上一版是 agent 归纳的十条概念，用户指出"没有一条是我显式要求写入项目设计的"。现在等**用户自己**用"这是一个 xxx，能实现 ABCD，看起来是 xx 样子"的口吻写。
 5. `data/` 里积压的运行产物可跑 `python scripts/prune_artifacts.py`（默认 dry-run）盘点。
