@@ -94,12 +94,18 @@ Start-Process .venv\Scripts\python.exe -ArgumentList '-m','pytest','-q' `
   判据：`pytest --co -q -n 8` 连跑收集数一致、`pytest -q` 连跑不出现该消息，即为已消除；若再现，先查该轮是否有 worker
   报告过 `ERROR`/导入异常（`--tb=short -n 0` 复收集该文件），不要当成随机性。
 
-- `tests/test_project_copy_boundaries.py` 偶发 `PermissionError: [WinError 5] 拒绝访问`，位置在
+- `tests/test_project_copy_boundaries.py` 曾偶发 `PermissionError: [WinError 5] 拒绝访问`，位置在
   `project_copy.py::duplicate_graph_project` 把暂存目录改名到最终路径那一步（`.project-copy-*` 下的数据目录 →
   目标数据目录）。实测同一天 6 次运行里出现 2 次，其中一次发生在**未改动的基线代码**上，两次挂的还不是同一条用例。
   判据：单跑该整文件必过、原地重跑即过，且失败点始终是 `os.rename` 的目录改名而非断言。看着像本机杀毒/索引
   还占着刚关闭的目录句柄（Windows 目录改名要求无任何打开句柄），不是路径语义或复制逻辑缺陷。
-  **遇到先重跑**；别为了让它变绿去改断言或给复制流程加 sleep。
+  **已加有界重试**：`_publish_rename` 只吃 `PermissionError`，退避档位 10/50/200ms（共 4 次尝试，总等待 0.26s）。
+  实测依据：给 `Path.rename` 套记账插件跑该文件 9 轮，5 次拒绝分布在 4 轮（约 1/2 轮次命中），
+  每次都靠下一次尝试恢复，最坏一次是连续 2 次拒绝、累计等待 25ms 后成功，涉及的目录是 `assistant`/`material`。
+  判据仍保留：失败点若再次出现在这里、且是在 0.26s 预算之外仍被拒绝，说明不再是瞬时占用（例如真的被别的进程
+  hold 住），按上面判据复核；别改断言，也别把退避档位无界放大
+  （覆盖测试：`test_transient_rename_denial_during_publication_is_retried_and_publishes_the_copy` 与
+  `test_rename_denial_after_the_retry_budget_propagates_and_leaves_no_partial_copy`）。
 
 - UI 用例的滚动等待超时 `tests/test_chat_scroll.py` 抛 `AssertionError: Transcript did not settle: y=… height=…`：
   出现在**高负载/并行**的全量里（实测那一轮全量 774s，平时约 310s；同机器上另有任务在跑），等的是"内容滚到底"
