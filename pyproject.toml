@@ -1,6 +1,6 @@
 [project]
 name = "narrative-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "本地叙事证据工作台"
 requires-python = ">=3.12"
 dependencies = [

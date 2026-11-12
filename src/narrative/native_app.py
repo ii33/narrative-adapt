@@ -15,6 +15,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from . import version
+
 QML_PATH = Path(__file__).with_name("qml") / "Main.qml"
 
 
@@ -109,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     # 在这里先强制一次浅色会把系统的深色偏好盖住，之后「跟随系统」就永远读到浅色。
     QQuickStyle.setStyle("Fusion")
     app.setApplicationName("叙事图工作台")
+    app.setApplicationVersion(version.version_number())
     render_log = _render_log_path(args.render_log)
     render_log.parent.mkdir(parents=True, exist_ok=True)
     log_lock = threading.Lock()
@@ -126,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
         record(f"qt:{category}:{getattr(mode, 'name', str(mode))}: {message}")
 
     qInstallMessageHandler(qt_message)
+    # 每次启动写一行构建身份：截图、日志、bug 报告靠它指回具体代码。
+    record(f"build {version.display_version()}")
     record(f"startup pid={os.getpid()} qml={QML_PATH}")
     record(f"requested_render_loop={os.environ.get('QSG_RENDER_LOOP', '<Qt platform default>')}")
     record(f"requested_backend={os.environ.get('QSG_RHI_BACKEND', '<Qt platform default>')}")

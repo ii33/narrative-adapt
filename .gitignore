@@ -81,3 +81,6 @@ examples/harness_events_result.json
 
 # 成员本地工作账本
 TASKS*.md
+
+# 会话账本（plan_init 默认写在这里）
+.dsh/

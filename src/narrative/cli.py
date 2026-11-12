@@ -2,11 +2,27 @@ import argparse
 import json
 from pathlib import Path
 
-from . import tool_cli
+from . import tool_cli, version
 from .errors import OperationError
 from .project_catalog import create_graph_project, open_graph_project
 
 CONTEXT_FIELDS = ("context_window", "output_reserve", "compaction_reserve", "compaction_max_tokens")
+
+
+class _BannerVersion(argparse.Action):
+    """``--version``：打印一行 banner 后退出 0。
+
+    用自定义 Action 而不是 ``action="version"``：后者要求版本串在解析器构造时就
+    算好，那会让每条普通子命令都白读一次 git 取构建身份。
+    """
+
+    def __init__(self, option_strings, dest=argparse.SUPPRESS, default=argparse.SUPPRESS, help=None):
+        super().__init__(option_strings=option_strings, dest=dest, default=default, nargs=0, help=help)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        # 走 stdout（argparse 自带的 version action 也这样），管道/脚本才好取。
+        print(version.banner())
+        parser.exit(0)
 
 
 def _records_arguments(parser):
@@ -43,6 +59,7 @@ def main():
     parser = argparse.ArgumentParser(description="叙事证据工作台")
     parser.add_argument("--access-mode", dest="trusted_access_mode", choices=["standard", "full"], default="standard", help="可信主机访问模式")
     parser.add_argument("--db", default="data/demo.nproj", help=".nproj 工程入口信息文件")
+    parser.add_argument("--version", action=_BannerVersion, help="打印版本与构建身份后退出")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("graph-create", help="创建工程包（节点 + 属性记录 + 原文）")
     graph_import = commands.add_parser("graph-import", help="向图项目导入 UTF-8 原文")

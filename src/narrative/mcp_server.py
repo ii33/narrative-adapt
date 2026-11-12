@@ -21,11 +21,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from . import tool_api
+from . import tool_api, version
 from .assistant_host import HOST_TOOL_NAMES, cancel_host_commands, host_access_context
 
 SERVER_NAME = "narrative-graph"
-SERVER_VERSION = "1.0"
+# 与界面、CLI 同一个真源（narrative/version.py）；客户端据此指回具体构建。
+SERVER_VERSION = version.version_number()
 DEFAULT_PROTOCOL = "2024-11-05"
 PROJECT_ARG = "project"
 

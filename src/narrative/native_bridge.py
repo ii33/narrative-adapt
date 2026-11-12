@@ -20,7 +20,15 @@ from uuid import uuid4
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
-from . import appearance, graph_profile_ops, project_catalog, project_package, providers, theme
+from . import (
+    appearance,
+    graph_profile_ops,
+    project_catalog,
+    project_package,
+    providers,
+    theme,
+    version,
+)
 from .browse_view import moment_tree
 from .graph_operations import GraphOperations
 from .harness import HarnessRunner, harness_env
@@ -53,6 +61,7 @@ class NativeBridge(QObject):
     themeModeChanged = Signal()
     darkModeChanged = Signal()
     layoutModeChanged = Signal()
+    versionChanged = Signal()
 
     @Property(str, notify=themeModeChanged)
     def themeMode(self) -> str:
@@ -73,6 +82,18 @@ class NativeBridge(QObject):
     def theme(self) -> dict:
         """QML 用的设计令牌（颜色是十六进制字符串），与 Qt 控件调色板同源。"""
         return theme.tokens(self._appearance_dark)
+
+    # 构建身份在进程内不变，所以 versionChanged 从不发射；它只是让 Property
+    # 与上面几个只读属性一样有 notify。版本串的真源是 narrative/version.py。
+    @Property(str, notify=versionChanged)
+    def appVersion(self) -> str:
+        """带构建身份的完整版本串，例如 ``v0.2.0-dev.islands+20261112.ac8d5af``。"""
+        return version.display_version()
+
+    @Property(str, notify=versionChanged)
+    def appVersionTag(self) -> str:
+        """不带构建身份的版本标签，例如 ``v0.2.0-dev.islands``。"""
+        return version.tag()
 
     # 一个操作最多等这么久。超过就放弃它并把「处理中」清掉：
     # 结果要是永远不回来，界面就会一直卡在「处理中」，什么都点不动。

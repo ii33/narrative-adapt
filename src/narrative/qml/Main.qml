@@ -590,6 +590,15 @@ ApplicationWindow {
                         : app.diagnosticLine
                     color: app.errorText.length > 0 ? app.theme.bad : app.theme.muted
                 }
+                // 构建身份：截图与 bug 报告靠这一行指回具体代码（真源 narrative/version.py）。
+                Label {
+                    objectName: "appVersionLabel"
+                    text: bridge.appVersion
+                    color: app.theme.muted
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                    Layout.maximumWidth: 300
+                }
                 Button {
                     visible: app.errorText.length > 0 || app.notice.length > 0
                     text: "清除"

@@ -697,6 +697,19 @@ Item {
                 }
             }
         }
+
+        // 版本与代号：截图、日志、bug 报告靠这一行指回具体构建（真源 narrative/version.py）。
+        Label {
+            objectName: "launcherVersion"
+            Layout.fillWidth: true
+            Layout.leftMargin: 24
+            Layout.rightMargin: 24
+            Layout.bottomMargin: 10
+            text: "构建 " + bridge.appVersion
+            color: t.muted
+            font.pixelSize: 10
+            elide: Text.ElideRight
+        }
     }
 
     // Only private entry information files are project opening targets.
