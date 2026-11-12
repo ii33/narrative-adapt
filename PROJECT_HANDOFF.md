@@ -1,6 +1,7 @@
 # 交接：叙事数据工作台（narrative-adapt）
 
 盘点：2026-11-11 · 分支 `feat/five-layer-and-appearance` · HEAD `b3d74ff`（已推送到 `github.com/ii33/narrative-adapt`）
+后续（测试成本治理续作）：`df42a97`、`aaac87b`、`1190161` 三个提交**尚未推送**
 
 > 上一版交接（2026-10-19）已过期：仓库根目录、测试通过数、架构描述都变了（它写的是 `C:\a\wk\narrative`、806 passed）。本文替换它。
 
@@ -114,8 +115,8 @@ UI 侧约定：所有颜色走主题令牌（`theme.py` 的 `TOKENS` / `LAYOUT`�
 
 | 命令 | 含什么 | 实测 |
 |---|---|---|
-| `pytest` | 数据正确性 + 合同；排除 `ui` / `native` / `integration` / `slow` | **979 条** |
-| `pytest --slow` | 再加 `slow`（storyboard 全部、host_text、project_copy_boundaries、单例 >8s） | **1149 passed / 1 skipped / 约 55 秒** |
+| `pytest` | 数据正确性 + 合同；排除 `ui` / `native` / `integration` / `slow` | **979 条 / 约 41 秒** |
+| `pytest --slow` | 再加 `slow`（storyboard 全部、host_text、project_copy_boundaries、单例 >8s） | **1149 passed / 1 skipped / 约 56 秒** |
 | `pytest -m ui -n 4` | Qt Quick 界面 | 分批跑 |
 | `pytest -m "integration"` / `-m "native"` | 非数据集成 / 真实 SDK | 需要环境 |
 
@@ -126,6 +127,7 @@ UI 侧约定：所有颜色走主题令牌（`theme.py` 的 `TOKENS` / `LAYOUT`�
 | 用例 | 条件 |
 |---|---|
 | `tests/test_project_changes.py::test_project_runtime_registers_and_dispatches_general_writes_only_in_active_task` | 并行 + 高负载；单跑 `-n 0` 通过 |
+| `tests/test_project_copy_boundaries.py`（换不同用例挂） | `PermissionError [WinError 5]` 出现在 `duplicate_graph_project` 的目录改名；单跑该文件必过、重跑即过，**未改动的基线代码上也会出现** |
 | `tests/test_chat_scroll.py` | 高负载下 `Transcript did not settle` 超时；单文件单跑通过 |
 
 另：并行下偶见 `ConnectionAbortedError [WinError 10053]` 栈打印，属服务端关连接噪声，无对应用例失败。
@@ -153,6 +155,8 @@ UI 侧约定：所有颜色走主题令牌（`theme.py` 的 `TOKENS` / `LAYOUT`�
 | `31fcb7b` | 修测试写用户目录：两条用例没设 `NARRATIVE_CHAT_TEMPLATES_FILE`，14 个 worker 抢写 `~/.narrative/chat-templates.json`，表现为 `Different tests were collected` |
 | `1812a1a` | `tools_hash` / `tools_count` 埋点：缓存回退可直接归因"是不是工具数组变了" |
 | `3f6b7b8`、`024376f`、`43e75e1`、`b3d74ff` | 测试成本治理：本机 HTTP 超时 2s→60s、`slow` 分层与 `--slow` 入口、事件事实工程只建一次（该文件 60s→14s）、修跨模块 import 夹具的依赖丢失 |
+| `df42a97`、`aaac87b` | **两条重夹具链改成「module 级模板 + 每例副本」**：`test_screenplay_writing.project` 与 `test_screenplay_source_references.prepared`（那二十来个 `from test_x import project` 的模块共用它们）。模板夹具放 `tests/conftest.py`——pytest 按「提出请求的模块」解析夹具参数，放测试模块里会报 `fixture '...' not found`。实测（`-n 0 --slow`）：剧本链 34 例 **62.4s→43.9s**、setup 合计 **34.2s→9.0s**；来源链 44 例 **58.7s→35.6s**、setup **41.5s→17.8s**；默认门禁 **50.4s→40.6s**。并行全量几乎不动（56.8s→55.5s）——并行墙钟由各 worker 的聚合吞吐决定，不是单个文件 |
+| `1190161` | 测试文档：登记 `project_copy` 的 `WinError 5` 目录改名偶发（当天 6 次跑出现 2 次，未改动代码上也会出现），并写下模板夹具必须放 conftest 的约定 |
 
 ### 缓存这件事的结论（别再重查）
 
@@ -165,7 +169,7 @@ UI 侧约定：所有颜色走主题令牌（`theme.py` 的 `TOKENS` / `LAYOUT`�
 
 ## 7 未完成
 
-1. **夹具作用域剩 4 个文件**：`test_screenplay_writing`、`test_storyboard_assets`（带 `sketch_style`）、`test_storyboard_camera`、`test_storyboard_camera_overlays`。它们共用一条夹具链，需"module 级模板 + 每例副本"；`test_project_copy_boundaries` 测的就是路径语义，**若做不到断言不变就放弃优化**。
+1. ~~夹具作用域剩 4 个文件~~（已完成，见 `aaac87b`）：`test_screenplay_writing`、`test_storyboard_assets`（带 `sketch_style`）、`test_storyboard_camera`、`test_storyboard_camera_overlays` 已通过两条模板链受益。**仍有一处没动**：`test_project_copy_boundaries`（14 例、单文件 40~67 秒）。它的 `source` 夹具把源工程的绝对路径写进任务正文与 SDK 历史（断言 `copied_task.read_bytes() == raw_task`），改成"模板 + 副本"就得改动这些断言，按原约定放弃；并行下它也不是瓶颈（14 worker 里每例 setup 1.7 秒）。
 2. **岛屿布局下窄窗口挤压**：1127px + 协作者面板全开时，浏览器内部三列 SplitView 把预览列压到 53px。岛屿只在外层加缝，不解决内层。三种做法待选：折叠一列 / 缩小内部列 `minimumWidth` / 设最小窗宽。
 3. **模板会话的真实缓存样本**：只跑过一次（副本工程、62 字短原文），长任务样本还没有。
 4. **顶层概念文档**：`docs/CONCEPT.md` 已删。上一版是 agent 归纳的十条概念，用户指出"没有一条是我显式要求写入项目设计的"。现在等**用户自己**用"这是一个 xxx，能实现 ABCD，看起来是 xx 样子"的口吻写。
@@ -183,6 +187,7 @@ UI 侧约定：所有颜色走主题令牌（`theme.py` 的 `TOKENS` / `LAYOUT`�
 | **账本被覆盖** | 每个成员写自己的 `TASKS-<member>.md`；`TASKS.md` 归 Lead。`plan_init` 默认写 `TASKS.md`，成员必须显式传路径 |
 | **会话串项目** | 这个仓库与另一个项目（`C:\a\wk\n\manual`）共处 `C:\a\wk\n`。**一个会话只写自己项目的仓库**；看到任务面板里出现别的项目名词，先确认再动手 |
 | **缓存归因** | 别凭感觉；看 `tools_hash` |
+| **夹具依赖跨模块**：`from test_x import some_fixture` 只带过来一个名字，它的参数按**提出请求的模块**解析 | 共享模板夹具放 `tests/conftest.py`（`writing_template`、`sources_template`）；非共享的依赖在被 import 的模块里一并显式 import（`facts_template`） |
 | **`ruff` 假绿** | 一律 `--no-cache` |
 
 ---
