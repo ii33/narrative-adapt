@@ -24,9 +24,15 @@ def host():
         server.close()
 
 
-def post(server, name, *, token=None, args=None, session_id=None):
+# 本机进程内 HTTP，不是外部服务：超时只该防死锁，不该给业务写入计时。
+# 原来固定 2 秒，并行跑全量时真实 apply_changes（写库 + 全量投影）在忙的机器上会超过它，
+# 客户端先超时、服务端随后 ConnectionAbortedError —— 表现为用例偶发失败，与业务无关。
+LOCAL_TIMEOUT = 60
+
+
+def post(server, name, *, token=None, args=None, session_id=None, timeout=LOCAL_TIMEOUT):
     address = urlsplit(server.config["url"])
-    connection = http.client.HTTPConnection(address.hostname, address.port, timeout=2)
+    connection = http.client.HTTPConnection(address.hostname, address.port, timeout=timeout)
     headers = {"Content-Type": "application/json"}
     if token is not None:
         headers["Authorization"] = "Bearer " + token
