@@ -31,7 +31,12 @@ def facts_template(tmp_path_factory):
 
 @pytest.fixture
 def facts(facts_template, tmp_path, monkeypatch):
-    """每例一份独立副本：本文件的用例几乎都会写库，共享一个工程必然串味。"""
+    """每例一份独立副本：本文件的用例几乎都会写库，共享一个工程必然串味。
+
+    注意：本夹具依赖 `facts_template`，而 pytest **不会跨模块解析夹具依赖**。
+    别的模块要 `from test_event_property_state import facts` 时，必须同时
+    `import facts_template`，否则会报 `fixture 'facts_template' not found`。
+    """
     import shutil
 
     monkeypatch.setenv('NARRATIVE_PROVIDER_DB', str(tmp_path / 'providers.sqlite3'))
