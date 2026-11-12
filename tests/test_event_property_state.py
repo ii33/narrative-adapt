@@ -16,9 +16,31 @@ QUOTES = ['三人在会面。', '后来交换称呼。', '随后结束关系。'
 EVENTS = ['E9', 'E1', 'E6', 'E3']
 
 
+@pytest.fixture(scope="module")
+def facts_template(tmp_path_factory):
+    """整套事实工程只建一次：每个用例复制目录再打开，省掉 29 次建库（setup 是本文件最大开销）。"""
+    mp = pytest.MonkeyPatch()
+    tmp_path = tmp_path_factory.mktemp("event-facts")
+    mp.setenv('NARRATIVE_PROVIDER_DB', str(tmp_path / 'providers.sqlite3'))
+    try:
+        ops, sid = _build_facts(tmp_path)
+    finally:
+        mp.undo()
+    return {"root": tmp_path, "sid": sid}
+
+
 @pytest.fixture
-def facts(tmp_path, monkeypatch):
+def facts(facts_template, tmp_path, monkeypatch):
+    """每例一份独立副本：本文件的用例几乎都会写库，共享一个工程必然串味。"""
+    import shutil
+
     monkeypatch.setenv('NARRATIVE_PROVIDER_DB', str(tmp_path / 'providers.sqlite3'))
+    shutil.copytree(facts_template["root"], tmp_path, dirs_exist_ok=True)
+    ops = Operations.open(tmp_path / 'event-facts.nproj')
+    return ops, facts_template["sid"]
+
+
+def _build_facts(tmp_path):
     ops = Operations.create_graph_project(tmp_path / 'event-facts.nproj')
     sid = ops.import_source('事件状态', TEXT)
     def obj(identifier, kind, name, quote, **extra):
@@ -214,6 +236,7 @@ def test_cognition_is_never_filled_from_world_facts(facts):
     assert state == {'kind': 'unrecorded'}
 
 
+@pytest.mark.slow
 def test_cognition_does_not_follow_later_world_changes(facts):
     """防的是「跟随 world 变化自动改写认知」——世界事实变了，认知仍应保持未记录。"""
     ops, sid = facts
