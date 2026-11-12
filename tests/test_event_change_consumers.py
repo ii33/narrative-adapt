@@ -3,7 +3,8 @@ import copy
 
 import pytest
 from test_event_property_state import QUOTES, TEXT, change, commit, definition
-from test_event_property_state import facts as facts, facts_template as facts_template
+from test_event_property_state import facts as facts
+from test_event_property_state import facts_template as facts_template
 
 from narrative.browse_view import related_nodes
 from narrative.graph_models import Node
