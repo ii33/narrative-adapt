@@ -46,7 +46,6 @@ def seed(ops, payload=None):
     return sid
 
 
-
 def submit_first_day(ops, sid, payload):
     return ops.submit_extraction(sid, payload, end=FIRST_DAY_END)
 
@@ -73,6 +72,7 @@ def test_new_task_reuses_event_with_different_first_quote_and_exact_shared_span(
     assert next(span for span in spans if span['quote'] == Q1)['start'] == len(PREFIX)
 
 
+@pytest.mark.slow
 def test_explicit_existing_id_can_enrich_without_shared_quote_and_scene_keeps_children(project):
     sid = seed(project)
     event_id = node(project, '甲乙握手')['id']

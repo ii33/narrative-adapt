@@ -10,6 +10,8 @@ from test_storyboard_operations import setup_board
 
 from narrative.storyboard_audio import apply_audio, preview_audio, probe_audio, validate_audio
 
+pytestmark = pytest.mark.slow
+
 
 def wav(path, milliseconds=2000):
     with wave.open(str(path), 'wb') as stream:

@@ -15,6 +15,8 @@ from narrative.storyboard_contract import (
 from narrative.storyboard_operations import _FIELDS
 from narrative.storyboard_timing import STAGING_FIELDS
 
+pytestmark = pytest.mark.slow
+
 
 def test_contract_is_typed_closed_and_fields_match_business_operations():
     schema = storyboard_change_schema()

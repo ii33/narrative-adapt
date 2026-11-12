@@ -11,6 +11,8 @@ from test_screenplay_ui import dialog_action, render_ready, visuals
 from test_static_check_ui import click, plain
 from test_storyboard_ui import storyboard_diagnostics  # noqa: F401
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.mark.usefixtures("storyboard_diagnostics")
 def test_phase3_real_animatic_adoption_and_single_submitted_job(tmp_path, monkeypatch):

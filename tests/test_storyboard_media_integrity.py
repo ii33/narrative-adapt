@@ -10,6 +10,8 @@ from test_storyboard_operations import setup_board
 from narrative import storyboard_media
 from narrative.project_package import layout
 
+pytestmark = pytest.mark.slow
+
 
 def movie(path, color):
     writer = imageio_ffmpeg.write_frames(str(path), (64, 64), fps=5, macro_block_size=1)

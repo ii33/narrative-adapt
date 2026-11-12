@@ -192,6 +192,7 @@ def test_screenplay_and_storyboard_do_not_commit_a_shared_outer_transaction(proj
     assert ops.read_storyboard(unit['id'])['shots'] == []
 
 
+@pytest.mark.slow
 def test_animation_metadata_can_be_repaired_but_image_io_is_not_staged(project, tmp_path):
     from narrative.storyboard_video import StoryboardVideoMixin
     ops, _screenplay, segment = project

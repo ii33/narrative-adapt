@@ -8,6 +8,8 @@ from PIL import Image
 
 from narrative.storyboard_video_provider import build_request, query, submit
 
+pytestmark = pytest.mark.slow
+
 
 def test_reference_and_endpoint_payloads_follow_published_roles(tmp_path):
     image = tmp_path / 'style.png'

@@ -215,6 +215,7 @@ def test_ambiguous_adjacent_existing_big_events_need_explicit_id(project):
     assert not [r for r in project.check_project()["issues"] if r["severity"] == "error"]
 
 
+@pytest.mark.slow
 def test_explicit_existing_orphan_can_be_attached_without_duplicate_or_property_changes(project):
     sid = seed(project)
     assert (

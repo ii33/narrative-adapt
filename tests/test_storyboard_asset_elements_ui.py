@@ -1,7 +1,10 @@
 """Real QML multi-shot asset selection, analysis scope and asset navigation."""
+import pytest
 from test_chat_scroll import transcript_shell
 from test_screenplay_ui import render_ready, visuals
 from test_static_check_ui import click, plain
+
+pytestmark = pytest.mark.slow
 
 
 def seed(ops):

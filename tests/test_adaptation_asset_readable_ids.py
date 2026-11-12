@@ -66,6 +66,7 @@ def test_adaptation_ids_preserve_type_identity_references_and_original_ids(proje
     assert ids["甲"] == "P1" and ids["甲敲门"] in {n["id"] for n in state["nodes"]}
 
 
+@pytest.mark.slow
 def test_asset_category_and_image_ids_are_readable_stable_and_never_reused(project, tmp_path):
     ids = seed(project)
     state = project.edit_adaptation_node(changes={"node_type": "item", "name": "道具", "initial_holder": ids["甲"],"point_id":ids["甲敲门"]})

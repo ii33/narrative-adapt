@@ -1,6 +1,7 @@
 """Shared readers consume reduced current facts, never old values or intervals."""
 import copy
 
+import pytest
 from test_event_property_state import QUOTES, TEXT, change, commit, definition
 from test_event_property_state import facts as facts
 
@@ -25,6 +26,7 @@ def test_check_project_uses_change_contract_without_interval_apis(facts):
     assert checked['checked_records'] == len(ops.property_records())
 
 
+@pytest.mark.slow
 def test_item_holder_transfer_unknown_and_clear_rejection_are_atomic(facts):
     ops, sid = facts
     holder = definition('持有者', value_type='either', semantic='item_holder')

@@ -11,6 +11,8 @@ from test_screenplay_ui import render_ready, visuals
 from test_static_check_ui import click, plain
 from test_storyboard_asset_elements_ui import open_create_element, seed
 
+pytestmark = pytest.mark.slow
+
 
 def invoke(target, method, *arguments):
     from PySide6.QtCore import Q_ARG, QMetaObject

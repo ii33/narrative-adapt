@@ -68,6 +68,7 @@ def test_structured_overrides_and_atomic_revisions(project):
     assert ops.read_screenplay(script)['screenplay']['revision'] == 1
 
 
+@pytest.mark.slow
 def test_effective_agreement_context_basis_and_cross_script_isolation(project):
     ops, script, segment = project
     unit = body(ops, table(ops, segment)['units'][0]['id'])

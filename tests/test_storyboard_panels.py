@@ -6,6 +6,8 @@ from test_screenplay_writing import project as project
 from test_storyboard_operations import setup_board
 from test_storyboard_timing import assert_problem, staged
 
+pytestmark = pytest.mark.slow
+
 
 def apply_board(ops, unit, revision, changes):
     result = ops.apply_storyboard_changes(unit, revision, changes)

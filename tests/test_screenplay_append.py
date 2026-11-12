@@ -37,6 +37,7 @@ def write_body(project, screenplay_id, event_id, person_id):
     return segment["id"], unit["id"], bound["span"]["id"]
 
 
+@pytest.mark.slow
 def test_append_at_tail_preserves_old_content_order_and_written_work_then_deduplicates(project):
     ids = seed(project)
     screenplay_id = create(project)

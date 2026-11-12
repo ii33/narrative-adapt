@@ -5,6 +5,8 @@ import pytest
 
 from narrative import host_text
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.mark.parametrize(('codec', 'bom'), [('utf-8', False), ('utf-8', True),
     ('utf-16le', True), ('utf-16be', True), ('utf-16le', False), ('utf-16be', False), ('gbk', False), ('big5', False)])

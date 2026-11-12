@@ -1,11 +1,14 @@
 """Independent phase-one director-time contract checks through Operations."""
 from copy import deepcopy
 
+import pytest
 from test_screenplay_writing import project as project
 from test_storyboard_operations import setup_board
 
 from narrative.operations import Operations
 from narrative.project_package import layout
+
+pytestmark = pytest.mark.slow
 
 
 def test_shared_action_time_static_frame_cut_reorder_and_reopen(project, tmp_path):

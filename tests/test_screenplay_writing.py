@@ -296,6 +296,7 @@ def test_writing_uses_independent_script_entities_and_actual_local_dependencies(
     assert read_context(ops)[0] == before
 
 
+@pytest.mark.slow
 def test_same_source_ids_are_scoped_and_local_only_entities_cannot_cross_scripts(project):
     ops, first_sp, segment_id = project
     first_unit = table(ops, segment_id)["units"][0]

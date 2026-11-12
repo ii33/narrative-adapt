@@ -255,6 +255,7 @@ def test_writing_span_input_obeys_existing_adaptation_visibility(suppressed):
     assert suppressed not in {n["id"] for n in current["input"]["entities"]}
     assert all(suppressed not in n.get("participants", []) for n in current["input"]["nodes"])
 
+@pytest.mark.slow
 def test_export_body_types_invalid_source_retention_and_explicit_segment_discard(project, tmp_path):
     from narrative.screenplay_store import read_context
     ids = seed(project)

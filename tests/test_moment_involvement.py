@@ -1,6 +1,7 @@
 """Moment membership is a time/context filtered read projection, never stored duplication."""
 from copy import deepcopy
 
+import pytest
 from agent_fixtures import project as project
 from test_browse_detail_sync import choose
 from test_chat_scroll import transcript_shell
@@ -87,6 +88,7 @@ def test_cut_event_change_context_and_subjective_or_literal_references_do_not_le
     assert mapping["@5"] not in related and mapping["@3"] not in related
 
 
+@pytest.mark.slow
 def test_actual_browse_container_membership_links_jump_to_referenced_node(tmp_path, monkeypatch):
     with transcript_shell(tmp_path, monkeypatch) as ui:
         ops = Operations.open(ui.bridge._project_path)

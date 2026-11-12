@@ -7,6 +7,8 @@ from PIL import Image
 from test_screenplay_writing import project as project
 from test_storyboard_operations import setup_board
 
+pytestmark = pytest.mark.slow
+
 
 def setup(project):
     ops, unit, block = setup_board(project)

@@ -6,6 +6,8 @@ from test_storyboard_operations import setup_board
 
 from narrative.operations import Operations
 
+pytestmark = pytest.mark.slow
+
 
 def change(ops, unit, changes):
     """Apply a batch expected to succeed; batches with immediate-only actions return no envelope."""

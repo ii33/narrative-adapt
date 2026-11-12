@@ -6,6 +6,8 @@ from PIL import Image
 from test_screenplay_writing import project as project
 from test_storyboard_operations import setup_board
 
+pytestmark = pytest.mark.slow
+
 
 def test_generated_picture_binds_provider_output_not_private_guide(project, monkeypatch):
     from narrative import storyboard_style_provider

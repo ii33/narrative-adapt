@@ -36,6 +36,7 @@ def test_draft_symmetric_definition_persists_without_reverse_values(project):
     assert all(names[row['node_id']] == '甲' and names[row['value']] == '乙' for row in values)
 
 
+@pytest.mark.slow
 def test_explicit_definition_change_and_omitted_flag_preserves_current_value(project):
     sid = project.import_source('对称语义', TEXT)
     payload = draft()

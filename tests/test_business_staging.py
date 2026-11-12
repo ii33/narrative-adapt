@@ -255,6 +255,7 @@ def test_material_existing_image_caption_is_content_but_image_deletion_is_immedi
     assert len(project.material_view(person)['cards'][0]['images']) == 1
 
 
+@pytest.mark.slow
 def test_pending_material_edit_cannot_overwrite_later_change_to_same_card(project):
     from narrative.content_errors import ContentConflictError
     sid = project.import_source('原文', TEXT)

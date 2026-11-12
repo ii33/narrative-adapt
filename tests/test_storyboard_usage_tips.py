@@ -8,6 +8,8 @@ from agent_fixtures import project as project
 from narrative import tool_api
 from narrative.tool_loading import CORE_TOOL_NAMES, list_available_tools, load_tools, tool_guidance
 
+pytestmark = pytest.mark.slow
+
 
 def _files(directory):
     return {str(p.relative_to(directory)): p.read_bytes() for p in directory.rglob("*") if p.is_file()}

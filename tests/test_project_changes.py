@@ -92,6 +92,7 @@ def test_catalog_contains_all_project_writes_but_no_external_tools():
     } <= project_tools
 
 
+@pytest.mark.slow
 def test_generic_atomic_write_and_revision_guard(project):
     sid = seed(project)
     objects, records = batch(project, sid)

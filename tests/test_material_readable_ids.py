@@ -24,6 +24,7 @@ def project(tmp_path, monkeypatch):
     return ops, person
 
 
+@pytest.mark.slow
 def test_operations_and_tool_ids_survive_deletion_without_reusing_numbers(project, tmp_path):
     ops, person = project
     entry = layout(ops.path).entry

@@ -72,10 +72,20 @@ INTEGRATION_MODULES = {
 }
 
 
+def pytest_addoption(parser):
+    parser.addoption("--slow", action="store_true", default=False,
+                     help="连同 slow 用例一起跑（全量入口；默认只跑门禁）")
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "ui: Qt Quick UI tests (slow, heavy)")
     config.addinivalue_line("markers", "native: real SDK/HTTP/host runtime tests (slow, environment sensitive)")
     config.addinivalue_line("markers", "integration: non-data integration suites kept opt-in")
+    config.addinivalue_line("markers", "slow: 单例 >8s 或 setup>50% 或涉及真实图像/子进程；默认排除，--slow 全量")
+    if config.getoption("slow"):
+        # 门禁的 addopts 里带着 "and not slow"；--slow 把它去掉，回到「默认集全量」。
+        expression = str(getattr(config.option, "markexpr", "") or "")
+        config.option.markexpr = expression.replace(" and not slow", "").strip() or "not ui and not native and not integration"
 
 
 def _default_run(config) -> bool:

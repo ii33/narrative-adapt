@@ -90,6 +90,7 @@ def raw_values(project):
     return {r["id"]: r for r in project.property_records() if r["kind"] == "property_change"}
 
 
+@pytest.mark.slow
 def test_a_b_c_are_event_changes_without_validity_or_retraction_objects(project):
     sid, ids = setup(project)
     for i in range(3):
@@ -129,6 +130,7 @@ def test_node_metadata_updates_replace_current_object_without_revision_replay_st
         project.graph_snapshot(as_of_revision=before["revision"])
 
 
+@pytest.mark.slow
 def test_suffix_rollback_deletes_later_changes_and_recomputes_from_retained_facts(project):
     sid, ids = setup(project)
     for i in range(3):
@@ -239,6 +241,7 @@ def test_physical_event_merge_deletes_source_and_rewrites_references_without_ali
         assert db.execute("SELECT 1 FROM objects WHERE id='E99'").fetchone() is None
 
 
+@pytest.mark.slow
 def test_source_order_precedes_unicode_offset_for_changes_and_suffix_rollback(project):
     sid, ids = setup(project)
     for i in range(3):
@@ -287,6 +290,7 @@ def test_source_order_precedes_unicode_offset_for_changes_and_suffix_rollback(pr
     assert not any(n["name"] == "改称D" for n in project.graph_snapshot()["nodes"])
 
 
+@pytest.mark.slow
 def test_property_rename_and_merge_physically_rewrite_names_without_alias_rows(project):
     sid, ids = setup(project)
     for i in range(3):

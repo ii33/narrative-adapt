@@ -174,6 +174,7 @@ def test_failure_inside_physical_merge_transaction_restores_all_rows_and_revisio
         "direct_order",
     ],
 )
+@pytest.mark.slow
 def test_physical_merge_rejects_conflicts_without_writing(project, problem):
     sid, ids, target, source, proof = seed(project)
     expected = project.graph_project_info()["revision"]

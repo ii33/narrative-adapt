@@ -7,6 +7,8 @@ from test_screenplay_writing import project as project
 
 from narrative.operations import Operations
 
+pytestmark = pytest.mark.slow
+
 
 def setup_board(project):
     ops, _, segment_id = project

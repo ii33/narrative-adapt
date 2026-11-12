@@ -42,6 +42,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 SOURCE = ROOT / "src"
@@ -598,6 +600,7 @@ def test_doc_relative_links_alive():
     assert not _report(check_doc_links())
 
 
+@pytest.mark.slow
 def test_literal_doc_paths_in_code_exist():
     """src/、tests/、scripts/ 里写死的 docs/...md 路径必须存在。"""
     assert not _report(check_literal_doc_paths())

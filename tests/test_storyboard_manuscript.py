@@ -9,6 +9,8 @@ from pypdf import PdfReader
 from test_screenplay_writing import project as project
 from test_storyboard_operations import setup_board
 
+pytestmark = pytest.mark.slow
+
 
 def test_export_scene_without_images_and_protect_existing_copy(project, tmp_path):
     ops, unit, _ = setup_board(project)

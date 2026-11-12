@@ -13,6 +13,8 @@ from test_screenplay_writing import project as project
 
 from narrative.storyboard_style_provider import render_sketch_image, render_style_image
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.mark.parametrize('with_references', [False, True])
 def test_comfy_http_contract_and_expected_output(tmp_path, monkeypatch, with_references):

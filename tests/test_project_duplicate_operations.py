@@ -64,6 +64,7 @@ def test_copy_suggestion_and_path_checks_do_not_overwrite_or_recurse(project, tm
     assert Operations.inspect_graph_project(tmp_path / "missing.nproj")["status"] == "missing"
 
 
+@pytest.mark.slow
 def test_copy_resumes_copied_sdk_session_and_host_writes_only_new_project(project, tmp_path):
     from narrative import tool_api
     from narrative.assistant import tool_catalog

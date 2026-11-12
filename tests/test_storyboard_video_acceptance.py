@@ -14,6 +14,8 @@ from test_storyboard_operations import setup_board
 from narrative.storyboard_media import probe_video
 from narrative.storyboard_video_provider import build_request
 
+pytestmark = pytest.mark.slow
+
 
 def ready(project, tmp_path):
     ops, unit, block = setup_board(project)

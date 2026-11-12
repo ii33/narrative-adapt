@@ -9,6 +9,8 @@ from narrative.operations import Operations
 from narrative.storyboard_camera import CAMERA_FIELDS, PRESETS
 from narrative.storyboard_contract import ACTION_FIELDS
 
+pytestmark = pytest.mark.slow
+
 
 def test_marker_move_previews_all_conflicts_preserves_free_items_and_ids(project, tmp_path):
     ops, unit, _ = setup_board(project)

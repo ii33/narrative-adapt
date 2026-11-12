@@ -6,6 +6,8 @@ from test_screenplay_ui import render_ready
 from test_static_check_ui import click, plain
 from test_storyboard_ui import storyboard_diagnostics  # noqa: F401
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.mark.usefixtures("storyboard_diagnostics")
 def test_script_default_edit_readonly_and_shared_selection(tmp_path, monkeypatch):

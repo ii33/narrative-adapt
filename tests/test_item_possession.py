@@ -172,6 +172,7 @@ def test_clear_only_current_holder_cannot_leave_item_uncovered(project):
     assert project.graph_snapshot() == before and project.property_records() == rows
 
 
+@pytest.mark.slow
 def test_atomic_transfer_and_explicit_unowned_keep_reading_cuts_historical(project):
     sid, ids, _item = install(project, value="无")
     for i, value in [(1, ids["甲"]), (2, ids["乙"]), (3, "无")]:
@@ -398,6 +399,7 @@ def test_early_cut_before_real_holder_disclosure_does_not_leak_future_person(pro
     assert project.property_state("I1", "持有者")["state"]["values"] == [ids["乙"]]
 
 
+@pytest.mark.slow
 def test_atomic_current_definition_update_and_unknown_holder_for_another_item(project):
     sid, ids, item = setup(project)
     assert (

@@ -76,12 +76,13 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 # 默认只跑数据/合同测试并使用全部核心并行；UI、真实 SDK 与非数据集成套件显式选择。
-addopts = "-m 'not ui and not native and not integration' -n auto"
+addopts = "-m 'not ui and not native and not integration and not slow' -n auto"
 testpaths = ["tests"]
 markers = [
   "ui: Qt Quick UI tests (slow, heavy)",
   "native: real SDK/HTTP/host runtime tests (slow, environment sensitive)",
   "integration: non-data integration suites kept opt-in",
+  "slow: 单例 >8s 或 setup>50% 或涉及真实图像/子进程的用例；默认排除，`--slow` 全量",
 ]
 
 [tool.pyright]

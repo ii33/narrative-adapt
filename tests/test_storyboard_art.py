@@ -9,6 +9,8 @@ from test_screenplay_writing import project as project
 
 from narrative.storyboard_art import render_sketch
 
+pytestmark = pytest.mark.slow
+
 
 def test_light_changes_image_without_moving_blocking():
     spec = {"composition": "empty", "setting": "interior"}

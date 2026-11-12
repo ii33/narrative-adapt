@@ -14,6 +14,8 @@ from narrative.operations import Operations
 from narrative.project_package import layout, read_entry
 from narrative.screenplay_store import read_context
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.fixture
 def source(tmp_path, monkeypatch):

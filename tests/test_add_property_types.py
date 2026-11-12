@@ -12,6 +12,7 @@ def setup(project):
     return layout(project.project_info().path).entry, {"node_id": ids["甲"], "value": ids["乙"], "event_id": ids["甲认识朋友乙"], "quote": "甲认识朋友乙。", "category": "关系"}
 
 
+@pytest.mark.slow
 def test_explicit_node_new_role_is_drawn_and_any_same_id_remains_literal(project):
     entry, args = setup(project)
     assert call("record_property_change", args | {"op": "set", "expected_revision": project.graph_project_info()["revision"], "reason": "定向补录"} | {"property_id": "诈骗对象", "value_type": "node", "symmetric": False}, project=entry)["status"] == "accepted"

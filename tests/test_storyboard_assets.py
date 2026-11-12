@@ -9,6 +9,8 @@ from narrative.operations import Operations
 from narrative.screenplay_writing import validate_script_writing_tool_call
 from narrative.tool_api import TOOLS
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.fixture
 def board(prepared):
@@ -146,7 +148,6 @@ def test_manual_asset_selection_uses_normal_binding_checks(board):
     assert good['submission_status'] == 'committed'
     with pytest.raises(ValueError, match='分镜引用'):
         ops.delete_asset(asset['id'])
-
 
 
 def test_explicit_create_missing_is_per_row_atomic_and_empty(board):

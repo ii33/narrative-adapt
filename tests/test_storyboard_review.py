@@ -4,11 +4,14 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
 from PIL import Image
 from test_screenplay_writing import body
 from test_screenplay_writing import project as project
 from test_storyboard_operations import setup_board
 from test_storyboard_video_acceptance import ready, video
+
+pytestmark = pytest.mark.slow
 
 
 def test_sketch_compact_source_reopens_and_related_basis_changes_only(project, monkeypatch):

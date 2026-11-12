@@ -10,6 +10,8 @@ from narrative.prompt_settings import bind_prompt_snapshot, prompt_snapshot
 from narrative.storyboard_sketch_style import current_sketch_style
 from narrative.tool_api import TOOLS
 
+pytestmark = pytest.mark.slow
+
 
 def panels(ops, unit, b, count=1):
     shot = b['shots'][0]['id']
@@ -127,7 +129,6 @@ def test_all_image_tools_publish_same_simple_color_option():
         assert TOOLS[name].params['simple_color']['type'] == 'boolean'
 
 
-
 def test_panel_simple_color_metadata_follows_adoption_into_keyframe(board, monkeypatch):
     ops, _script, unit, b = board
     shot, rows, b = panels(ops, unit, b)
@@ -139,7 +140,6 @@ def test_panel_simple_color_metadata_follows_adoption_into_keyframe(board, monke
         {'op': 'adopt_panel_candidate', 'shot_id': shot, 'panel_id': rows[0]['id'], 'candidate_id': candidate['id']},
         {'op': 'use_panel_frame', 'shot_id': shot, 'panel_id': rows[0]['id']}])
     assert final['shots'][0]['keyframes'][0]['sketch_source'] == {'source': 'panel', 'panel_id': rows[0]['id'], 'candidate_id': candidate['id'], 'simple_color': True}
-
 
 
 def test_global_line_drawing_default_applies_without_project_override(prepared):

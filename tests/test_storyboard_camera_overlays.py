@@ -6,6 +6,8 @@ from test_screenplay_writing import project as project
 from test_storyboard_operations import setup_board
 from test_storyboard_timing import assert_problem, change, staged
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.mark.parametrize('easing,quarter,mid', [('linear', .25, .5), ('ease_in', .0625, .25),
                                              ('ease_out', .4375, .75), ('ease_in_out', .125, .5)])

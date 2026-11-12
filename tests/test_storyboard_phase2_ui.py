@@ -9,6 +9,8 @@ from test_screenplay_ui import dialog_action, render_ready, visuals
 from test_static_check_ui import click, plain
 from test_storyboard_ui import sketch_provider_stub, storyboard_diagnostics  # noqa: F401
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.mark.usefixtures("storyboard_diagnostics")
 def test_phase2_marker_impact_camera_preset_audio_and_subtracks(tmp_path, monkeypatch):

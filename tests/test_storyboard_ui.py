@@ -4,6 +4,8 @@ from test_chat_scroll import transcript_shell
 from test_screenplay_ui import dialog_action, render_ready, visuals
 from test_static_check_ui import click, plain
 
+pytestmark = pytest.mark.slow
+
 
 @pytest.fixture(autouse=True)
 def sketch_provider_stub(monkeypatch):
