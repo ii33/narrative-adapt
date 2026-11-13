@@ -752,13 +752,8 @@ Item {
         return -1
     }
 
-    // 移除时**必须**先选一种：只移出列表 / 连文件一起删除。没有默认值——以前默认
-    // 「只移出列表」，有人以为已经删干净，实际上文件一个没动。
-    property int removeMode: 0
-
     function confirmRemove() {
-        if (removeMode === 0) return
-        bridge.removeProject(removeDialog.targetPath, removeMode === 2)
+        bridge.removeProject(removeDialog.targetPath, deleteCheck.checked)
         removeDialog.close()
     }
 
@@ -768,7 +763,7 @@ Item {
         // 标题常常两边都叫「未命名作品」，所以连文件名一起显示。
         removeDialog.targetTitle = title && title !== fileName
             ? title + "（" + fileName + "）" : fileName
-        page.removeMode = 0
+        deleteCheck.checked = false
         removeDialog.open()
     }
 
@@ -816,25 +811,14 @@ Item {
                 maximumLineCount: 3
             }
 
-            ButtonGroup { id: removeModeGroup }
-
-            RadioButton {
-                objectName: "removeKeepFiles"
-                ButtonGroup.group: removeModeGroup
-                text: "只从最近列表移除（磁盘上的文件保留）"
-                checked: page.removeMode === 1
-                onClicked: page.removeMode = 1
-            }
-            RadioButton {
+            CheckBox {
+                id: deleteCheck
                 objectName: "removeDeleteFiles"
-                ButtonGroup.group: removeModeGroup
                 text: "同时删除磁盘上的工程文件"
-                checked: page.removeMode === 2
-                onClicked: page.removeMode = 2
             }
             Label {
                 Layout.fillWidth: true
-                visible: page.removeMode === 2
+                visible: deleteCheck.checked
                 wrapMode: Text.Wrap
                 text: "工程包会连同它的提取缓存、会话目录一起删除，不可恢复。"
                 color: page.t.bad
@@ -852,9 +836,7 @@ Item {
                 }
                 Button {
                     objectName: "removeConfirm"
-                    // 没选就不给按：这一步必须是用户明确表态，不能靠默认值替他决定。
-                    enabled: page.removeMode !== 0
-                    text: page.removeMode === 2 ? "删除并移除" : "从列表移除"
+                    text: deleteCheck.checked ? "删除并移除" : "从列表移除"
                     highlighted: true
                     onClicked: page.confirmRemove()
                 }
