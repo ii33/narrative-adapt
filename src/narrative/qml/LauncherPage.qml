@@ -51,12 +51,20 @@ Item {
     // 新建工程放哪：由人选，默认家目录。
     property string newProjectParent: bridge.homeDirectory()
 
+    // 两个工程可能同名（都叫 1.nproj、标题都叫「未命名作品」），列表里只靠文件名
+    // 根本分不出来——区分它们的是**所在文件夹**，所以次级行显示文件夹而不是完整路径。
+    function folderOf(path) {
+        var match = /^(.*)[\\/][^\\/]*$/.exec(path || "")
+        return match ? match[1] : (path || "")
+    }
+
     function rebuildProjectRows() {
         projectRows.clear()
         for (var i = 0; i < recentItems.length; ++i) {
             var item = recentItems[i]
             projectRows.append({
                 path: item.path,
+                folder: folderOf(item.path),
                 name: item.name,
                 title: item.title || item.name,
                 revision: 0,
@@ -282,6 +290,7 @@ Item {
                         spacing: 6
                         delegate: Rectangle {
                             required property string path
+                            required property string folder
                             required property string name
                             required property string title
                             required property int revision
@@ -323,11 +332,15 @@ Item {
                                         Layout.fillWidth: true
                                     }
                                     Label {
-                                        text: path
+                                        objectName: "projectRowFolder"
+                                        text: folder
                                         color: t.muted
                                         font.pixelSize: 10
                                         elide: Text.ElideMiddle
                                         Layout.fillWidth: true
+                                        ToolTip.visible: folderHover.hovered
+                                        ToolTip.text: path
+                                        HoverHandler { id: folderHover }
                                     }
                                 }
                                 Label {
@@ -745,8 +758,11 @@ Item {
     }
 
     function askRemove(path, title) {
+        var fileName = (/[^\\/]+$/.exec(path || "") || [""])[0]
         removeDialog.targetPath = path
-        removeDialog.targetTitle = title || path
+        // 标题常常两边都叫「未命名作品」，所以连文件名一起显示。
+        removeDialog.targetTitle = title && title !== fileName
+            ? title + "（" + fileName + "）" : fileName
         deleteCheck.checked = false
         removeDialog.open()
     }
@@ -787,10 +803,12 @@ Item {
             Label {
                 Layout.fillWidth: true
                 objectName: "removeProjectPath"
+                // 同名工程靠文件夹区分：这里允许换行，绝不省略——删之前必须看清是哪一份。
                 text: removeDialog.targetPath
                 color: page.t.muted
                 font.pixelSize: 10
-                elide: Text.ElideMiddle
+                wrapMode: Text.WrapAnywhere
+                maximumLineCount: 3
             }
 
             CheckBox {
