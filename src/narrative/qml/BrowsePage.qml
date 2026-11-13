@@ -972,6 +972,12 @@ Item {
                 if (page.selectedId.length > 0) page.io.loadNodeProperties(page.selectedId)
             } else if (kind === "material") {
                 page.applyMaterial(payload)
+                // 删资料/删图时磁盘文件可能正被页面占着：删不掉的要说明，且必须说"会再试"，
+                // 否则用户以为已经删干净了。
+                if ((payload.leftovers || []).length > 0) {
+                    app.toast("资料已改动；有 " + payload.leftovers.length
+                        + " 个文件被占用暂时没删掉，下次打开会再试", false)
+                }
             } else if (kind === "node_properties") {
                 page.applyProperties(payload)
             } else if (kind === "property_categorize") {

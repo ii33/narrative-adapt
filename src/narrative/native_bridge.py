@@ -1330,6 +1330,10 @@ class NativeBridge(QObject):
             if isinstance(changed, dict) and changed.get("id"):
                 payload["changed_id"] = changed["id"]
                 payload["changed_visible"] = holds_at(changed, self._state_cut, snapshot=ops.graph_snapshot())
+            # 删资料/删图时磁盘上可能还占着（Windows 不放正被显示的文件）。删不掉的路径
+            # 必须一起发回去：界面要能说"下次打开会再试"，而不是让人以为已经删干净。
+            if isinstance(changed, dict) and changed.get("leftovers"):
+                payload["leftovers"] = list(changed["leftovers"])
             return payload
 
         self._project_task("material", work)

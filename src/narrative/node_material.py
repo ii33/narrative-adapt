@@ -186,17 +186,20 @@ class MaterialStore:
         self._atomic_json(path, sequence)
         return number
 
-    def _sweep(self, node_id: str, data: dict) -> None:
-        """删掉没人认领的素材。
+    def _sweep(self, node_id: str, data: dict) -> list[str]:
+        """删掉没人认领的素材，返回这次**没删掉**的路径。
 
-        Windows 上删不掉正在显示的文件（页面的 Image 还开着它），所以删除只是尽力而为：
-        记录先走，文件留到下一次读这一页时再清——那时没人引用它了。
+        Windows 上删不掉正在显示的文件（页面的 Image 还开着它），所以删除确实是尽力而为：
+        记录先走，文件留到下一次读这一页时再清——那时没人引用它了。但"尽力而为"不等于
+        "悄悄放过"：清不掉的路径要作为返回值交出去，调用方才能告诉用户"下次再试"，
+        而不是让人以为已经删干净。
         """
+        leftovers: list[str] = []
         folder = self.root / node_id
         if not folder.resolve().is_relative_to(self.root.resolve()):
-            return
+            return leftovers
         if not folder.is_dir():
-            return
+            return leftovers
         alive = {str(card.get("id") or "") for card in data.get("cards") or []}
         keep = {
             str(image.get("file") or "").replace("\\", "/")
@@ -212,7 +215,7 @@ class MaterialStore:
             try:
                 path.unlink()
             except OSError:
-                pass
+                leftovers.append(str(path))
         # 资料已经删掉的空壳目录也不留；非空说明还有删不掉的文件，留着下次再说。
         for path in sorted(
             (item for item in folder.rglob("*") if item.is_dir()),
@@ -224,7 +227,8 @@ class MaterialStore:
             try:
                 path.rmdir()
             except OSError:
-                pass
+                leftovers.append(str(path))
+        return leftovers
 
     def nodes_with_material(self) -> list[str]:
         if not self.root.is_dir():
@@ -326,14 +330,22 @@ class MaterialStore:
         card = self._card(data, card_id)
         data["cards"] = [other for other in data["cards"] if other.get("id") != card_id]
         self._save(node_id, data)
-        # 图片跟着资料一起删：留在磁盘上的孤儿文件没人认领。
+        # 图片跟着资料一起删：留在磁盘上的孤儿文件没人认领。删不掉就如实回报，
+        # 下次读这一页时 `_sweep` 会再试——不假装删掉了，也不把用户卡在这里。
         folder = self.root / node_id / card_id
         if not folder.resolve().is_relative_to(self.root.resolve()):
             raise ValueError("资料图片目录不能指向资料域外")
+        leftovers: list[str] = []
         if folder.is_dir():
-            shutil.rmtree(folder, ignore_errors=True)
-        self._sweep(node_id, data)
-        return {"removed": card_id, "title": card.get("title")}
+            try:
+                shutil.rmtree(folder)
+            except OSError:
+                leftovers.append(str(folder))
+        leftovers += self._sweep(node_id, data)
+        # 报告只说"现在还没删掉的东西"：上面 rmtree 失败后 _sweep 往往已经把文件逐个删掉、
+        # 空目录也删掉了，那种情况再报"残留"就是在撒谎。
+        return {"removed": card_id, "title": card.get("title"),
+                "leftovers": [path for path in leftovers if Path(path).exists()]}
 
     # -- 图片 ----------------------------------------------------------
 
@@ -370,18 +382,22 @@ class MaterialStore:
             "added_at": _now(),
         }
 
-    def _drop_image_file(self, record: dict) -> bool:
-        """删掉图片文件。页面上还开着它时 Windows 不放，所以只是尽力而为。"""
+    def _drop_image_file(self, record: dict) -> tuple[bool, str]:
+        """删掉图片文件，返回 ``(删掉了没有, 删不掉的路径)``。
+
+        页面上还开着它时 Windows 不放，所以这里仍是尽力而为——但失败必须能被上层拿到，
+        不能只回一个 False 让调用方猜。
+        """
         target = self.root / str(record.get("file") or "")
         if not target.resolve().is_relative_to(self.root.resolve()):
-            return False
+            return False, str(target)
         if not target.is_file():
-            return False
+            return False, ""
         try:
             target.unlink()
-            return True
+            return True, ""
         except OSError:
-            return False
+            return False, str(target)
 
     def _sync_images(self, node_id: str, card: dict, entries: list[dict] | None, data: dict) -> None:
         """把这张资料的图片改成 `entries` 说的样子。
@@ -446,7 +462,9 @@ class MaterialStore:
         card["images"] = [image for image in images if image.get("id") != image_id]
         self._save(node_id, data)
         # 页面上还显示着这张图时删不掉文件，记录已经没了，`_sweep` 下次再清。
-        return {"removed": image_id, "file_deleted": self._drop_image_file(record)}
+        deleted, leftover = self._drop_image_file(record)
+        return {"removed": image_id, "file_deleted": deleted,
+                "leftovers": [leftover] if leftover else []}
 
     # -- 给界面用的一份投影 --------------------------------------------
 
