@@ -72,6 +72,38 @@ def test_creation_permission_failure_names_the_path_without_fallback(tmp_path, m
     assert not blocked.exists()
 
 
+def test_creation_conflict_names_the_leftover_paths_instead_of_a_bare_refusal(tmp_path, monkeypatch):
+    """同名冲突必须说清是哪条路占着。
+
+    典型现场：用户「移除工程」只把条目从最近列表拿掉（没勾删除文件），文件仍在磁盘上，
+    之后想用同一个代号新建，只看到一句「同名项目已经存在」，完全不知道该删什么。
+    """
+    qt = pytest.importorskip("PySide6.QtCore")
+    qt_widgets = pytest.importorskip("PySide6.QtWidgets")
+    from narrative.native_bridge import NativeBridge
+
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = qt_widgets.QApplication.instance() or qt_widgets.QApplication([])
+    monkeypatch.setenv("NARRATIVE_PROVIDER_DB", str(tmp_path / "providers.sqlite3"))
+    entry = tmp_path / "示例工程.nproj"
+    entry.write_text("", encoding="utf-8")
+    leftover = tmp_path / "示例工程_data"
+    leftover.mkdir()
+    bridge = NativeBridge()
+    errors = []
+    bridge.errorOccurred.connect(lambda kind, message: errors.append((kind, message)))
+    try:
+        bridge.createProjectAt(qt.QUrl.fromLocalFile(str(tmp_path)).toString(), "示例工程")
+        app.processEvents()
+        assert errors and errors[0][0] == "project"
+        message = errors[0][1]
+        assert str(entry) in message and str(leftover) in message
+        assert "移出最近列表不会删文件" in message and "换一个代号" in message
+    finally:
+        bridge.close()
+        app.processEvents()
+
+
 def test_set_graph_title_syncs_database_and_entry_without_renaming_paths(tmp_path):
     entry = tmp_path / "original-file-name.nproj"
     ops = Operations.create_graph_project(entry)

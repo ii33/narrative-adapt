@@ -560,8 +560,16 @@ class NativeBridge(QObject):
             self.errorOccurred.emit("project", "请先选一个存在的文件夹")
             return
         path = folder / f"{name}{project_package.PACKAGE_SUFFIX}"
-        if path.exists():
-            self.errorOccurred.emit("project", "同名项目已经存在")
+        # 只认入口文件会漏掉「从最近列表移除了、但文件还在磁盘上」的半残状态：那时
+        # 入口文件仍在，用户看到「同名项目已经存在」却不知道是哪条路、怎么办。
+        leftovers = [item for item in (path, folder / f"{name}_data", folder / f"{name}_extraction",
+                                       folder / f"{name}_chats") if item.exists()]
+        if leftovers:
+            self.errorOccurred.emit(
+                "project",
+                "该位置已有同名工程：" + "、".join(str(item) for item in leftovers)
+                + "。移出最近列表不会删文件；换一个代号，或先删除上面这些文件/目录再试。",
+            )
             return
         self._epoch += 1
         self._reading_cut = {}

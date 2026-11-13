@@ -1,8 +1,9 @@
-"""版本号在真实界面上的两处露出：状态栏与启动页底栏。
+"""版本号在真实界面上的露出：状态栏（唯一一处）。
 
 离屏跑：状态栏在两种模式下都在（它不在页面 StackLayout 里），启动页只有
 launcher 模式下可见。断言文本与 ``bridge.appVersion`` 完全一致，而不是只看
-「有个标签」——版本串对不上，截图和 bug 报告就指不回具体代码。
+「有个标签」——版本串对不上，截图和 bug 报告就指不回具体代码。启动页不许再自带
+一份（那会让同一句话在屏幕上出现两次）。
 """
 from __future__ import annotations
 
@@ -42,18 +43,11 @@ def test_status_bar_shows_the_same_version_as_the_bridge(tmp_path, monkeypatch):
         assert status is not None and status is not label
 
 
-def test_launcher_footer_shows_version_and_tag(tmp_path, monkeypatch):
-    from narrative import version
-
+def test_launcher_does_not_duplicate_the_status_bar_version(tmp_path, monkeypatch):
+    """版本只在状态栏露出一次：启动页自带一份会让同一句话在屏幕上出现两次。"""
     with _shell(tmp_path, monkeypatch) as ui:
         ui["settle"]()
         page = ui["window"].findChild(object, "launcherPage")
         assert page is not None
-        label = page.findChild(object, "launcherVersion")
-        assert label is not None, "启动页没有版本行"
-        ui["settle"](lambda: label.property("visible") and label.property("width") > 0)
-        text = label.property("text")
-        assert version.tag() in text
-        assert ui["bridge"].appVersion in text
-        assert ui["bridge"].appVersionTag == version.tag()
-        ui["settle"](lambda: label.property("width") >= label.property("contentWidth"))
+        assert page.findChild(object, "launcherVersion") is None
+        assert page.findChild(object, "launcherStatus") is None
