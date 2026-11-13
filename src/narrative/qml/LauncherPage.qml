@@ -176,12 +176,18 @@ Item {
                     return
                 }
                 var gone = (payload.deleted || []).length
-                app.toast(payload.retained_data === true
-                    ? "仅删除入口文件；原数据、资料和会话保留"
-                    : (gone > 0 ? "已删除工程文件（" + gone + " 项）"
-                        // 只从列表移除时**文件一个都没动**，不说清楚就会让人以为已经删了，
-                        // 之后同代号新建撞上残留文件还找不到原因。
-                        : "已从列表移除（磁盘文件未删除）：" + payload.path), false)
+                var keptPaths = payload.retained_paths || []
+                if (gone === 0) {
+                    // 只从列表移除时**文件一个都没动**，不说清楚就会让人以为已经删了，
+                    // 之后同代号新建撞上残留文件还找不到原因。
+                    app.toast("已从列表移除（磁盘文件未删除）：" + payload.path, false)
+                } else if (keptPaths.length > 0) {
+                    // 保留项必须说清是哪一项、为什么——静默留下的数据用户永远找不到。
+                    app.toast("已删除 " + gone + " 项；保留 " + keptPaths.length + " 项："
+                        + keptPaths[0].path + "…（" + keptPaths[0].reason + "）", true)
+                } else {
+                    app.toast("已删除工程文件（" + gone + " 项）", false)
+                }
             } else if (kind === "global_settings") {
                 catalog = payload.catalog || []
                 settingsPath = payload.path || ""

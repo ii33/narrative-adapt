@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import threading
 import time
 from collections.abc import Callable
@@ -25,6 +24,7 @@ from . import (
     graph_profile_ops,
     project_catalog,
     project_package,
+    project_removal,
     providers,
     runtime_security,
     theme,
@@ -754,7 +754,11 @@ class NativeBridge(QObject):
 
     @Slot(str, bool)
     def removeProject(self, path: str, delete_files: bool) -> None:
-        """Forget the entry; explicit deletion only removes its validated owned files.
+        """Forget the entry; ``delete_files`` removes what its descriptor owns.
+
+        删什么由 descriptor 说了算（见 ``project_removal``），不靠目录名猜——只有
+        真有危险（别人也在用、在入口目录之外、会连入口目录本身一起删）的项才保留，
+        并且每项都带人话原因进 payload。
 
         清单写失败不放弃动作：先按用户意图做完（内存里移除、关工程、删自有文件、刷新
         列表），最后只发一条能看懂的提示。最近工程列表是下次启动的便利记录，不是业务
@@ -783,55 +787,31 @@ class NativeBridge(QObject):
         if self._project_path is not None and self.recentProjectKey(str(self._project_path)) == key:
             self.closeProject()
         removed: list[str] = []
-        retained_data = False
+        retained: list[tuple[Path, str]] = []
         deletion_error = ""
         if delete_files and target.exists():
             try:
-                if not target.is_file() or target.suffix.lower() != project_package.PACKAGE_SUFFIX:
-                    raise ValueError("这不是有效的 .nproj 工程入口文件，没有删除")
-                found = project_package.layout(target)
-                parent = target.parent.resolve()
-                directories = list(dict.fromkeys(
-                    item.resolve() for item in (found.root, found.extraction, found.chats)
-                ))
-                owned = [parent / f"{target.stem}{suffix}"
-                         for suffix in ("_data", "_extraction", "_chats")]
-                shared = False
-                other_entries = set(parent.glob("*.nproj")) | {Path(self.urlToPath(row)) for row in rows}
-                for other in other_entries:
-                    if other.resolve() == target or not other.is_file():
-                        continue
-                    try:
-                        referenced = project_package.layout(other)
-                    except (OSError, ValueError):
-                        continue
-                    references = (referenced.db, referenced.material,
-                                  referenced.extraction, referenced.chats)
-                    if any(directory == reference.resolve()
-                           or directory in reference.resolve().parents
-                           or reference.resolve() in directory.parents
-                           for directory in directories for reference in references):
-                        shared = True
-                        break
-                if (shared or any(item == parent or item.parent != parent for item in directories)
-                    or directories != [item.resolve() for item in owned]
-                    or found.material.resolve() != found.root.resolve() / "material"):
-                    # An entry may reference shared/external data: only unlink the entry.
-                    directories = []
-                    retained_data = True
-                for directory in directories:
-                    if directory.exists():
-                        shutil.rmtree(directory)
-                        removed.append(str(directory))
-                target.unlink()
-                removed.append(str(target))
+                other_entries = set(target.parent.glob("*.nproj")) | {
+                    Path(self.urlToPath(row)) for row in rows
+                }
+                # 要删什么由 descriptor 决定，由目录名猜是另一种形式的静默不删。
+                plan = project_removal.plan_removal(target, other_entries=other_entries)
+                outcome = project_removal.apply_plan(plan)
+                removed = [str(path) for path in outcome.removed]
+                retained = plan.retained
+                if outcome.errors:
+                    # 删不掉的项如实报错，不许当作已经删了。
+                    deletion_error = "；".join(outcome.errors)
+                    self.errorOccurred.emit("project", deletion_error)
             except (OSError, ValueError) as exc:
                 deletion_error = str(exc)
                 self.errorOccurred.emit("project", deletion_error)
         self.resultReady.emit("project_removed", {
             "path": str(target), "deleted": removed, "kept": not removed,
-            "retained_data": retained_data, "key": key,
-            "deletion_error": deletion_error,
+            "retained_data": bool(retained),
+            "retained_paths": [{"path": str(path), "reason": reason}
+                               for path, reason in retained],
+            "key": key, "deletion_error": deletion_error,
         })
         self.loadRecentProjects()
         if write_error is not None:
