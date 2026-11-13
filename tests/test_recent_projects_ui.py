@@ -157,6 +157,31 @@ def test_bridge_shows_persistent_low_integrity_warning(monkeypatch, level, shown
         bridge.close()
 
 
+def test_plain_removal_says_the_files_are_still_on_disk(tmp_path, monkeypatch):
+    """只从列表移除时必须明说文件还在。
+
+    对话框里「同时删除磁盘上的工程文件」默认不勾，按钮写的是「从列表移除」；如果提示
+    只说「已从列表移除」，用户会以为删干净了，之后同代号新建撞上残留文件还找不到原因。
+    """
+    monkeypatch.setenv("QT_QPA_FONTDIR", "C:\\Windows\\Fonts")
+    import test_theme_ui as themeui
+
+    with themeui.theme_shell(tmp_path, monkeypatch) as ui:
+        ui["settle"]()
+        window, bridge = ui["window"], ui["bridge"]
+        entry = tmp_path / "示例工程.nproj"
+        entry.write_text("", encoding="utf-8")
+        bridge.resultReady.emit("project_removed", {
+            "path": str(entry), "deleted": [], "kept": True,
+            "retained_data": False, "key": bridge.recentProjectKey(str(entry)),
+            "deletion_error": "",
+        })
+        ui["settle"](lambda: "磁盘文件未删除" in window.property("notice"))
+        notice = window.property("notice")
+        assert "磁盘文件未删除" in notice
+        assert str(entry) in notice
+
+
 def test_native_app_refuses_low_integrity_before_entering_the_ui(tmp_path, monkeypatch, capsys):
     """直接跑 pythonw（绕过脚本）时也要硬失败：写渲染日志 + 非 0 退出码。"""
     _qt()

@@ -171,7 +171,9 @@ Item {
                 app.toast(payload.retained_data === true
                     ? "仅删除入口文件；原数据、资料和会话保留"
                     : (gone > 0 ? "已删除工程文件（" + gone + " 项）"
-                        : "已从列表移除"), false)
+                        // 只从列表移除时**文件一个都没动**，不说清楚就会让人以为已经删了，
+                        // 之后同代号新建撞上残留文件还找不到原因。
+                        : "已从列表移除（磁盘文件未删除）：" + payload.path), false)
             } else if (kind === "global_settings") {
                 catalog = payload.catalog || []
                 settingsPath = payload.path || ""
