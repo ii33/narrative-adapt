@@ -24,4 +24,4 @@ SDK 旧版本没有直接的两个 reserve 配置字段。运行器将触发阈�
 
 该版本插件自身在压力压缩失败后可能警告并继续生成。本项目在网关锁存摘要截断、HTTP/传输失败或流未完成，并在 SDK 尝试继续生成时拒绝向上游转发；不自动重试。`compaction/end` 的错误也会锁存。`HarnessReply` 对压缩失败强制报告 `finish_reason=error`、`compaction_incomplete=true`、`compaction_failure`，`blocked_generation_count` 记录本地阻止的主请求数；已发摘要的原始响应和 usage 保留。GraphAgent 现有结束状态检查先于动作解析，因此该轮标为 incomplete 且不提出候选。生命周期错误通知与 SDK 后续 HTTP 存在并发时，网关尽可能提前阻止，运行器仍后验报告失败；仅插件加载或存在压缩事件不代表实际输出质量通过。
 
-工程证据由 `tests/test_context_runtime.py` 覆盖：固定 runtime 的组合配置、安全 patch、无模型启动，以及本地伪服务上的真实 SDK 摘要→主请求。用极小触发阈值验证摘要真实发生、131,072/32,768 两种输出上限各自生效、原始文本与 usage 保存、第二轮仅计本轮两次调用。摘要 length 截断和 HTTP 失败均验证只发一次摘要、后续主请求在本地被阻止、原始响应保存与脱敏，以及 GraphOperations 最终 incomplete 且无候选。这是工程验证，不替代真实服务与原文验收。
+工程证据：`tests/test_messages_usage_compaction.py` 覆盖压缩事件、`model_requests` 记录与 usage 记账这条主链路（组合配置、安全 patch、无模型启动）。原文这段更早的"真实 SDK 摘要→主请求、131,072/32,768 两种输出上限各自生效、第二轮仅计本轮两次调用"**目前没有对应的自动化用例**（过去引用的 `tests/test_context_runtime.py` 已不存在），重跑取证要另起脚本，别把它当已覆盖。这是工程验证，不替代真实服务与原文验收。

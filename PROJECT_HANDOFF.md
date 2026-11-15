@@ -162,7 +162,7 @@ UI 侧约定：所有颜色走主题令牌（`theme.py` 的 `TOKENS` / `LAYOUT`�
 
 ### 5.3 验证纪律（血泪换来的，别省）
 
-1. **开发期不跑全量**：只跑你改动对应的文件（`pytest tests/test_x.py -n 0`）。全量留给推送前一次。
+1. **开发期不跑全量**：只跑你改动对应的文件（`pytest tests/<改动对应的测试文件>.py -n 0`）。全量留给推送前一次。
 2. **不要同时开多个 worktree 跑测试**：会互相拖慢，还会制造 flaky。有一次全量因此从 55 秒涨到 774 秒，并逼出一条假失败。
 3. **推送前才跑** `pytest --slow`（不是 `-m ""`，那个会连 ui/native/integration 一起跑）。
 4. **`ruff check --no-cache src tests`**：工作区的 `.ruff_cache` 会给出过期的"All checks passed"，必须带 `--no-cache`。

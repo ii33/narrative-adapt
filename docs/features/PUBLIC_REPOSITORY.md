@@ -18,14 +18,14 @@ model works, using that same synthetic cast in examples.
 - **No saved output from real model runs.** `examples/harness_result.json` and the regression test
   that replays a real response stay out: their provenance is not clear enough to redistribute.
 
-`src/narrative/texts/*.txt` are excluded too. The built-in text catalog and
-`tests/test_builtin_texts.py` expect those resources to exist locally; obtain the texts
-independently and place them in the expected directory. Do not commit them.
+`src/narrative/texts/*.txt` are excluded too. The built-in text catalog expects those resources
+to exist locally; obtain the texts independently and place them in the expected directory.
+Do not commit them. (The catalog itself has no automated guard today — the test file this section
+used to cite does not exist — so check by hand before publishing.)
 
 ## How this is enforced
 
-- `tests/test_public_baseline.py` fails if a tracked file names a specific project, or if a project
-  path is tracked at all. Its marker list is written in fragments so the test does not trip itself.
+- **No automated guard yet**: the baseline test this section used to cite (`tests/test_public_baseline.py`) was never landed and its file no longer exists, so the rules below are conventions enforced by review, not by CI.
 - `pyproject.toml` keeps the wheel to code (`src/narrative/texts`, databases, caches excluded) and
   lists the sdist contents explicitly instead of walking the tree — which is both slow and how
   project data used to leak into a build.

@@ -1,87 +1,89 @@
-"""Prompt snapshot guard: text changed ⇒ version changed.
+"""文档里写的提示词版本必须是运行时真值，文档点名的测试必须真的存在。
 
-The snapshot (``tests/prompt_snapshot.json``) records ``key -> {version, digest[:16]}``
-for every ``DEFAULT_PROMPTS`` entry. This test does not judge wording — 文案是否合理
-仍靠要点断言与真实模型对照 — it only catches a silent text edit shipped under an old
-version number, and a version bump that changed nothing.
+两处漂移都是实际发生过的：``docs/GLOSSARY.md`` 长期写着「提取提示词（``extraction``
+v23）」而代码早已是 v26；SPEC 里也曾点名一个不存在的守卫文件。版本靠人抄、测试名靠人记，
+就一定会过期，所以这里按「合同」把它们钉住：
 
-Update with ``python scripts/update_prompt_snapshot.py --write`` after a human confirms.
+* 文档里凡是 `` `<prompt id>` v<N> `` 的写法，``<N>`` 必须等于
+  ``prompt_defaults.DEFAULT_PROMPTS[id]["version"]``（升版而文档不跟，直接红）；
+* 文档里凡是 ``tests/test_xxx.py`` 的写法，该文件必须存在（不许用不存在的守卫给自己背书）。
 """
 from __future__ import annotations
 
-from prompt_snapshot import SNAPSHOT, compare, current_entries, digest, load_snapshot, summarise
+import re
+from pathlib import Path
+
+import pytest
+
+from narrative.prompt_defaults import DEFAULT_PROMPTS
+
+ROOT = Path(__file__).resolve().parents[1]
+DOCS = ROOT / "docs"
+PROSE = [ROOT / "AGENTS.md", ROOT / "README.md", ROOT / "PROJECT_HANDOFF.md"]
+ID_VERSION = re.compile(r"`([a-z][a-z_]{2,})`\s*v(\d+)")
+# §7 的索引表把版本放在独立单元格里：`| `extraction` | v26 | …`
+TABLE_VERSION = re.compile(r"\|\s*`([a-z][a-z_]{2,})`\s*\|\s*v(\d+)\s*\|")
+# 历史记录里的旧版本号是「当时的事实」，不是当前声明，不该被当成漂移。
+HISTORICAL = re.compile(r"历史|当时|落后|取自")
+TEST_REFERENCE = re.compile(r"(tests/[A-Za-z0-9_./-]+\.py)")
 
 
-def test_snapshot_file_exists():
-    """快照必须存在，否则「文本变动」没有任何基线。"""
-    assert SNAPSHOT.exists(), (
-        f"{SNAPSHOT} 缺失；跑 python scripts/update_prompt_snapshot.py --write 生成基线")
+def _prose_files():
+    yield from sorted(DOCS.rglob("*.md"))
+    yield from (path for path in PROSE if path.is_file())
 
 
-def test_current_prompts_match_snapshot():
-    """当前 DEFAULT_PROMPTS 与快照完全一致。"""
-    snapshot = load_snapshot()
-    current = current_entries()
-    problems = compare(current, snapshot)
-    detail = "\n".join("  " + problem["message"] for problem in problems)
-    assert not problems, f"提示词快照与代码不一致（{len(problems)} 条）：\n{detail}"
-    assert snapshot.get("prompts") == current
+def _mentions():
+    """``(文件, 行号, 提示词 id, 文档里的版本)``；只认已知的提示词 id。
+
+    除普通的 `` `extraction` v26 `` 写法，也要认 §7 索引表的单元格形态。
+    """
+    for path in _prose_files():
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for number, line in enumerate(text.splitlines(), start=1):
+            if HISTORICAL.search(line):
+                continue
+            for identifier, version in ID_VERSION.findall(line) + TABLE_VERSION.findall(line):
+                if identifier in DEFAULT_PROMPTS:
+                    yield path, number, identifier, version
 
 
-def test_text_change_without_version_change_is_rejected():
-    """文本变了版本没变 → 失败，并给出「先升版本再更新快照」的提示。"""
-    snapshot = {"prompts": {"extraction": {"version": "23", "digest": digest("旧文本")}},
-                "allow_version_only": []}
-    current = {"extraction": {"version": "23", "digest": digest("新文本")}}
-
-    problems = compare(current, snapshot)
-
-    assert [problem["kind"] for problem in problems] == ["text_without_version"]
-    assert "文本已改但版本仍是 v23" in problems[0]["message"]
-    assert "请先升版本再更新快照" in problems[0]["message"]
+def test_documented_prompt_versions_match_the_runtime():
+    stale = [
+        f"{path.relative_to(ROOT)}:{number} 写的是 `{identifier}` v{version}，"
+        f"实际是 v{DEFAULT_PROMPTS[identifier]['version']}"
+        for path, number, identifier, version in _mentions()
+        if version != str(DEFAULT_PROMPTS[identifier]["version"])
+    ]
+    assert not stale, "文档里的提示词版本已过期：\n" + "\n".join(stale)
 
 
-def test_version_change_without_text_change_is_rejected():
-    """版本升了文本没变 → 失败，除非登记在 allow_version_only。"""
-    entry = {"version": "23", "digest": digest("同一段文本")}
-    snapshot = {"prompts": {"extraction": entry}, "allow_version_only": []}
-    current = {"extraction": {"version": "24", "digest": entry["digest"]}}
-
-    problems = compare(current, snapshot)
-    assert [problem["kind"] for problem in problems] == ["version_without_text"]
-    assert "但文本没变" in problems[0]["message"]
-
-    allowed = {"prompts": {"extraction": entry}, "allow_version_only": ["extraction"]}
-    assert compare(current, allowed) == []
+def test_every_prompt_id_is_documented_somewhere_in_the_extraction_spec():
+    """提示词索引必须覆盖全部条目：新增一条提示词而不登记，等于没人知道它的规则在哪。"""
+    spec = (DOCS / "extraction" / "SPEC.md").read_text(encoding="utf-8")
+    missing = sorted(set(DEFAULT_PROMPTS) - {identifier for _p, _n, identifier, _v in _mentions() if _p.name == "SPEC.md"})
+    assert not missing, f"SPEC 的提示词索引缺这些条目：{missing}"
+    assert "## 7 提示词索引" in spec
 
 
-def test_version_and_text_both_changed_needs_snapshot_update():
-    """正常改法（升版本 + 改文本）仍要求把快照更新到新版本。"""
-    snapshot = {"prompts": {"system": {"version": "10", "digest": digest("旧")}},
-                "allow_version_only": []}
-    current = {"system": {"version": "11", "digest": digest("新")}}
-
-    problems = compare(current, snapshot)
-
-    assert [problem["kind"] for problem in problems] == ["outdated"]
-    assert "v10" in problems[0]["message"] and "v11" in problems[0]["message"]
-
-
-def test_added_and_removed_prompts_are_reported():
-    """新增或删除提示词条目同样要让快照跟上。"""
-    snapshot = {"prompts": {"old": {"version": "1", "digest": digest("x")}}, "allow_version_only": []}
-    current = {"new": {"version": "1", "digest": digest("y")}}
-
-    kinds = {problem["kind"] for problem in compare(current, snapshot)}
-
-    assert kinds == {"added", "removed"}
+def test_documents_only_name_tests_that_exist():
+    """文档不许用不存在的测试给自己背书；但写明"已不存在/未落地"的历史说明除外。"""
+    retracted = re.compile(r"不存在|已删除|已移除|未落地|不再存在|已不存在|no longer exists|never landed|does not exist")
+    missing = []
+    for path in _prose_files():
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for number, line in enumerate(text.splitlines(), start=1):
+            if retracted.search(line):
+                continue
+            for candidate in TEST_REFERENCE.findall(line):
+                if not (ROOT / candidate).is_file():
+                    missing.append(f"{path.relative_to(ROOT)}:{number} 提到 {candidate}，但文件不存在")
+    assert not missing, "文档点名了不存在的测试：\n" + "\n".join(missing)
 
 
-def test_summarise_prints_version_moves():
-    """更新脚本的 diff 摘要要写清 key、旧新版本与哈希前缀。"""
-    old = {"extraction": {"version": "23", "digest": "0123456789abcdef"}}
-    new = {"extraction": {"version": "24", "digest": "fedcba9876543210"}}
-
-    lines = summarise(old, new)
-
-    assert lines == ["~ extraction  v23 → v24  01234567 → fedcba98"]
+@pytest.mark.parametrize("identifier", sorted(DEFAULT_PROMPTS))
+def test_prompt_entry_has_a_version_string(identifier: str):
+    """版本必须是可渲染的字符串，否则文档里的 `vN` 无从对齐。"""
+    version = DEFAULT_PROMPTS[identifier]["version"]
+    assert isinstance(version, str) and version.strip()
+    assert version.isdigit(), f"{identifier} 的 version 不是纯数字：{version!r}"

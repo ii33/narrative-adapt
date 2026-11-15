@@ -7,7 +7,7 @@
 | 前缀 | 归属 | 含义 | 例子 |
 | --- | --- | --- | --- |
 | `M-xx` | [extraction/SPEC.md](extraction/SPEC.md) 第 4 节 | 模型规则：可判定的判断标准 | `M-07` 属性变更只写在事件处 |
-| `E-xx` | [extraction/SPEC.md](extraction/SPEC.md) 第 3 节 | 提示词规范化出的硬约束（待 P2 填充） | — |
+| `E-xx` | [extraction/SPEC.md](extraction/SPEC.md) 第 3 节 | 提示词规范化出的硬约束：模型侧该怎么做（程序细节指到 `I-xx`） | `E-01` 未成功的操作不得声称已完成 |
 | `I-xx` | [extraction/SPEC.md](extraction/SPEC.md) 第 5 节 | 不变量：必须成立的校验点，绑诊断码 | 事件地点必填 → `EVENT_LOCATION_REQUIRED` |
 | `G-xx` | [GLOSSARY.md](GLOSSARY.md) | 概念词条：术语定义与易混对照 | 场景 S 与剧本场次 |
 
@@ -58,6 +58,7 @@
 | 公开仓库范围 | [PUBLIC_REPOSITORY.md](features/PUBLIC_REPOSITORY.md) |
 | 上下文运行时 | [context-runtime.md](features/context-runtime.md) |
 | 提示词写法（五段结构、硬指标） | [PROMPT_STYLE.md](PROMPT_STYLE.md) |
+| 提示词版本与变更记录 | [extraction/PROMPT_CHANGELOG.md](extraction/PROMPT_CHANGELOG.md) |
 | 提取提示词重写与真实验收 | [EXTRACTION_PROMPT_REWRITE.md](EXTRACTION_PROMPT_REWRITE.md) |
 | 测试分层与默认套件边界 | [TESTING.md](TESTING.md) |
 | 需求总表（agent 归纳，未经用户确认） | [REQUIREMENTS.md](requirements/REQUIREMENTS.md) |
