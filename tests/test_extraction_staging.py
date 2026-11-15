@@ -9,8 +9,13 @@ BAD_INDEX = 4  # draft_result 里的第一个事件：只有事件能带 quotes�
 
 
 def bad_draft():
+    """能整批拒收的引文问题只剩「本批多处命中」（`U-11`：定位不到只丢引文 + info）。
+
+    `甲` 在 TEXT 里出现两次：坐标有歧义，程序不许任取首处，于是草稿进 staged，
+    问题仍落在 `nodes[4].quotes` 这个原始槽上——下面逐个槽位修补的机制不变。
+    """
     draft = draft_result(ended=False)
-    draft['nodes'][BAD_INDEX]['quotes'] = ['不在原文中的句子']
+    draft['nodes'][BAD_INDEX]['quotes'] = ['甲']
     return draft
 
 
@@ -27,7 +32,7 @@ def test_invalid_submit_persists_only_draft_patch_auto_commits_and_reopen_reads(
     assert 'entries' not in summary
     partial = project.read_extraction_submission(identifier, section='nodes', indices=[BAD_INDEX])
     assert partial['entries'][0]['reference'] == '@5'
-    assert partial['entries'][0]['item']['quotes'] == ['不在原文中的句子']
+    assert partial['entries'][0]['item']['quotes'] == ['甲']
     fixed = project.patch_extraction_submission(identifier, 1,
         [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['甲约好接乙。']}], '更正证据')
     assert fixed['status'] == 'accepted' and fixed['submission_status'] == 'committed'
@@ -50,7 +55,7 @@ def test_patch_stale_revision_and_illegal_splice_are_atomic(project):
     initial = project.submit_extraction(sid, bad_draft())
     identifier = initial['submission_id']
     changed = project.patch_extraction_submission(identifier, 1,
-        [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['依旧不存在']}], '仍待修')
+        [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['乙']}], '仍待修')
     assert changed['status'] == 'staged' and changed['submission_revision'] == 2
     before = project.read_extraction_submission(identifier, section='nodes')
     with pytest.raises(ValueError, match='revision'):
@@ -188,7 +193,7 @@ def test_concurrent_draft_patch_before_commit_rolls_back_canonical_delta(project
     def concurrent(prepared, reason, **kwargs):
         # Another editor successfully stores a different unresolved revision.
         competing = project.patch_extraction_submission(staged['submission_id'], 1,
-            [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['另一个错误引文']}], '另编辑者')
+            [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['乙']}], '另编辑者')
         assert competing['submission_revision'] == 2
         return commit(prepared, reason, **kwargs)
     monkeypatch.setattr(project, 'commit_changes', concurrent)
@@ -197,7 +202,7 @@ def test_concurrent_draft_patch_before_commit_rolls_back_canonical_delta(project
             [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['甲约好接乙。']}], '落后修改')
     assert not project.graph_snapshot()['nodes']
     current = project.read_extraction_submission(staged['submission_id'], section='nodes', indices=[BAD_INDEX])
-    assert current['submission_revision'] == 2 and current['entries'][0]['item']['quotes'] == ['另一个错误引文']
+    assert current['submission_revision'] == 2 and current['entries'][0]['item']['quotes'] == ['乙']
 
 
 def test_static_problem_targets_exact_original_property_row_not_same_name_other_owner(project):

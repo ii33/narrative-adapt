@@ -169,14 +169,28 @@ def test_property_quotes_are_dropped_with_one_info(project):
     assert change["evidence"] == nodes_by(ops)["event" + FIRST]["evidence"]
 
 
-def test_quoted_event_that_does_not_match_the_source_is_still_rejected(project):
+def test_quoted_event_that_cannot_be_located_is_dropped_with_one_info(project):
+    """逐字与归一化都定位不到：丢弃引文、事件照常入库，位置取本批范围起点（`U-11`）。"""
     ops, source = project
-    raw = draft()
-    del raw["nodes"][5]["anchor"]
-    raw["nodes"][5]["quotes"] = ["原文里没有这句话"]
-    result = ops.submit_extraction(source, raw)
-    assert result["status"] == "staged"
-    assert ("nodes", 5, "quotes", 0) in paths(result)
+    raw = {"nodes": [
+        {"type": "person", "name": "林岚"},
+        {"type": "location", "name": "档案室"},
+        {"type": "scene", "name": "档案室交接"},
+        {"type": "event", "name": FIRST, "scene": "@3", "participants": ["@1"], "location": "@2",
+         "quotes": ["原文里没有这句话"]},
+        # 同场景还有个能定位的事件：容器证据照样能派生，所以只有丢引文这件事需要提醒。
+        {"type": "event", "name": SECOND, "scene": "@3", "participants": ["@1"], "location": "@2",
+         "quotes": ["周宁收下钥匙离开档案室"]},
+    ], "properties": []}
+    # 本批从原文第 10 个字符开始：近似位置必须是**本批范围起点**，不是原文开头。
+    result = ops.submit_extraction(source, raw, start=10)
+    assert result["status"] == "accepted", result
+    event = nodes_by(ops)["event" + FIRST]
+    assert "evidence" not in event and event["evidence_spans"] == []
+    assert event["disclosure"] == {"source_id": source, "start": 10}
+    notices = [row for row in result.get("info") or []
+               if row.get("field") == "quotes" and row.get("note") == "dropped"]
+    assert [(row["count"], row["indexes"]) for row in notices] == [(1, [3])]
 
 
 def test_property_without_quotes_is_ordered_by_its_event_and_submission_order(project):

@@ -63,12 +63,21 @@ def test_location_shortcut_points_at_its_own_field_when_the_reference_is_wrong(p
     assert not ops.graph_snapshot()['nodes']
 
 
-def test_quote_position_preserves_blank_raw_array_slot(project):
-    ops, source, text = project
-    raw = draft(text)
-    raw['nodes'][3]['quotes'] = ['会议结束', '原文没有的地点']
-    result = ops.preview_extraction(source, raw)
-    assert any(row.get('path') == ['nodes', 3, 'quotes', 1] for row in result['diagnostics'])
+def test_quote_position_preserves_blank_raw_array_slot():
+    """引文路径指向**原始数组槽**：空串不参与校验，也不许让后面的下标漂移。
+
+    定位不到原文的引文已经改成「丢弃 + info」（`U-11`），所以这里看仍然会整批拒收的
+    「同一句在本批出现多处」：空串在 [1] 不占诊断，歧义那条仍报在 `quotes[2]`，并给出
+    候选起点（`positions_sample`），不任取首处。
+    """
+    from narrative.extraction import parse_nodes
+    text = '林岚在会议室宣布会议结束。'
+    payload = {'nodes': [{'type': 'event', 'name': '会议结束', 'participants': [],
+                          'quotes': ['会议结束', '  ', '会议']}], 'properties': []}
+    parsed = parse_nodes(payload, text)
+    assert [tuple(row['path']) for row in parsed['rejected']] == [('nodes', 0, 'quotes', 2)]
+    assert len(parsed['rejected'][0]['positions_sample']) > 1
+    assert parsed['rejected'][0]['position_basis'] == 'submission_relative'
 
 
 def test_references_report_exact_participant_array_position(project):

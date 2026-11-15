@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import cast
+import unicodedata
+from typing import NamedTuple, cast
 
 from .order_ids import allocate, prefix_for
 from .property_core import container_property_duplicate
@@ -51,10 +52,12 @@ def _batch_participant_kind(value: str, rows: list, declared: dict[str, str]) ->
 
 
 def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], locations: dict,
-                      lookup=None, spans: dict[int, tuple[int, int]] | None = None, *, dropped=None) -> list[dict]:
+                      lookup=None, spans: dict[int, tuple[int, int]] | None = None, *,
+                      dropped=None, source=None) -> list[dict]:
     """Verify property observations the same way as nodes: exact quote, known owner.
 
-    ``quotes`` 是可选的：给了就按节点同样的规则逐字定位，不给就不产生证据。
+    ``quotes`` 是可选的：给了就按节点同样的定位规则（先逐字，只差排版时归一化校正，
+    `U-11`），不给就不产生证据。
     但属性不该自带引文（出处就是 ``at_event``），模型多写的一律丢掉并记进
     ``dropped``，不整批拒收（`U-10`）。程序自己生成的行（事件地点快捷字段）例外：
     它的引文来自已经核对过的事件定位依据，标记 ``_draft_generated``。这些行还可能带
@@ -103,12 +106,17 @@ def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], lo
         good = []
         span = (spans or {}).get(draft_index)
         for quote_index, quote in quote_entries:
-            index, found = _locate(text, quote, locations, lookup)
-            if index < 0:
-                _diagnostic(rejected, path + ['quotes', quote_index], f'{node_name}.{property_id}', '引文不在指定原文范围中', quote=quote[:60])
+            hit = _locate(text, quote, locations, lookup, source)
+            if hit.status in {"exact", "normalized"}:
+                good.append({"quote": hit.quote, "start": hit.start})
                 continue
-            good.append({"quote": found, "start": index})
-        if quotes and not good:
+            if row.get("_draft_generated"):
+                # 程序生成的行（事件地点快捷字段）证据来自事件本身：引文定位不到时
+                # 事件那边已经回了一条 info，这里不再重复报错，也不拒收——这一行
+                # 的取值（地点）仍然有用，缺的只是坐标。
+                continue
+            _diagnostic(rejected, path + ['quotes', quote_index], f'{node_name}.{property_id}', '引文不在指定原文范围中', quote=quote[:60])
+        if quotes and not good and not row.get("_draft_generated"):
             _diagnostic(rejected, path + ['quotes'], f'{node_name}.{property_id}', '没有可用的原文引文')
             continue
         if not quotes and span is not None:
@@ -157,29 +165,187 @@ def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], lo
 WRAPPING_QUOTES = "\"'\u2018\u2019\u201c\u201d\u300c\u300d\u300e\u300f"
 
 
-def _locate(text: str, quote: str, locations: dict, lookup=None) -> tuple[int, str]:
-    if quote not in locations:
-        locations[quote] = _find_quote(text, quote, lookup)
-    return locations[quote]
+# 宽容定位只抹**排版差别**，文字一个都不抹（`U-11`）：
+# * 全半角与兼容写法按 NFKC 统一（`，`→`,`, `Ａ`→`A`, `１２`→`12`）；
+# * 空白与不可见字符（控制符、格式符、零宽、行／段分隔）不参与比对；
+# * 标点不参与比对：连续几处折成零处，换一个标点、少一个标点都不算改内容。
+# 汉字／字母／数字一个都不动，所以差一个实词（`狠狠地`→`狠地`）仍然定位不到——
+# 这就是「宽容」的边界：放宽排版，不放弃逐字校验（写进证据的永远是原文截取的文本）。
+_INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Zs", "Zl", "Zp"})
+_PUNCTUATION_CATEGORY = "P"
+
+
+def _fold_character(char: str) -> str:
+    """一个字符在比对里的样子：NFKC 展开后去掉空白、不可见字符与标点。"""
+    folded = []
+    for piece in unicodedata.normalize("NFKC", char):
+        category = unicodedata.category(piece)
+        if category in _INVISIBLE_CATEGORIES or category.startswith(_PUNCTUATION_CATEGORY):
+            continue
+        folded.append(piece)
+    return "".join(folded)
+
+
+def _fold_text(text: str) -> str:
+    return "".join(_fold_character(char) for char in text)
+
+
+def _normalized_text(text: str) -> tuple[str, list[int]]:
+    """比对骨架与「骨架下标 → 原文下标」映射：命中后一律回原文取逐字文本。"""
+    pieces: list[str] = []
+    origin: list[int] = []
+    for index, char in enumerate(text):
+        folded = _fold_character(char)
+        pieces.append(folded)
+        origin.extend([index] * len(folded))
+    return "".join(pieces), origin
+
+
+class _NormalizedSource:
+    """一次提交的比对骨架，按需构建：逐字全部命中时根本不建（长章节不白算）。"""
+
+    def __init__(self, text: str):
+        self.text = text
+        self._built: tuple[str, list[int]] | None = None
+
+    def get(self) -> tuple[str, list[int]]:
+        if self._built is None:
+            self._built = _normalized_text(self.text)
+        return self._built
+
+
+class _QuoteHit(NamedTuple):
+    """一次引文定位的结果。
+
+    * ``exact``：原文逐字命中（含只剥首尾引号的写法）；
+    * ``normalized``：逐字不中、归一化后在本批范围**唯一**命中——``start``／``quote``
+      已是原文的真实坐标与截取到的逐字文本，不是模型给的那一串；
+    * ``ambiguous``：多处命中，``candidates`` 是候选起点（提交内相对坐标），不任取首处；
+    * ``missing``：逐字与归一化都不命中（引文里的文字确实对不上原文）。
+    """
+
+    status: str
+    start: int
+    quote: str
+    candidates: tuple[int, ...] = ()
+
+
+def _quote_spellings(quote: str) -> list[str]:
+    """先原样、再去掉首尾引号：模型常把整句再套一层引号，多出来的是排版不是内容。"""
+    trimmed = quote.strip().strip(WRAPPING_QUOTES).strip()
+    if not trimmed or trimmed == quote:
+        return [quote]
+    return [quote, trimmed]
+
+
+def _normalized_positions(source: _NormalizedSource, quote: str) -> list[tuple[int, int]]:
+    """归一化后的全部命中，回到原文坐标；同一段原文只算一处。"""
+    skeleton, origin = source.get()
+    needle = _fold_text(quote)
+    if not needle:
+        return []  # 只有标点／空白的引文没有内容可比，按找不到处理
+    found: list[tuple[int, int]] = []
+    cursor = 0
+    while True:
+        at = skeleton.find(needle, cursor)
+        if at < 0:
+            break
+        span = (origin[at], origin[at + len(needle) - 1] + 1)
+        if span not in found:
+            found.append(span)
+        cursor = at + 1
+    return found
+
+
+def _search_quote(text: str, quote: str, lookup=None, source=None, *,
+                  unique_exact: bool = False) -> _QuoteHit:
+    """宽容定位一次：先逐字，再归一化（`U-11`）。
+
+    ``unique_exact`` 表示「逐字命中也要唯一」——事件用它（同一句在本批出现多处时
+    坐标本身就是歧义，不能任取首处当身份依据）；属性行沿用旧口径（取首处）。
+    归一化命中**一律**要求唯一：模型给的引文本来就不是原文坐标，没法替它在多处之间选。
+    """
+    lookup = lookup if lookup is not None else ExactQuoteLookup(text)
+    source = source if source is not None else _NormalizedSource(text)
+    for spelling in _quote_spellings(quote):
+        positions = lookup.positions(spelling, 2 if unique_exact else 1)
+        if positions:
+            if len(positions) > 1:
+                return _QuoteHit("ambiguous", -1, spelling, tuple(positions))
+            return _QuoteHit("exact", positions[0], spelling)
+    found = _normalized_positions(source, quote)
+    if len(found) > 1:
+        return _QuoteHit("ambiguous", -1, quote, tuple(start for start, _ in found[:5]))
+    if found:
+        start, end = found[0]
+        return _QuoteHit("normalized", start, text[start:end])
+    return _QuoteHit("missing", -1, quote)
+
+
+def _locate(text: str, quote: str, locations: dict, lookup=None, source=None, *,
+            unique_exact: bool = False) -> _QuoteHit:
+    key = (quote, unique_exact)
+    hit = locations.get(key)
+    if hit is None:
+        hit = locations[key] = _search_quote(text, quote, lookup, source, unique_exact=unique_exact)
+    return hit
 
 
 def _find_quote(text: str, quote: str, lookup=None) -> tuple[int, str]:
     """找到引文在原文里的位置，返回 (下标, 实际用的引文)。
 
-    先按原样找；找不到就只去掉**首尾的引号**再试一次——模型经常把整句再套一层
-    引号（`“他说‘火纹石改过外形’”` 多套了一层），多出来的是排版不是内容。只剥首尾、
-    不动中间，所以「逐字对上」这条并没有松。
+    先按原样找；找不到就只去掉**首尾的引号**再试一次（模型常把整句再套一层引号）；
+    再不行按归一化骨架找**唯一**命中，命中时返回原文截取到的逐字文本与真实下标
+    （`U-11`：全半角、空白、不可见字符、标点的差别不算改内容）。多处命中与找不到
+    都返回 ``(-1, quote)``——宁可不认，也不指向一个猜出来的位置。
     """
-    lookup = lookup if lookup is not None else ExactQuoteLookup(text)
-    found = lookup.positions(quote, 1)
-    if found:
-        return found[0], quote
-    trimmed = quote.strip().strip(WRAPPING_QUOTES).strip()
-    if trimmed and trimmed != quote:
-        found = lookup.positions(trimmed, 1)
-        if found:
-            return found[0], trimmed
+    hit = _search_quote(text, quote, lookup)
+    if hit.status in {"exact", "normalized"}:
+        return hit.start, hit.quote
     return -1, quote
+
+
+# 引文定位的提醒按「同一件事」折叠成一条 `info`（与 `U-10` 的丢弃记账同一口径）：
+# 一处异常一行会把几十行一样的提示糊满，折叠后 `count` 记处数、`indexes` 指出条目。
+_QUOTE_NOTE_INDEX_LIMIT = 12
+_QUOTE_NOTE_MESSAGES = {
+    "normalized": ("有 {count} 处事件引文与原文只有排版差异（全半角／空白／不可见字符／标点），"
+                   "程序已按归一化在本批范围唯一命中，证据改用原文截取的逐字文本与真实坐标"),
+    "dropped": ("有 {count} 处事件引文在提交范围里定位不到原文（归一化后也不命中），已丢弃这些引文；"
+                "事件照常入库，位置近似取本批范围起点"),
+}
+
+
+class _QuoteNotes:
+    """引文定位的两种提醒：近似命中、找不到被丢弃。都只是 `info`，不影响 `valid`。"""
+
+    def __init__(self):
+        self._groups: dict[str, dict] = {}
+        self._order: list[str] = []
+
+    def add(self, kind: str, index: int):
+        group = self._groups.get(kind)
+        if group is None:
+            group = self._groups[kind] = {"count": 0, "indexes": []}
+            self._order.append(kind)
+        group["count"] += 1
+        if index not in group["indexes"]:
+            group["indexes"].append(index)
+
+    def diagnostics(self) -> list[dict]:
+        rows = []
+        for kind in self._order:
+            group = self._groups[kind]
+            rows.append({
+                "severity": "info", "code": "EXTRACTION_INFO",
+                "path": ["nodes"], "field": "quotes", "note": kind,
+                "count": group["count"],
+                "indexes": group["indexes"][:_QUOTE_NOTE_INDEX_LIMIT],
+                "message": _QUOTE_NOTE_MESSAGES[kind].format(count=group["count"])
+                           + "；涉及条目见 indexes，其余内容照常入库",
+            })
+        return rows
+
 
 
 def _participant_domain_error(participants: list, rows: list, declared: dict[str, str]):
@@ -201,10 +367,16 @@ def parse_nodes(payload: dict, text: str, *, node_spans: dict[int, tuple[int, in
                 property_spans: dict[int, tuple[int, int]] | None = None, dropped=None) -> dict:
     """Verify every given quote and pin each node to its first appearance.
 
-    证据是可选的：节点或属性给了引文，每条都必须是原文的逐字子串；不给就不产生
+    证据是可选的：节点或属性给了引文，每条都要能**定位**到原文；不给就不产生
     证据，也不因此拒收——实体与属性的出处是它参与的事件（``participants``、
     事件处的属性变更、``at_event``）。**事件例外**：它必须给定位依据，``anchor``
     或 ``quotes`` 二选一，``node_spans`` 就是已经核对过的 anchor 坐标。
+
+    定位是程序的事，宽容只放宽**排版**（`U-11`）：逐字不中时按归一化骨架在本批范围
+    找唯一命中，命中就用原文截取到的逐字文本与真实坐标（``_search_quote``）。逐字要求
+    因此是**对存储结果**的硬要求，不是对模型输入的措辞要求。归一化后多处命中仍拒收
+    （给候选起点）；归一化后找不到就丢弃这条引文、事件照常入库，位置取本批范围起点，
+    两件事都折叠成一条 `info`（`quote_notices`），不整批拒收。
 
     非事件节点带的 ``quotes`` 是多余的参数：丢掉引文继续走，只把丢弃记进 ``dropped``
     （`U-10`），不整批拒收——它本来就不该有引文，写多了不代表这一行看不懂。
@@ -243,8 +415,10 @@ def parse_nodes(payload: dict, text: str, *, node_spans: dict[int, tuple[int, in
     rows = kept_rows
 
     nodes: list[dict] = []
-    locations: dict[str, tuple[int, str]] = {}
+    locations: dict[tuple[str, bool], _QuoteHit] = {}
     lookup = ExactQuoteLookup(text)
+    source = _NormalizedSource(text)
+    notes = _QuoteNotes()
     rejected: list[dict] = []
     for original_index, row in rows:
         path = ['nodes', original_index - 1]
@@ -302,26 +476,38 @@ def parse_nodes(payload: dict, text: str, *, node_spans: dict[int, tuple[int, in
             good = [{"quote": text[span[0]:span[1]], "start": span[0]}]
         else:
             for quote_index, quote in quote_entries:
-                index, found = _locate(text, quote, locations, lookup)
-                if index < 0:
-                    _diagnostic(rejected, path + ['quotes', quote_index], name, '引文不在指定原文范围中', quote=quote[:60])
-                    continue
-                positions = lookup.positions(found, 2) if node_type == "event" else []
-                if len(positions) > 1:
+                hit = _locate(text, quote, locations, lookup, source, unique_exact=node_type == "event")
+                if hit.status == "ambiguous":
                     _diagnostic(rejected, path + ['quotes', quote_index], name,
                                 '事件引文在提交范围出现多处，不能任取首处作为精确身份依据；请缩小提交范围或提供更具体的逐字引文',
-                                quote=found, positions_sample=positions, position_basis='submission_relative')
-                good.append({"quote": found, "start": index})
+                                quote=hit.quote, positions_sample=list(hit.candidates),
+                                position_basis='submission_relative',
+                                # 候选起点已给出（`positions_sample`）；也告诉模型另一条路：
+                                # 直接用 `anchor` 写坐标就是消歧，不必再猜哪一处。
+                                related_paths=[path + ['anchor']])
+                    continue
+                if hit.status == "missing":
+                    # 逐字与归一化都不命中：丢弃这条引文，事件照常入库（`U-11`）。
+                    # 位置在下面按本批范围起点近似，提醒在 `notes` 里折叠成一条 info。
+                    notes.add("dropped", original_index - 1)
+                    continue
+                if hit.status == "normalized":
+                    # 只有排版差异：用原文截取到的逐字文本与真实坐标，不发回重来。
+                    notes.add("normalized", original_index - 1)
+                good.append({"quote": hit.quote, "start": hit.start})
         if not name:
             _diagnostic(rejected, path + ['name'], name, 'name必须是非空字符串')
             continue
+        position = good[0]["start"] if good else None
         if node_type == 'event' and not good:
             if quotes:
-                _diagnostic(rejected, path + ['quotes'], name, '没有可用的原文引文')
+                # 宽容定位也找不到：引文丢掉、事件入库，位置取本批范围起点（`U-11`）。
+                # 逐字要求针对**存储结果**（这里已经没有引文可存），不是要模型重写这一段。
+                position = 0
             else:
                 _diagnostic(rejected, path + ['anchor'], name,
                             '事件必须给定位依据：anchor{start,end}（推荐）或非空quotes逐字引文，二者至少一个')
-            continue
+                continue
         if row.get("existing_id") is not None and not isinstance(row["existing_id"], str):
             _diagnostic(rejected, path + ['existing_id'], name, 'existing_id须为节点ID字符串')
             continue
@@ -337,7 +523,8 @@ def parse_nodes(payload: dict, text: str, *, node_spans: dict[int, tuple[int, in
             "reference": f"@{original_index}",
             "type": node_type,
             # 没有定位依据的节点不冒称一个原文坐标：start 为 None，交由批次起点定序。
-            "start": good[0]["start"] if good else None,
+            # 引文被丢弃的事件有一个近似位置（本批范围起点），那是「位置」不是「证据」。
+            "start": position,
             "quotes": [item["quote"] for item in good],
             "evidence_spans": [{"start": item["start"], "end": item["start"] + len(item["quote"]),
                                 "quote": item["quote"]} for item in good],
@@ -369,7 +556,7 @@ def parse_nodes(payload: dict, text: str, *, node_spans: dict[int, tuple[int, in
     if strays:
         declared = declared + strays
     properties = _parse_properties(declared, text, {item["name"] for item in nodes}, rejected, locations, lookup,
-                                  dropped=dropped)
+                                  dropped=dropped, source=source)
     scenes = {item["name"] for item in grouped["scene"]}
     for event in grouped["event"]:
         if event["scene"] and event["scene"] not in scenes:
@@ -386,6 +573,8 @@ def parse_nodes(payload: dict, text: str, *, node_spans: dict[int, tuple[int, in
         "grouped": grouped,
         "counts": {node_type: len(items) for node_type, items in grouped.items()},
         "rejected": rejected,
+        # 引文定位的 info 提醒（近似命中／丢弃）：由调用方并进诊断，不影响 valid（`U-11`）。
+        "quote_notices": notes.diagnostics(),
     }
 
 
@@ -902,6 +1091,10 @@ def build_extraction(ops, data: dict) -> dict:
             payload["disclosure"] = {"source_id": item.get("evidence_source_id", data["source_id"]), "start": item["start"]}
             payload["evidence"] = {"source_id": item.get("evidence_source_id", data["source_id"]), "quote": item["quotes"][0]}
             payload["evidence_spans"] = _node_spans(item, data["source_id"])
+        elif item["type"] == "event" and isinstance(item["start"], int):
+            # 引文被丢弃的事件（`U-11`）仍要在时间轴上有个位置：披露点取本批范围起点。
+            # 只给位置、不造引文——没有逐字证据就不冒称有，静态检查按「没有证据」看它。
+            payload["disclosure"] = {"source_id": item.get("evidence_source_id", data["source_id"]), "start": item["start"]}
         if item.get("derived_completion"):
             payload["completion"] = dict(item["derived_completion"])
         if item["type"] in children_by_type:

@@ -515,7 +515,10 @@ def _argv():
     if not given("--seconds"):
         argv += ["--seconds", "3600"]
     if not given("--token-budget"):
-        argv += ["--token-budget", "2000000"]
+        # 这是**验收观察预算**，不是产品任务时限：它只决定这次观察跑多久就收摊，
+        # 不影响产品侧的任何限制。2M 上一轮只跑到第 2 章就被中止（第 3 章 0 事件），
+        # 测不出「三章全文」这个基准，所以放到 4M。真实 usage 与是否触顶都写进报告。
+        argv += ["--token-budget", "4000000"]
     sys.argv = [sys.argv[0], *argv]
     return main()
 

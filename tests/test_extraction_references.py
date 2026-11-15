@@ -21,16 +21,16 @@ def draft():
 
 
 def test_original_indices_survive_sorting_and_rejected_nodes():
-    # 被拒收的行仍然是「原文数组的第几个」：坏行是事件（只有事件带 quotes，`U-09`），
-    # 它的引文不成立被拒，后面那行的 @ 引用不变。
-    payload = {'nodes': [{'type': 'event', 'name': '坏事件', 'participants': [], 'quotes': ['原文没有这句']},
+    # 被拒收的行仍然是「原文数组的第几个」：坏行是事件，缺 participants 是真正
+    # 「看不懂」的输入（`I-08`；引文定位不到已经只丢引文 + info，`U-11`），
+    # 它被拒之后后面那行的 @ 引用不变。
+    payload = {'nodes': [{'type': 'event', 'name': '坏事件', 'quotes': ['甲先走。']},
                          {'type': 'event', "location": "未知", 'name': '后发生', 'participants': [],
                           'quotes': ['甲再停。']},
                          {'type': 'scene', 'name': '先披露'}], 'properties': []}
     parsed = parse_nodes(payload, TEXT)
     assert [(row['name'], row['reference']) for row in parsed['nodes']] == [('先披露', '@3'), ('后发生', '@2')]
-    assert {tuple(row['path']) for row in parsed['rejected']} == {
-        ('nodes', 0, 'quotes'), ('nodes', 0, 'quotes', 0)}
+    assert {tuple(row['path']) for row in parsed['rejected']} == {('nodes', 0, 'participants')}
 
 
 def test_event_owner_event_target_and_existing_definition_type_are_preserved(project):

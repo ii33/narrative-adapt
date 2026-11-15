@@ -28,6 +28,7 @@
 
 | `U-09` | 哪些对象必须自带原文位置、哪些靠事件定位 | **只有事件需要定位依据**：`anchor{start,end}`（原文 Unicode 偏移，推荐）或一条逐字 `quotes`，二者至少一个。**其它节点与属性不填引文（写了也是多余参数：程序丢弃并回一条 `info`，`U-10`）**。理由是这一句：**每个节点、每个属性都以事件为基础；事件是时间点，事件链是时间轴**。所以实体的出处就是它挂靠的那个事件——人物／群体出现在事件的 `participants`，地点是事件发生处的 `world` 地点取值，物品在事件处易手，属性以 `at_event` 指向事件，场景／大事件／主要故事由下级包含，动作直属一个事件。实体的阅读位置＝**它最早挂靠的那个事件的位置**（程序按此派生 `evidence`／`disclosure`，形状与逐字引文完全一致）；整条链上都找不到落点的实体没有位置，由静态检查的 `entity_unanchored`（warning，不阻塞）报出来人工核。不要把"没有引文的节点"当成缺证据。 |
 | `U-10` | 草稿里带了不该带的字段，要不要为它整批拒收 | **无效参数只丢弃，然后提醒**。**多余**的东西不影响理解：不该带的字段（非事件的 `quotes`、属性上的 `quotes`／`anchor`、场景／大事件／主要故事的 `quotes`）、没有意义的冗余写法、不认的未知字段，一律从草稿里剥掉，同类 `(section, field)` 折叠成一条 `info`（`count` 是处数、`indexes` 指出涉及条目，最多列 12 个），**能理解的部分照常入库**。**只有"看不懂"的输入才拒收**：缺必填、类型不对、引用解析不到、事件没有定位依据。判据就是这一句：**多余不影响理解，缺失才影响理解**。剥完以后一行里已经没有有效内容的（例如只给了 `quotes` 的人物），按缺必填拒收，不静默丢成空节点（`E-09`、`E-13`、`I-08`、`I-10`、`I-13`）。 |
+| `U-11` | 模型给的引文和原文只差一个标点／空格／全半角，要不要整批拒收 | **不要：定位是程序的事，逐字是对存储结果的硬要求，不是对模型输入的措辞要求**。程序先逐字找；不中就把引文与原文做**同一套归一化**，在本批范围再找一次——归一化只抹**排版差别**：全半角与兼容写法按 NFKC 统一（`，`→`,`, `Ａ`→`A`、`１２`→`12`）、空白与不可见字符（零宽、控制符、行／段分隔）不参与比对、标点不参与比对（连续几处折成零处；换一个、少一个、多一个都不算改内容）。**文字一个都不抹**：差一个汉字／字母／数字（`狠狠地`→`狠地`、`匕首`→`短刀`、`第12号`→`第13号`）仍然定位不到——那是另一个词，不是排版，宁可丢弃也不把证据写成错的。归一化后**唯一命中**：用原文截取到的逐字文本与真实坐标，`evidence.quote` 因此**不是**模型给的那一串；归一化后**多处命中**：仍拒收，回候选起点（`positions_sample`，另给 `related_paths` 指向该行的 `anchor`——写坐标就没有歧义）；归一化后**找不到**：丢弃这条引文、**事件照常入库**，位置近似取本批范围起点，回一条折叠后的 `info`（`EXTRACTION_INFO`：`count` 是处数、`indexes` 是涉及条目）说明丢了几条。`anchor` 路径不变（本来精确）。判据一句话：**像排版差异就校正，像内容差异就丢弃，两种都不回退整批**（`M-12`、`E-13`、`I-13`）。 |
 
 锚定关系（谁靠什么挂在事件上；这张表就是 `U-09` 的可核对照）：
 
@@ -41,11 +42,11 @@
 | 动作 | 直属事件的披露位置（`M-05`） |
 | 场景／大事件／主要故事 | 下级容器／事件包含，证据由 `src/narrative/container_evidence.py::validated_spans` 逐层派生（`I-10`） |
 
-到 2026-11 为止，`U-01`–`U-05`、`U-07`、`U-08`、`U-09` 与 `U-10` 已落进提示词（`extraction` v33、`granularity_fine` v8、`review` v13），`U-06` 永远留在「仅提示词」一侧。
+到 2026-11 为止，`U-01`–`U-05`、`U-07`、`U-08`、`U-09` 与 `U-10` 已落进提示词（`extraction` v33、`granularity_fine` v8、`review` v13），`U-06` 永远留在「仅提示词」一侧；`U-11` 只落在**程序侧**（定位与存储），提示词不加判据——模型该做的还是照原文写，宽容是程序的事。
 
 ## 1 范围、引用与批次
 
-- 范围：原文是唯一事实来源；事件必须给定位依据（`anchor` 或逐字引文），给了引文就须逐字命中原文（`I-13`、`M-13`）；章节标题、原文切片和提交批次只作阅读索引与处理范围，不决定场景或事件边界（`M-06`）。来源：本页 §4（原 `docs/MODEL.md` 第 2 节）与提取提示词「提取通用要求」v33。
+- 范围：原文是唯一事实来源；事件必须给定位依据（`anchor` 或逐字引文），引文的逐字与唯一由程序落实——只差排版时归一化校正，差实词就丢弃那条引文（`U-11`、`I-13`、`M-13`）；章节标题、原文切片和提交批次只作阅读索引与处理范围，不决定场景或事件边界（`M-06`）。来源：本页 §4（原 `docs/MODEL.md` 第 2 节）与提取提示词「提取通用要求」v33。
 - 引用：本页与其它文档一律按「编号 + 结论」引用（§0），编号集合与出处见 `docs/README.md`；五层概念见 `docs/MODEL.md` 第 1 节。
 - 批次：一小批一次提交；本批引用 `@n` 从 1 起，数组索引从 0 起（见 §5「暂存、入库与编号」）；局部修补用 `patch_extraction_submission`（`I-28`）。
 
@@ -121,9 +122,9 @@
 
 ### 3.3 范围与复用（`source_extraction`、`extraction`）
 
-- `E-13` 给了引文就必须逐字落在本次提交范围内（Unicode 字符，左闭右开）；范围外可读，但引文不出范围。事件用 `anchor` 时锚点同样必须落在本批范围内。范围之外的多余字段不算范围问题：丢弃后照常校验（`U-10`）。
+- `E-13` 引文必须落在本次提交范围内（Unicode 字符，左闭右开）；范围外可读，但引文不出范围。逐字与定位由程序落实（`U-11`）：只差排版（全半角／空白／不可见字符／标点）时程序归一化后校正、存原文截取文本；差实词就丢弃那条引文，事件照常入库。事件用 `anchor` 时锚点同样必须落在本批范围内。范围之外的多余字段不算范围问题：丢弃后照常校验（`U-10`）。
   - 出处：`source_extraction` v9 ·「每条引文必须逐字落在范围内」
-  - 程序：`I-16`、`DRAFT_SCHEMA`（`anchor` 越界或不在本批范围）、`EXTRACTION_INFO`（范围以外的多余字段只丢弃）；互查 `M-12`
+  - 程序：`I-16`、`DRAFT_SCHEMA`（`anchor` 越界或不在本批范围）、`EXTRACTION_INFO`（范围以外的多余字段、定位不到的引文只丢弃）；互查 `M-12`
   - 反例：为补前情，把范围外上一段的句子当作本批证据提交。
 - `E-14` 拿不准的事实放进 `uncertainties`，不补默认值、不猜原文没交代的属性。
   - 出处：`extraction` v33 ·「拿不准放进 uncertainties，不补默认值」
@@ -261,7 +262,7 @@
 
 **证据与纠错**
 
-- `M-12` 给了引文就必须逐字命中原文，定位与唯一性由程序校验，模型不手算坐标；场景、大事件、主要故事与实体不填引文，它们的出处是各自挂靠的事件（`U-09`）。
+- `M-12` 引文的**逐字**要求针对**存储结果**：给了引文，定位与唯一性都由程序做，模型不手算坐标；程序先逐字、只有排版差异时按归一化校正（存进 `evidence.quote` 的永远是原文截取文本，`U-11`），差一个实词就丢弃那条引文并回 `info`，都不回退整批。场景、大事件、主要故事与实体不填引文，它们的出处是各自挂靠的事件（`U-09`）。
 - `M-13` 事件必须给定位依据：`anchor{start,end}` 或一条能支持身份与核心发生的逐字引文，二者至少一个；引文条数不决定事件边界，也不为起因、过程、结果分别取证。属性与关系不再各自取证：属性以 `at_event` 指向事件，实体以参与的事件为出处。
 - `M-14` 复核只修有据错漏：没再提及不等于失效，冲突或一次攻击也不等于终止；确认终止时保留建立事实，在终止事件追加 `remove`／`clear`。
 - `M-15` 两个疑似重复的事件是否同一次发生，看原文证据是否一致，同名或位置相近不作依据；先 `preview_event_merge`，再 `merge_events`。
@@ -289,7 +290,7 @@
 | I-10 | 容器不落自身 `quotes`：容器证据只由已验证下级派生；草稿里的容器 `quotes` 丢弃并回 `info`，既不采纳、也不因此拒收（`U-09`、`U-10`） | `src/narrative/extraction_draft.py::_prune_node_row`，`src/narrative/extraction.py::parse_nodes`（`is_container` 分支），`src/narrative/container_evidence.py::refresh_container_evidence` | `EXTRACTION_INFO`，`EXTRACTION_CONTENT` | `tests/test_extraction_container_evidence.py`，`tests/test_container_evidence_refresh.py` |
 | I-11 | 进展属性只能落在直属子级：`storyline_progress` 记在 `big_event`，`big_event_progress` 记在 `scene` | `src/narrative/extraction.py::build_extraction`（`progress_owners`），`src/narrative/property_audit.py::audit_properties` | `progress_owner`（info） | `tests/test_storyline_contract.py` |
 | I-12 | `world` 作用域不得带 `holder_id`；`claim`／`cognition` 必须带人物节点 `holder_id`（`M-08`） | `src/narrative/property_core.py::validate_records` | `SCOPE` | 无直接用例（同函数其余分支见 `tests/test_current_state_contract.py`） |
-| I-13 | 引文必须**逐字**且**唯一**匹配原文；同一句多处出现时用合法 `disclosure.start` 消歧（`M-12`）。只校验**给了的**引文：引文只出现在事件上（`U-09`），非事件与属性带的 `quotes` 是多余参数，草稿层丢弃并回 `info`（`U-10`） | `src/narrative/property_core.py::_evidence_error`，`src/narrative/property_operations.py::record_change`，`src/narrative/extraction_draft.py::_prune_node_row` | `EVIDENCE`，`EXTRACTION_INFO` | `tests/test_source_location_contract.py`，`tests/test_extraction_evidence_anchor.py` |
+| I-13 | 引文必须**逐字**且**唯一**匹配原文；同一句多处出现时用合法 `disclosure.start` 消歧（`M-12`）。**逐字是对存储结果的硬要求**：模型给的引文只差排版（全半角／空白／不可见字符／标点）时按归一化在本批范围找唯一命中，存原文截取文本与真实坐标；差实词则丢弃那条引文、事件照常入库并回 `info`（`U-11`）。只校验**给了的**引文：引文只出现在事件上（`U-09`），非事件与属性带的 `quotes` 是多余参数，草稿层丢弃并回 `info`（`U-10`） | `src/narrative/property_core.py::_evidence_error`，`src/narrative/property_operations.py::record_change`，`src/narrative/extraction_draft.py::_prune_node_row`，`src/narrative/extraction.py::parse_nodes`（`_search_quote`／`_QuoteNotes`） | `EVIDENCE`，`EXTRACTION_INFO` | `tests/test_source_location_contract.py`，`tests/test_extraction_evidence_anchor.py`，`tests/test_tolerant_quote_location.py` |
 | I-14 | `evidence` 只允许 `source_id` 与逐字 `quote` 两个键 | `src/narrative/property_core.py::_evidence_error` | `EVIDENCE` | `tests/test_current_state_contract.py` |
 | I-15 | `disclosure` 须为合法原文 Unicode 坐标，且与引文起点逐字对齐 | `src/narrative/property_core.py::validate_records` | `DISCLOSURE` | `tests/test_project_check_locations.py` |
 | I-16 | 节点证据引文须是原文子串，跨度须与原文位置相符（`M-12`）；事件用 `anchor` 时锚点必须满足 `0 <= start < end <= len(source)` 且落在本批范围内，越界即拒（`path=["nodes",i,"anchor"]`） | `src/narrative/graph_service.py::precheck`，`src/narrative/extraction_draft.py::_validate_anchors` | `EVIDENCE`，`EVIDENCE_SPAN`，`DRAFT_SCHEMA` | `tests/test_project_check.py`，`tests/test_extraction_evidence_anchor.py` |
@@ -485,7 +486,7 @@ flowchart LR
 | `KIND` | `kind` 不是 `property_definition` 或 `property_change` | 模型改草案 | `I-17` | `src/narrative/property_core.py::validate_records` | — |
 | `ID` | 属性记录 ID 为空、非字符串，或与已有／本批记录重复 | 模型改草案 | `I-17` | `src/narrative/property_core.py::validate_records` | — |
 | `DEFINITION` | 定义缺 `value_type`／`cardinality`、`symmetric` 非严格布尔，或 `target_node_types` 用在非 `node` 定义上 | 模型改草案 | `I-20` | `src/narrative/property_core.py::validate_records` | tests/test_property_symmetry.py::test_non_boolean_definition_flag_is_rejected_atomically |
-| `EVIDENCE` | 引文缺失、不是原文子串、不是逐字唯一命中，或 `evidence_spans` 形状／坐标不合法 | 模型改草案 | `I-13`、`I-14`、`I-16`、`E-09`、`E-13`、`M-12` | `src/narrative/property_core.py::validate_records`、`src/narrative/graph_service.py::precheck` | tests/test_source_location_contract.py::test_property_validation_scans_shared_evidence_once_and_never_across_calls |
+| `EVIDENCE` | 引文缺失、不是原文子串、不是逐字唯一命中，或 `evidence_spans` 形状／坐标不合法。这是**存储侧**的硬约束：`U-11` 的宽容发生在入库之前，写进去的 `quote` 一律是原文截取文本，所以这里不再放宽 | 模型改草案 | `I-13`、`I-14`、`I-16`、`E-09`、`E-13`、`M-12`、`U-11` | `src/narrative/property_core.py::validate_records`、`src/narrative/graph_service.py::precheck` | tests/test_source_location_contract.py::test_property_validation_scans_shared_evidence_once_and_never_across_calls |
 | `EVIDENCE_SPAN` | 节点证据跨度与原文对应位置不符 | 模型改草案 | `I-16` | `src/narrative/graph_service.py::precheck` | — |
 | `DISCLOSURE` | 披露坐标不是合法原文 Unicode 位置，或与逐字证据起点不一致 | 模型改草案 | `I-15` | `src/narrative/property_core.py::validate_records`、`src/narrative/graph_service.py::precheck` | tests/test_reviewed_location_regressions.py::test_repeated_evidence_requires_valid_exact_disclosure |
 | `TARGET` | 属性变更的主体节点或属性定义不存在 | 模型改草案 | — | `src/narrative/property_core.py::validate_records` | tests/test_project_check.py::test_checker_reports_current_value_with_missing_definition |
@@ -532,8 +533,8 @@ flowchart LR
 | 码 | 触发（可判定的一句话） | 处理方 | 相关编号 | 锚点（`文件.py::符号`） | 覆盖测试 |
 | --- | --- | --- | --- | --- | --- |
 | `DRAFT_SCHEMA` | 草稿形状不合 `RESULT_SCHEMA`，且是「看不懂」的那一类：缺必填（事件的定位依据 `anchor`／`quotes`、`participants`、`category`、`node`／`property`／`at_event`／`op`）、类型不对（`quotes` 不是字符串数组、`anchor` 不满足 `0 <= start < end`）、`op` 与 `value` 不配套、`anchor` 越界或不在本批范围。多余字段与未知字段**不在此列**（见 `EXTRACTION_INFO`，`U-10`） | 模型改草案 | `I-08`、`E-37`、`E-09`、`U-09`、`U-10` | `src/narrative/extraction_draft.py::_draft_input_diagnostics`、`src/narrative/extraction_draft.py::_validate_anchors`、`src/narrative/extraction_draft.py::_prepare` | tests/test_property_category_contract.py::test_property_row_without_category_is_rejected |
-| `EXTRACTION_CONTENT` | 草稿内容过不了节点／属性校验：引用、引文、类型不符，或程序丢弃某行时给出的原因 | 模型改草案 | `I-08`、`E-13` | `src/narrative/extraction_draft.py::_prepare` | tests/test_extraction_diagnostic_paths.py::test_non_subject_entities_are_rejected_as_participants_with_a_reason |
-| `EXTRACTION_INFO` | 草稿里的**无效参数**被丢弃时的汇总 `info`：多余字段（非事件与属性带的 `quotes`、节点上的 `anchor`、容器 `quotes`）与未知字段，按 `(section, field)` 折叠成一条，带 `count`（实际处数）与 `indexes`（涉及条目，最多 12 个）。丢弃不影响 `valid`，能理解的部分照常入库（`U-10`） | 程序跳过 | `I-08`、`I-10`、`I-13`、`U-09`、`U-10` | `src/narrative/extraction_draft.py::_prune_draft`、`src/narrative/extraction_draft.py::_prune_node_row`、`src/narrative/extraction_draft.py::_DroppedParameters`、`src/narrative/extraction_draft.py::_prepare` | tests/test_extraction_draft_leniency.py::test_unknown_fields_are_dropped_in_one_folded_info |
+| `EXTRACTION_CONTENT` | 草稿内容过不了节点／属性校验：引用、类型、参与者不符，事件引文在本批出现多处（给候选起点），容器无法从下级派生证据，或程序丢弃某行时给出的原因。引文「差排版」与「定位不到」不在此列（见 `EXTRACTION_INFO`，`U-11`） | 模型改草案 | `I-08`、`E-13`、`U-11` | `src/narrative/extraction_draft.py::_prepare`、`src/narrative/extraction.py::parse_nodes`、`src/narrative/extraction_containers.py::derive` | tests/test_extraction_diagnostic_paths.py::test_non_subject_entities_are_rejected_as_participants_with_a_reason |
+| `EXTRACTION_INFO` | 草稿里的**无效参数**与**引文定位结果**被处理时的汇总 `info`：多余字段（非事件与属性带的 `quotes`、节点上的 `anchor`、容器 `quotes`）与未知字段按 `(section, field)` 折叠；事件引文只差排版（近似命中，已改用原文截取文本与真实坐标）与定位不到（引文被丢弃、事件照常入库、位置取本批起点）各折叠一条，`note` 是 `normalized`／`dropped`。都带 `count`（处数）与 `indexes`（涉及条目，最多 12 个）。不影响 `valid`，能理解的部分照常入库（`U-10`、`U-11`） | 程序跳过 | `I-08`、`I-10`、`I-13`、`U-09`、`U-10`、`U-11` | `src/narrative/extraction_draft.py::_prune_draft`、`src/narrative/extraction_draft.py::_prune_node_row`、`src/narrative/extraction_draft.py::_DroppedParameters`、`src/narrative/extraction_draft.py::_prepare`、`src/narrative/extraction.py::_QuoteNotes`、`src/narrative/extraction.py::_search_quote` | tests/test_extraction_draft_leniency.py::test_unknown_fields_are_dropped_in_one_folded_info |
 | `CHECK_PENDING` | 暂存稿刚写入、静态检查尚未完成的过渡态（紧随其后的求值会覆盖它） | 程序跳过 | `I-28` | `src/narrative/extraction_staging.py::submit`、`src/narrative/business_staging.py::_new` | tests/test_extraction_staging.py::test_pending_is_discoverable_after_interrupted_check_and_pages_are_bounded |
 | `FORMAL_REVISION_CHANGED` | 准备入库时发现正式资料版本已变，草稿保留为 `staged` | 模型改草案 | `I-27` | `src/narrative/extraction_staging.py::_evaluate` | tests/test_extraction_staging.py::test_conflicting_formal_revision_retains_draft_without_committing |
 | `REVISION` | `expected_revision` 与当前正式版本不一致 | 模型改草案 | `I-27` | `src/narrative/graph_service.py::precheck`、`src/narrative/property_operations.py::record_change` | — |

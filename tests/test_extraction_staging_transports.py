@@ -105,9 +105,10 @@ def test_pending_submissions_are_discoverable_without_draft_payload(project, cap
 def test_one_patch_array_fixes_multiple_reported_nodes_without_read_or_resubmit(project):
     sid = project.import_source('多点局部修补', TEXT)
     draft = draft_result(ended=False)
-    # 只有事件带 quotes（`U-09`）：两条事件的引文都写错，问题分别落在各自的原始槽上。
-    draft['nodes'][4]['quotes'] = ['甲的错误引文']
-    draft['nodes'][5]['quotes'] = ['乙的错误引文']
+    # 只有事件带 quotes（`U-09`）：两条事件的引文都在本批多处命中，问题分别落在各自的
+    # 原始槽上（定位不到的引文已经只丢引文 + info，见 `U-11`，这里要的是会整批拒收的那种）。
+    draft['nodes'][4]['quotes'] = ['甲']
+    draft['nodes'][5]['quotes'] = ['乙']
     entry = str(layout(project.project_info().path).entry)
     staged = tool_api.call('submit_extraction', {'source_id': sid, 'result': draft}, project=entry)
     assert staged['status'] == 'staged'

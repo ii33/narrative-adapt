@@ -123,12 +123,23 @@ def test_cycles_report_actual_child_field_without_writing(project):
 
 
 def test_invalid_leaf_evidence_remains_root_cause(project):
+    """叶节点引文定位不到只丢引文（`U-11`），但容器证据只能从已验证下级派生（`I-10`）：
+    整层没有证据仍然拒收，拒收原因直接说「没有可用的直属下级证据」，丢引文这件事在
+    `info` 里点名到行，不当成含糊的「引文不符」。
+    """
     source = project.import_source('坏证据', '正文。')
     raw = hierarchy('不存在的引文', '甲')
     result = project.submit_extraction(source, raw)
     assert result['status'] == 'staged'
-    assert any(p['path'] == ['nodes', 3, 'quotes', 0] for p in result['problems'])
-    assert not any(p['path'] == ['nodes', 0, 'quotes'] for p in result['problems'])
+    blocked = [p for p in result['problems'] if '没有可用的直属下级证据' in p['message']]
+    assert blocked, result['problems']
+    # 折叠成一条：场景／大事件／主要故事三层都缺证据，报在第一处并注明共几处。
+    assert tuple(blocked[0]['path']) == ('nodes', 2, 'children')
+    assert '3 处' in blocked[0]['message']
+    # 丢引文不是错的：事件本身不再被拒（没有落在节点 3 上的 error），但在 info 里点名。
+    assert not any(tuple(p['path'])[:2] == ('nodes', 3) for p in result['problems'])
+    notices = [row for row in result.get('info') or [] if row.get('note') == 'dropped']
+    assert [(row['count'], row['indexes']) for row in notices] == [(1, [3])]
 
 
 def test_missing_leaf_locator_is_not_excused_by_ancestor_derivation(project):

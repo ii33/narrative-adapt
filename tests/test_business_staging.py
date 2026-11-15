@@ -74,16 +74,18 @@ def test_graph_content_invalid_stage_no_nested_duplicate_and_patch(project):
 def test_extraction_adapter_is_discoverable_readable_and_patchable(project):
     sid = project.import_source('原文', TEXT)
     draft = draft_result(ended=False)
-    # 只有事件能带 quotes（`U-09`）：把第一个事件的引文改错，问题仍落在原始字段槽上。
-    draft['nodes'][4]['quotes'] = ['不存在']
+    # 引文定位不到已经改成「丢弃引文 + info」（`U-11`），拒不了这一批；这里用真正
+    # 「看不懂」的缺必填制造 staged——事件没给 participants（`U-09`／`I-08`），
+    # 问题仍落在原始字段槽上。
+    draft['nodes'][4].pop('participants')
     staged = project.submit_extraction(sid, draft)
     assert project.list_content_submissions(operation='submit_extraction')['submissions'][0]['submission_id'] == staged['submission_id']
     args = project.read_content_submission(staged['submission_id'], paths=[[]])['values'][0]['value']
-    assert args['result']['nodes'][4]['quotes'] == ['不存在']
-    patch = [{'op': 'set', 'path': ['result', 'nodes', 4, 'quotes'], 'value': ['甲约好接乙。']}]
+    assert 'participants' not in args['result']['nodes'][4]
+    patch = [{'op': 'set', 'path': ['result', 'nodes', 4, 'participants'], 'value': ['甲', '乙']}]
     resolved = project.preview_content_patch(staged['submission_id'], 1, patch)
     assert resolved['operation'] == 'submit_extraction'
-    assert project.patch_content_submission(staged['submission_id'], 1, patch, '仅修引文')['status'] == 'accepted'
+    assert project.patch_content_submission(staged['submission_id'], 1, patch, '仅补参与者')['status'] == 'accepted'
 
 
 def test_material_metadata_draft_and_receipt_share_authoritative_json(project):

@@ -41,14 +41,15 @@ def test_duplicate_submission_is_idempotent_and_later_new_facts_apply(project):
     assert any(n['name'] == '便笺' for n in project.graph_snapshot()['nodes'])
 
 
-@pytest.mark.parametrize('problem', ['quote', 'expiration', '关系', '关系（朋友）', '关系(朋友)', 'heading'])
+@pytest.mark.parametrize('problem', ['participants', 'expiration', '关系', '关系（朋友）', '关系(朋友)', 'heading'])
 def test_invalid_submission_never_mutates_graph_or_leaves_pending(project, problem):
     heading = '第一卷 远行 第一章 来客'
     sid = project.import_source('合成原文', heading + '\n' + TEXT)
     data = draft_result()
-    if problem == 'quote':
-        # 事件的引文必须逐字命中原文；人物的多余引文只会被丢弃（`U-10`），拒不了这一批。
-        data['nodes'][4]['quotes'] = ['原文没有这句话']
+    if problem == 'participants':
+        # 引文定位不到已经改成「丢弃引文 + info」（`U-11`），拒不了这一批；缺参与者
+        # 是真正「看不懂」的输入（`I-08`），仍然整批拒收。
+        del data['nodes'][4]['participants']
     elif problem == 'expiration':
         data['properties'].append({'node': '甲', 'property': '计划' , "category": "未分类", 'op': 'clear', 'at_event': 'missing'})
     elif problem == 'heading':

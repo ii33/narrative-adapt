@@ -68,7 +68,7 @@ Start-Process .venv\Scripts\python.exe -ArgumentList '-m','pytest','-q' `
   .venv\Scripts\python.exe scripts\accept_piaomiao_three_chapters.py
   ```
 
-  只跑一次，不自动重试；外部观察预算默认 3600 秒 / 2,000,000 token，到点由观察者停任务并记 `observation_expired`（这是 QA 预算，不是产品任务时限）。判读代码本身修正后，用 `--recheck <报告目录>` 对已有产物离线重算（不调用模型、不动工程数据，首次判读另存 `report-first-scoring.json`）——不用为了改判读再烧一次模型。
+  只跑一次，不自动重试；外部观察预算默认 3600 秒 / 4,000,000 token，到点由观察者停任务并记 `observation_expired`（这是验收观察预算，不是产品任务时限；2M 时上一轮只跑到第 2 章就中止，测不出三章）。判读代码本身修正后，用 `--recheck <报告目录>` 对已有产物离线重算（不调用模型、不动工程数据，首次判读另存 `report-first-scoring.json`）——不用为了改判读再烧一次模型。
 - **判读口径**（依据 `AGENTS.md`：**提取正确性不由程序判断**）：
   - **结构结论**（`report.json` 的 `structural_checks`，程序能机械核对）：任务跑完且无框架错误；模型自建了三章切片；节点引文与坐标逐字相符；证据全部落在 `[146, 16517)`；`check_project` 无结构错误；导入后原文未被改写。
   - **测量值**（`measurements`，只记数字、不判定）：接受批次与声明范围、各章事件数/证据数、八分位分布与空段、`action` 节点数，以及两份口径观察（`identity` 分类条数、跨事件仍用 `add` 累积的规模——按现行规则应接近 0，不为 0 说明模型把先后写成了并列）。

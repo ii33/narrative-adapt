@@ -21,7 +21,7 @@ RESULT_SCHEMA = {
                 "type": {"type": "string", "enum": ["person", "group", "item", "location", "storyline", "big_event", "scene", "event", "action"],
                     "description": "event是介于场景与动作之间、有自身推进与落点的完整情节单元；同场同总目标可有多个事件，不按章节或实施步骤机械拆分。action仅在明确请求动作提取时使用。"},
                 "quotes": {"type": "array", "items": {"type": "string"},
-                    "description": "仅event可填：准确的原文证据，给了就逐字校验。场景／大事件／主要故事由下级派生，其它节点与属性以参与的事件为出处，都不填quotes（多写的不入库，只回一条info说明已丢弃）"},
+                    "description": "仅event可填：原文证据。程序负责定位——先逐字，只有排版差异（全半角／空白／标点）时按归一化校正，存进证据的永远是原文截取文本；归一化后也找不到就丢弃这条引文、事件照常入库并回一条info。场景／大事件／主要故事由下级派生，其它节点与属性以参与的事件为出处，都不填quotes（多写的不入库，只回一条info说明已丢弃）"},
                 "anchor": {"type": "object", "required": ["start", "end"], "additionalProperties": False,
                     "description": "仅event：原文Unicode位置锚点{start,end}（左闭右开），程序按它截取逐字原文作为本事件证据，推荐用它代替回抄引文；与quotes同时给出时以anchor为准",
                     "properties": {"start": {"type": "integer", "description": "原文Unicode起点，含"},
@@ -450,7 +450,9 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
                                        if isinstance(row, dict) and '_anchor_span' in row})
     # 丢弃记账在解析之后再取：`parse_nodes`／`_parse_properties` 直接遇到的多余引文
     # 也记进同一个记账器，最后仍然按 (section, field) 折叠成一条 info（`U-10`）。
-    notices = dropped.diagnostics() + anchor_notices
+    # 引文定位的两种提醒（近似命中、找不到被丢弃）由 `parse_nodes` 自己折叠好带回来，
+    # 同样是 info、同样不影响 valid（`U-11`）。
+    notices = dropped.diagnostics() + list(data.get("quote_notices") or []) + anchor_notices
     for key in ("uncertainties", "exclusions"):
         rows = result.get(key) or []
         if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):

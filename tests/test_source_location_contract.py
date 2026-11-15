@@ -67,14 +67,9 @@ def test_submit_locates_and_validates_without_optional_locate_or_preview(project
     nodes = project.graph_snapshot()["nodes"]
     first = next(node for node in nodes if node["name"] == "甲约好接乙")
     assert first["disclosure"]["start"] == 1
-    before = copy.deepcopy(project.graph_snapshot())
-    draft = draft_result()
-    # 事件引文必须逐字命中原文：这才是拒收的理由（人物的多余引文只丢弃，`U-10`）。
-    draft["nodes"][4]["quotes"] = ["原文不存在的引文"]
-    staged = project.submit_extraction(sid, draft)
-    assert staged["status"] == "staged" and staged["problems"]
-    assert any(row.get("path") == ["nodes", 4, "quotes", 0] for row in staged["problems"])
-    assert project.graph_snapshot() == before
+    # 「引文完全不存在」不再整批拒收（`U-11`）：这条契约的正面/反面断言现在在
+    # `test_extraction_evidence_anchor.py::test_quoted_event_that_cannot_be_located_is_dropped_with_one_info`
+    # 与 `test_tolerant_quote_location.py`（本文件的 `_find_quote` 用例守匹配层）。
 
 
 def test_ambiguous_overlapping_event_evidence_is_still_atomic_rejection(project):
