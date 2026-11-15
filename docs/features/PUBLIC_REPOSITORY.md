@@ -1,5 +1,8 @@
 # Public repository scope
 
+> Scope of what ships, not a rule page: extraction rules and codes live in
+> [`docs/extraction/SPEC.md`](../extraction/SPEC.md).
+
 This repository and anything built from it contain the tool, not somebody's work.
 
 ## What is in here

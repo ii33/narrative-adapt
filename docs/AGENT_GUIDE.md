@@ -1,5 +1,7 @@
 # AGENT 手册
 
+> 本文是压缩与定位手册：概念速览只给编号，判据本身只在[提取任务规范](extraction/SPEC.md)（`E-xx`／`M-xx`／`I-xx`／诊断码）与[叙事模型](MODEL.md)（概念）里；发现两处读起来不一致时，以那两篇为准。
+
 面向：在本工程里读写叙事数据的模型／agent。
 用法：先读第 1 节拿骨架，再按第 2 节定位事实源，改动后用第 3 节验证，动手前扫一遍第 4 节。
 
@@ -24,7 +26,7 @@
 
 | 概念／规则 | 事实源 | 关键位置 | 不要改这里 |
 | --- | --- | --- | --- |
-| 五层语义与边界判据 `M-01`–`M-06`、`G-02`–`G-06` | `artifacts/prompt-drafts/extraction.md` | 正文 + 头部 `version:`；经 `scripts/rebuild_prompt_defaults.py` 生成 `DEFAULT_PROMPTS['extraction']` | `src/narrative/prompt_defaults.py`（生成物，见 §4.3） |
+| 五层语义与边界判据 `M-01`–`M-06`、`G-02`–`G-06` | [extraction/SPEC.md](extraction/SPEC.md) 第 4 节（判据）＋ `artifacts/prompt-drafts/extraction.md`（提示词正文） | 判据只写 SPEC；提示词正文 + 头部 `version:` 经 `scripts/rebuild_prompt_defaults.py` 生成 `DEFAULT_PROMPTS['extraction']` | `src/narrative/prompt_defaults.py`（生成物，见 §4.3） |
 | 粒度两档 `G-21` | `artifacts/prompt-drafts/granularity_standard.md`、`granularity_fine.md` | 同上脚本；工程设置键 `extraction_granularity` | 在 `extraction.md` 里复制粒度细则 |
 | 草稿字段与形状 `I-08` | `src/narrative/extraction_draft.py` | `RESULT_SCHEMA`、`_PROPERTY_DRAFT_SCHEMA`、`submission_input_schema()` | 在提示词里重列字段枚举 |
 | 事件参与者必填 `I-08` | `src/narrative/extraction.py` | `parse_nodes()`：缺 `participants` → `EXTRACTION_CONTENT` | 新增「参与者未知」状态位 |

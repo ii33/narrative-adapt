@@ -1,16 +1,18 @@
 # 工程工具与统一对话
 
+> 本文只讲工具与统一对话的参数、返回和流程。提取规则（地点／参与者／持有者必填、属性状态推导、逐字证据、五层边界、诊断码）只看[提取任务规范](../extraction/SPEC.md)，本文只引用编号，不复述判断标准。
+
 Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力。工具名称、参数和读写标记以 `tool_api.describe()` 返回的当前工具表为准。当前数据库格式为 schema 11；旧版工程明确拒绝打开，不自动转换或修改原库。
 
 ## 统一对话
 
-所有活动事件必须记录自身事件锚定的 `world` 地点属性。使用 `property="地点"`、`value_type="either"`，`value` 为地点节点引用或“无”“未知”；`op="unknown"` 时省略 `value`。`node` 和 `at_event` 均引用该事件。缺少地点的内容提交进入待修暂存，由原问题路径局部修补；程序不推测地点，也不自动补“未知”。改编和剧本新建事件可在同一次内容提交的 `changes.initial_location` 指定地点引用或这两个显式值。
+事件地点的必填与取值判据在[提取规范](../extraction/SPEC.md) §5 `I-01`–`I-04`，本页只记工具形态：写 `property="地点"`、`value_type="either"`，`value` 为地点节点引用或“无”“未知”，`op="unknown"` 时省略 `value`，`node` 与 `at_event` 都引用该事件；缺少地点的提交进入待修暂存、按原问题路径局部修补，程序不推测地点也不自动补值。改编和剧本新建事件可在同一次内容提交的 `changes.initial_location` 指定地点引用或这两个显式值。
 
 草稿合同17增加 `event.location` 快捷输入：地点节点ID/`@n`引用、“无”或“未知”。程序复用该事件引文，生成world地点记录的主体、自事件锚点、ID与序号；原始模型草稿仍完整保存。此字段和同事件的显式地点 `properties` 不可双写，冲突暂存反馈，不自动选择；省略也不自动补值。
 
-草稿合同18的默认指导是每个事件只提交一条代表性准确引文，支持事件身份与核心发生即可，不要求起因、经过、结果逐项引用，也不要求跨章事件在两侧各取引文。事件边界仍按完整情节判断，属性和关系仍各自提供必要证据。数组保留以支持明确的补证需求；不因多引文静态拒绝，不删除已有历史证据。
+草稿合同18的默认指导是每个事件只提交一条代表性准确引文，支持事件身份与核心发生即可（判据与反例见[提取规范](../extraction/SPEC.md) §3 `E-09`、§4 `M-13`）。数组保留以支持明确的补证需求；不因多引文静态拒绝，不删除已有历史证据。
 
-草稿合同19规定：场景、大事件和主要故事不由模型填写 `quotes` 或 `closing_quote`，只提交名称与直属层级关系（`children` 或下级父级引用）。程序从已验证下级逐层派生证据与阅读起点，沿用已有下级的真实来源和坐标；不要求把旧证据重新抄进本批范围。空容器、循环、错层和无有效下级证据按原始关系字段反馈，不能给上层补引文绕过。事件仍默认一条代表引文；动作、人物等实体以及属性关系继续提供自身必要证据。
+草稿合同19规定：场景、大事件和主要故事不由模型填写 `quotes` 或 `closing_quote`，只提交名称与直属层级关系（`children` 或下级父级引用）；程序从已验证下级逐层派生证据与阅读起点，沿用已有下级的真实来源和坐标，不要求把旧证据重新抄进本批范围。容器引文的下场与派生失败怎么反馈，见[提取规范](../extraction/SPEC.md) §3 `E-10`、§5 `I-10`。
 
 模型可见工具合同不再暴露写作提交的 `task_id`、`manifest_ref`，由宿主按捕获任务注入；CLI/MCP与Operations合同保持完整，查询其他任务编号不会被覆盖。修订号和上下文依据仍按原读取结果校验，不自动取最新值。
 
@@ -47,7 +49,7 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 
 `preview_extraction` 与 `submit_extraction` 使用相同参数：`source_id`、`result`，以及可选的 `start`、`end`。省略范围时使用完整原文。`result` 包含 `nodes`、事件变更 `properties` 及可选 `uncertainties`、`exclusions`；具体结构以工具 schema 为准。
 
-原文位置使用 Python Unicode 字符坐标，范围为 `[start, end)`。模型直接提交的新引文必须逐字出自本次目标范围；读取其他原文帮助理解，不会扩大这类引文的范围。上层容器引用已入库下级时，程序沿用下级已经验证的精确证据，不要求重新落在本批范围。
+原文位置使用 Python Unicode 字符坐标，范围为 `[start, end)`。新引文的逐字、唯一与「不出本批范围」要求见[提取规范](../extraction/SPEC.md) §3 `E-13`、§5 `I-13`、`I-16`；读取其他原文帮助理解，不会扩大引文范围。上层容器引用已入库下级时，程序沿用下级已经验证的精确证据，不要求重新落在本批范围。
 
 暂存是程序校验修补工作区，不是待人工确认队列。合法结果通过 `Operations` 自动采用，模型存疑与程序诊断保留在结果和内部审计中。`status=staged` 表示尚未写入正式事实，不能冒充入库成功；若已经提交成功，而后续模型回答失败，已发生的入库动作仍须如实记录。
 
@@ -78,12 +80,12 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 `get_schema` 返回图对象与属性记录合同；`read_project_state` 返回当前工程结构、事件属性变更及派生状态，供 agent 查漏补缺。
 `preview_changes` 只做静态预检；`apply_changes` 使用同样的 `graph_objects`、`property_records`、`expected_revision`，另加写入依据 `reason`，通过后原子提交。
 新增与修订节点、场景包含、上下文和时间轴可在同一批完成；属性状态变化在对应事件追加set/add/remove/clear/unknown记录；录入错误直接更正或删除。节点只保存当前对象，revision只用于并发检查。
-过期修订、非法引用或包含环拒绝整批写入；每个活动事件最终须归属同语境活动场景。旧格式工程不迁移或写入；当前工程若已有孤立事件，可同批修复结构后再提交。
+过期修订、非法引用或包含环拒绝整批写入（判据见[提取规范](../extraction/SPEC.md) §5 `I-21`–`I-24`、`I-27`）。旧格式工程不迁移或写入；当前工程若已有孤立事件，可同批修复结构后再提交。
 这些工具与属性、资料卡等现有业务写入工具都向统一 agent 开放，不依赖独立工作台或人工审核。
 
 ## 物品持有者
 
-每个活动 `item` 必须有当前有效的世界事实层持有者记录，值是合法节点引用或显式“无”“未知”。未知必须明确记录，不能省略；`scope=cognition/claim` 的观点及其 `holder_id` 不替代世界事实层的物品持有者。“门派归属”“持有时间”等属性也不满足这条规则。
+每个活动 `item` 的持有状态：必填、合法取值与「认知 `holder_id` 不替代世界事实层」的判据见[提取规范](../extraction/SPEC.md) §5 `I-05`–`I-07`（`ITEM_HOLDER_*`），本页不复述。
 写入在完整拟写图与属性记录上校验；可同批新增物品、场景事件和持有者。换手时新增状态并保留历史，不允许仅撤掉最后一个有效持有状态而留下缺失。只读打开旧工程不伪造记录；界面的未记录或尚未披露提示不视为已入库的“未知”。
 
 若旧“持有者”定义为 `node`，不能直接写入“无”或“未知”。可显式将当前定义改为 `either`，或经 `merge_properties` 物理合并到兼容定义；保留 `item_holder` 语义，直接重写引用，不建立别名链。
@@ -144,7 +146,7 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 
 旧节点仍可凭原主证据精确命中复用。完整草稿哈希只解决相同提交的幂等，不能替代事件身份判断。程序不读取历史响应来偷偷补写旧证据。
 
-复核还需检查已有重复事件。模型查阅两个事件与原文后，用 `preview_event_merge` 预检，再用 `merge_events` 显式合并；必须提供保留与并入的事件 ID、当前修订号、逐字原文位置和判断理由。同名本身不触发合并。 两个工具均使用 `source_event_id`（并入方）、`target_event_id`（保留方）、`expected_revision`、`evidence` 和 `reason`；`evidence` 为精确 `source_id/start/end/quote` 列表，须覆盖双方已有原文依据。该能力仅支持同一语境中的事件，不支持任意类型节点合并。
+复核还需检查已有重复事件：先核对原文，再用 `preview_event_merge` 预检、`merge_events` 显式合并（合并判据与「同名不足以证明同一次发生」见[提取规范](../extraction/SPEC.md) §3 `E-31`–`E-33`、§4 `M-15`）。两个工具均使用 `source_event_id`（并入方）、`target_event_id`（保留方）、`expected_revision`、`evidence` 和 `reason`；`evidence` 为精确 `source_id/start/end/quote` 列表，须覆盖双方已有原文依据。该能力仅支持同一语境中的事件，不支持任意类型节点合并。
 
 合并保留原节点、原属性记录及修订审计，以正式身份映射形成当前投影：旧事件退出活动列表，其属性与结构引用指向保留事件，证据合并保存。合并前的修订仍可重建当时两个节点；当前查询旧 ID 会明确告知合并去向。复核不能仅忽略重复节点后宣称已处理。
 
@@ -223,9 +225,7 @@ result = tool_api.call("event_state", {"event_id": "E1"}, project="C:/projects/e
 
 `Operations.load_project_settings()` / `save_project_settings({extraction_granularity, profile})` 读取和保存本工程的粒度与模型设置。粒度为 `standard`（阅读梳理）或 `fine`（默认精细，细查独立叙事转折和证据）。每个统一助手任务读取当时的设置，改变粒度不自动重提旧数据；只改粒度不固化原本继承的全局模型配置。
 
-事件的 `participants` 引用原文明示出场或实际起作用的人物；有原文支持的事件地点用属性 `地点` 引用 `location` 节点（`value_type=node`、`scope=world`、`at_event` 指向该事件，quotes 提供原文证据）。地点不可证时不猜，上层容器通过成员派生，无需重复抄写。精细档额外细查非关键、无名但原文可区分的人物和具体地点，不臆造姓名/身份，也不拆分无法区分的泛称。
-
-事件介于场景与动作之间：场景是一组空间上接近、时间上连续的事件的归纳，不承担地点身份（地点只记在事件上），事件记录其中可独立概括的叙事进展，动作是事件的实施细节。同一场景、同一总体目标可有多个各有起因、推进与落点的事件，不要求另起目标或后续独立展开才拆分；也不按每个发现、决定、动词或属性变化自动切界。fine保留有独立意义的过程、转折与信息节点，兼查过细的动作碎片和过粗的整场概括。边界由模型结合原文语义判断，不设事件数量、场景比例、题材词表或语义静态拒绝。
+事件的 `participants`、事件地点与粒度档的判据见[提取规范](../extraction/SPEC.md) §5 `I-01`、`I-25` 与 §3 `E-17`、`E-19`、`E-20`；本页只记草稿里怎么写：参与者写人物／群体节点引用，地点用属性 `地点` 引用 `location` 节点（`value_type=node`、`scope=world`、`at_event` 指向该事件，quotes 提供原文证据），地点不可证时不猜。上层容器通过成员派生，无需重复抄写。
 
 标准、精细都默认不创建动作。明确请求动作提取时，草稿可使用 `type: action`，以 `event` 优先引用直属事件的正式 ID 或本批 `@序号`（唯一名称可作便利输入），并给出逐字原文引文。动作必须有且只有一个同语境父事件，不能直接归属场景或含子项。已有动作经查证后用 `existing_id` 复用。节点编辑器的“动作提取”按钮将明确父事件 ID 发送到当前统一对话，不另起专用进程。
 
@@ -239,22 +239,22 @@ result = tool_api.call("event_state", {"event_id": "E1"}, project="C:/projects/e
 
 常规提取直接`submit_extraction`，程序自动定位与静态检查；合法立即原子入库，问题批持久暂存，只按反馈的submission_id和问题索引局部patch。成功仅返回必要状态、修订和计数；暂存不是人工审批候选，也不算正式入库。完整诊断、原始模型消息及存疑理由保留宿主审计，preview仅用于独立试查。
 
-层级为主要故事（storyline/T）→大事件（big_event/B）→场景（scene/S）→事件（event/E）→动作（action/A）。主要故事仅在模型判断完整篇章真正结束后总结：可用 `children:[B1,B2]` 归并已有大事件，无需重列或手填引文。程序按正式来源顺序及 Unicode 坐标，从下级已验证证据的最后末端派生 `completion`，不要求 `closing_quote`，不以本批或章末自动闭合。未结束的大事件可暂不归主要故事。主要故事进展 `storyline_progress` 记录在大事件上，大事件进展 `big_event_progress` 记录在场景上。
+层级为主要故事（storyline/T）→大事件（big_event/B）→场景（scene/S）→事件（event/E）→动作（action/A）。主要故事可用 `children:[B1,B2]` 归并已有大事件，无需重列或手填引文；`completion` 由程序从下级已验证证据派生，不要求 `closing_quote`。边界怎么判、完成与进展属性怎么写，见[提取规范](../extraction/SPEC.md) §4 `M-01`–`M-04`、§5 `I-11`、`I-33`。
 
 大事件在同语境内依原文顺序形成 `[start,next.start)` 的连续阅读区间。末个大事件已归入完成的主要故事时，以该主要故事的 `completion` 为末端；否则保持 `end=null`。这不是故事发生时间区间。`attach_children(parent_id,child_ids)` 可直接归入已有直属子项，主要故事归大事件、大事件归场景、场景归事件（或嵌套场景）、事件归动作；不保留旧场景直属主要故事的接口。
 
-关系方向统一以主体为参照：`node=A,property=父亲,value=B` 表示“B是A的父亲”，`property` 描述对方相对 `node` 的身份、关系或作用中的角色，节点型 `value` 为被指向的对方ID。普通 `string/any` 内容仍按字面保存。程序不依据关系词表翻转方向，不因对称关系补造反向记录。
+关系方向统一以主体为参照：`node=A,property=父亲,value=B` 表示“B是A的父亲”，`property` 描述对方相对 `node` 的身份、关系或作用中的角色，节点型 `value` 为被指向的对方ID。普通 `string/any` 内容仍按字面保存。方向与对称的判据（不猜反向、不补造反向记录）见[提取规范](../extraction/SPEC.md) §3 `E-27`。
 
 `record_property_change` 对新属性定义必须显式提供顶层 `value_type`；已有定义可省略沿用。节点引用使用 `node/either`，`string/any` 中的P样字符串仍是字面内容，不画作人物关系。可显式提供严格布尔 `symmetric`（新定义默认false）；与已有类型或对称标识冲突时原子拒绝，须另行显式修改定义，不能暗中改写。
 
 关系核对不仅看长期身份与称谓，也包括对叙事有意义、原文明示已发生的人际作用角色；不因一次发生就排除，也不由共现或单次作用外推长期立场。任务完成情况以实际工具返回为准，不将未调用或未成功的工具声称为已完成。
 
-人物心理意图、所知所信也需查漏。`scope=world` 保存原文支持的客观事实；`cognition` 保存人物所知所信或主观判断，`claim` 保存言说主张，后二者须用 `holder` 标明认知者／说话人，`node` 仍为被认知／谈论的主体。经旁证支持的对白内容可属于世界事实，不按对白形式机械全归主张；不同scope及holder不能覆盖客观取值。
+人物心理意图、所知所信也要查漏：`world`／`cognition`／`claim` 各自是什么、`holder` 怎么标、`node` 指向谁，见[提取规范](../extraction/SPEC.md) §4 `M-08`、§5 `I-12`（`SCOPE`）；经旁证支持的对白内容可属于世界事实，不按对白形式机械全归主张。
 
 
 ## 事件属性变更（当前唯一合同）
 
-草稿 `properties` 每项必填 `node/property/at_event/op/quotes`；`op` 为 `set/add/remove/clear/unknown`。前三者须提供 `value`，后两者禁止携带 `value`。不再接收 `expirations`、`valid_from`、`valid_to` 或模型填写的 `sequence`。程序用自动定位的精确引文起点生成 sequence，并按事件顺序与 sequence 推导状态；one人物关系按对方分别维护，many表示类型化集合数组。
+草稿 `properties` 每项必填 `node/property/at_event/op/quotes`；`op` 为 `set/add/remove/clear/unknown`，不再接收 `expirations`／`valid_from`／`valid_to` 或模型填写的 `sequence`。取值、序号由谁生成、状态怎么折叠，见[提取规范](../extraction/SPEC.md) §5 `I-18`–`I-20`（`M-07`）与草稿合同的 `DRAFT_SCHEMA`。
 
 手动补录使用 `record_property_change(node_id,property_id,event_id,op,expected_revision,reason,...)`，程序分配同事件后继 sequence。新剧情变化追加该记录；错误录入用 `correct_property(record_id,changes,expected_revision,reason)` 更正（sequence保留）或 `delete_property_records(record_ids,expected_revision,reason)` 物理删除。`clear` 表示明确清空，`unknown` 表示明确未知；缺失不自动等于两者。
 

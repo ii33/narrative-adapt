@@ -1,5 +1,9 @@
 # Property state acceptance matrix
 
+> Acceptance record only: the rules, codes and field contract live in
+> [`docs/extraction/SPEC.md` section 5](../extraction/SPEC.md#程序强制i-xx与属性状态合同);
+> this page records how they were checked and what was observed.
+
 Status: deterministic v5 implementation checked locally; a minimal synthetic
 live property closure passed on 2026-10-19, and a chapter-scale three-chapter
 closure passed on 2026-10-20. Full-work property extraction remains unverified.
@@ -7,9 +11,9 @@ This file records the expected synthetic example and the local verification
 below.
 
 All cases use fresh isolated projects and the contract in
-`docs/extraction/SPEC.md` section 5. `holder` is an item property with a single node
+[`docs/extraction/SPEC.md` section 5](../extraction/SPEC.md#程序强制i-xx与属性状态合同). `holder` is an item property with a single node
 reference; `held_items(person)` must be an inverse query, never a stored second
-truth. A and B are independent branches between E0 and E9.
+truth (the rule itself is SPEC §5's, not this matrix's). A and B are independent branches between E0 and E9.
 
 | Case | Setup | Required observation |
 | --- | --- | --- |

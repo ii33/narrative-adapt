@@ -2,6 +2,8 @@
 
 ## 协作与架构
 
+- 提取类条款（五层边界、粒度与动作、事件地点与参与者、物品持有者、引文条数、容器派生、属性状态）的判据只有一个出处：`docs/extraction/SPEC.md`。本文件里这些条款是操作摘要，读起来不一致时以 SPEC 为准；改规则先改 SPEC，再同步本节。
+
 - 项目处于开发阶段，只维护当前正式实现与当前数据合同。禁止保留旧版本／旧模式兼容分支、迁移或回退路径、废弃入口和重复实现；替换功能时同步删除旧代码、参数、配置、调用方及对应旧行为测试，更新文档。旧格式明确拒绝，不静默转换或自动改写用户数据。第三方 API 协议适配、当前业务容错和拒绝不支持格式的检查不属于旧版本兼容。
 
 - 业务内容输入统一经 Operations 暂存、静态检查与局部修补；有问题反馈原始字段路径，保留草稿但不写正式事实。修补通过自动原子入库，不重发整稿、不设置人工接受或审批工作台。UI保存待修时保留表单，CLI/MCP/助手使用同一合同。只允许明确内容校验错误进入待修；并发过期、权限与固定目标拒绝、文件/网络/未知错误不得伪装成可延迟执行的内容。删除、移动、复制、采用/批准、导入导出、生成和密钥配置等即时命令保留原有原子语义，不因通用patch偷偷执行。具体内容目录与可修字段由程序发布，原目标、业务修订及上下文依据不可由patch替换。
@@ -40,6 +42,11 @@
 - 已经在低完整性会话里跑过，必须复核并修复：`icacls .venv\Scripts\pythonw.exe | findstr /I Mandatory`（出现 `Low Mandatory Level` 就是它），然后**从中完整性（正常）终端**运行 `python scripts\check_runtime.py --fix-integrity-labels`。`start-desktop.cmd`（逻辑在 `src/narrative/launcher.py`）每次启动都会自动修一次，但**低完整性进程抬不高标签**，那次修复在受限会话里必然失败，只能到正常终端修。
 - `scripts/check_runtime.py` 每次运行都会打印解释器标签状态（`integrity_label … level=Medium|Low|absent`）：看到 `Low` 就按上一条处理。
 - 启动链不用 PowerShell：`start-desktop.cmd`（纯批处理，只找 `.venv\Scripts\python.exe`）→ `python -m narrative.launcher` → `pythonw -m narrative.native_app`。不许在 `.cmd` 里出现任何 PowerShell 字样、不许写中文、必须纯 ASCII + CRLF（`tests/test_launcher_scripts.py` 会拦）。
+
+## 提取规范（硬规则）
+
+- 动提取（提示词 / 校验 / 工具 / 诊断码）之前先读 `docs/extraction/SPEC.md`：`E-xx` 是模型侧硬约束、`M-xx` 是判断规则、`I-xx` 与属性状态合同是程序强制、诊断码在 §6、提示词版本在 §7。概念只查 `docs/MODEL.md`，术语只查 `docs/GLOSSARY.md`，工具参数只查 `docs/features/AGENT_API.md`——其余文档只许引用编号，不许再写一份判断标准；发现两处都能读到判据，删掉非权威的那份。
+- 改完同批更新对应条目：新增或改动的 `E-xx`／`I-xx` 落回 §3／§5，新出现的诊断码补 §6 一行，提示词升版同批改 §7 与 `docs/extraction/PROMPT_CHANGELOG.md`（守卫：`tests/test_extraction_spec.py`、`tests/test_prompt_version_snapshot.py`）。
 
 ## 运行产物与历史代码边界
 

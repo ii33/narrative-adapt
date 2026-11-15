@@ -31,3 +31,15 @@
 | `reference_policy` | v4 | 依据优先级与「不授权恢复已排除情节」 |
 
 版本号只以代码为准：本表与 [SPEC §7](SPEC.md) 由 `tests/test_extraction_spec.py` 逐条比对 `DEFAULT_PROMPTS` 的运行时值。
+
+## 怎么记
+
+每次改提示词都在上面「本次变更」列补一行，格式固定为：
+
+```
+日期 | id | 旧 → 新版本 | 影响的 E-xx／§6 码 | 原因
+```
+
+例：`2026-11-20 | extraction | v26 → v27 | E-09、E-13；无新码 | 代表性引文改为按事件身份判断`。
+
+本轮（建页）之前的历史没有系统记录，从这次开始按上面的格式记；既往改动只能到 [PROMPT_STYLE](../PROMPT_STYLE.md) 第 7 节与 [EXTRACTION_PROMPT_REWRITE](../EXTRACTION_PROMPT_REWRITE.md) 里核对，不回填本页表格。改提示词必须同批升版本（只升版本不改文本会被 `tests/test_prompt_version_snapshot.py` 拦）。
