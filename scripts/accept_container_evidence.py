@@ -14,7 +14,7 @@ TAIL = '\n附记：本行仅说明排版，不属于办理故事。'
 TEXT = STORY + TAIL
 CONTAINERS = {'scene', 'big_event', 'storyline'}
 CHILD_TYPES = {'scene': 'event', 'big_event': 'scene', 'storyline': 'big_event'}
-TASK = '这份原文的办理正文是一篇已经完结的微型故事，请读取并完整提取适用的主要故事、大事件、场景、事件以及必要人物和地点，通过submit_extraction自动入库。只处理办理正文，不把附记纳入故事，不提取物品或动作。事件按现行指导使用代表性引文；事件以上层级只给名称和下级归属，不给quotes或closing_quote，由程序派生证据与位置。主要故事仅因正文确已完结而创建，不因原文范围末尾闭合。遇具体诊断只局部修补，不重发整稿，不重复定位预检。'
+TASK = '这份原文的办理正文是一篇已经完结的微型故事，请读取并完整提取适用的主要故事、大事件、场景、事件以及必要人物和地点，通过submit_extraction自动入库。只处理办理正文，不把附记纳入故事，不提取物品或动作。每个事件只给一条定位依据：原文位置锚点anchor{"start","end"}（推荐）或一条代表性逐字引文；人物和地点不必给引文，事件以上层级只给名称和下级归属，不给quotes或closing_quote，由程序派生证据与位置。主要故事仅因正文确已完结而创建，不因原文范围末尾闭合。遇具体诊断只局部修补，不重发整稿，不重复定位预检。'
 
 
 def seed(ops):
@@ -70,13 +70,26 @@ def assess_container_graph(graph, source_id):
     }, details
 
 
+def event_location_basis(row):
+    """事件定位依据只有两种，且只能给一种：`anchor{start,end}` 或一条逐字引文。
+
+    按 `U-09` 事件必须给定位依据（二者至少一个，同时给时以 anchor 为准），其它节点
+    与属性都不填引文；所以这里断言的是「一个事件只用一条定位依据」。
+    """
+    anchor = row.get('anchor')
+    quotes = [quote for quote in row.get('quotes') or [] if isinstance(quote, str) and quote.strip()]
+    if isinstance(anchor, dict):
+        return set(anchor) == {'start', 'end'} and not quotes
+    return len(quotes) == 1
+
+
 def assess_drafts(drafts):
     nodes = [n for draft in drafts for n in draft.get('nodes', [])]
     upper = [n for n in nodes if n.get('type') in CONTAINERS]
     events = [n for n in nodes if n.get('type') == 'event']
     return {
         'model_did_not_author_container_quotes': bool(upper) and all('quotes' not in n and 'closing_quote' not in n for n in upper),
-        'submitted_event_uses_one_quote': bool(events) and all(isinstance(n.get('quotes'), list) and len(n['quotes']) == 1 for n in events),
+        'submitted_event_uses_one_location_basis': bool(events) and all(event_location_basis(n) for n in events),
     }
 
 

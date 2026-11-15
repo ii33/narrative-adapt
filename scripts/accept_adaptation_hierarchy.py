@@ -10,20 +10,29 @@ TEXT = "甲走到桥头。甲停下等人。乙走入车站。乙穿着蓝衣坐
 TASK = """这是多级时间点选择导入的独立验收。请实际调用import_adaptation_candidates读取父子层级，从中选择“桥头等候”scene（应包含它的下属事件）及另一分支“乙坐下”event，按这两个真实ID通过import_adaptation一次导入。不要选顶层大事件，不导入另一分支“乙入站”事件，不调用sync_adaptation，不修改提取，不创建节点或动作。随后adaptation_snapshot与check_adaptation核对导入的子树、必要归属和相关状态。简述所选容器与叶节点ID，不开启新任务或重试服务。"""
 
 
+def anchor(quote):
+    """事件定位依据：原文位置锚点 {start,end}，偏移从本文件的原文常量现算。"""
+    start = TEXT.index(quote)
+    return {"start": start, "end": start + len(quote)}
+
+
 def seed(ops):
     source_id = ops.import_source("分支选择合成原文", TEXT)
+    # 人物／地点／容器与属性都不带 quotes（`U-09`：只有事件给定位依据）。
     result = ops.submit_extraction(source_id, {"nodes": [
-        {"type": "person", "name": "甲", "quotes": ["甲走到桥头。"]},
-        {"type": "person", "name": "乙", "quotes": ["乙走入车站。"]},
-        {"type": "big_event", "name": "两地等候", "quotes": [TEXT]},
-        {"type": "scene", "name": "桥头等候", "big_event": "两地等候", "quotes": ["甲走到桥头。甲停下等人。"]},
-        {"type": "scene", "name": "车站等候", "big_event": "两地等候", "quotes": ["乙走入车站。乙穿着蓝衣坐下。"]},
-        {"type": "event", "name": "甲到桥头", "scene": "桥头等候", "participants": ["甲"], "quotes": ["甲走到桥头。"]},
-        {"type": "event", "name": "甲等待", "scene": "桥头等候", "participants": ["甲"], "quotes": ["甲停下等人。"]},
-        {"type": "event", "name": "乙入站", "scene": "车站等候", "participants": ["乙"], "quotes": ["乙走入车站。"]},
-        {"type": "event", "name": "乙坐下", "scene": "车站等候", "participants": ["乙"], "quotes": ["乙穿着蓝衣坐下。"]}],
-        "properties": [{"node": "乙", "property": "服装"  , "value": "蓝衣", "value_type": "string",
-            "at_event": "乙坐下", "quotes": ["乙穿着蓝衣坐下。"]}]})
+        {"type": "person", "name": "甲"},
+        {"type": "person", "name": "乙"},
+        {"type": "location", "name": "桥头"},
+        {"type": "location", "name": "车站"},
+        {"type": "big_event", "name": "两地等候"},
+        {"type": "scene", "name": "桥头等候", "big_event": "两地等候"},
+        {"type": "scene", "name": "车站等候", "big_event": "两地等候"},
+        {"type": "event", "name": "甲到桥头", "scene": "桥头等候", "location": "桥头", "participants": ["甲"], "anchor": anchor("甲走到桥头。")},
+        {"type": "event", "name": "甲等待", "scene": "桥头等候", "location": "桥头", "participants": ["甲"], "anchor": anchor("甲停下等人。")},
+        {"type": "event", "name": "乙入站", "scene": "车站等候", "location": "车站", "participants": ["乙"], "anchor": anchor("乙走入车站。")},
+        {"type": "event", "name": "乙坐下", "scene": "车站等候", "location": "车站", "participants": ["乙"], "anchor": anchor("乙穿着蓝衣坐下。")}],
+        "properties": [{"node": "乙", "property": "服装", "category": "未分类", "op": "set", "value": "蓝衣", "value_type": "string",
+            "at_event": "乙坐下"}]})
     assert result["status"] == "accepted", result
     ids = {node["name"]: node["id"] for node in ops.graph_snapshot()["nodes"]}
     # The shared evidence runner also archives an empty screenplay container;

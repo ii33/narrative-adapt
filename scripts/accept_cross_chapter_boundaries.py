@@ -1,4 +1,4 @@
-"""One isolated cross-chapter, single-event-quote QA; no product count policy."""
+"""One isolated cross-chapter, single-event-location-basis QA; no product count policy."""
 from __future__ import annotations
 
 import hashlib
@@ -15,7 +15,20 @@ PARTS = [
 ]
 TEXT = '\n'.join(PARTS)
 ANCHORS = ['周宁核对申请上的姓名与借阅期限', '确认本次借阅登记完成']
-TASK = '请读取指定原文的全部章节，按当前工程精细粒度和现行提取指导提取场景、事件及必要人物、地点，以准确原文引文支持事实，并通过submit_extraction自动入库。章节切片已建立，仅处理本原文，不提取动作节点、物品或主要故事；地点使用event.location。遇具体诊断只局部修补，不重发整稿，不重复定位校验或复核已通过数据。'
+TASK = '请读取指定原文的全部章节，按当前工程精细粒度和现行提取指导提取场景、事件及必要人物、地点，每个事件给一条定位依据（原文位置锚点anchor{"start","end"}或一条代表性逐字引文）支持事实，并通过submit_extraction自动入库。章节切片已建立，仅处理本原文，不提取动作节点、物品或主要故事；地点使用event.location。遇具体诊断只局部修补，不重发整稿，不重复定位校验或复核已通过数据。'
+
+
+def event_location_basis(row):
+    """事件定位依据只有两种，且只能给一种：`anchor{start,end}` 或一条逐字引文。
+
+    `U-09` 之后其它节点与属性都不填引文；这条断言只针对事件的定位依据，不是要求
+    两个章节各引一次，也不用引文条数证明事件边界。
+    """
+    anchor = row.get('anchor')
+    quotes = [quote for quote in row.get('quotes') or [] if isinstance(quote, str) and quote.strip()]
+    if isinstance(anchor, dict):
+        return set(anchor) == {'start', 'end'} and not quotes
+    return len(quotes) == 1
 
 
 def seed(ops):
@@ -104,8 +117,8 @@ def validate(ops, fixture, screenplay, calls, report):
     submitted_events = [row['item'] for step in accepted
         for row in ops.read_extraction_submission(step['result']['submission_id'], section='nodes')['entries']
         if row['item'].get('type') == 'event']
-    checks['submitted_event_uses_one_quote'] = bool(submitted_events) and all(
-        isinstance(row.get('quotes'), list) and len(row['quotes']) == 1 for row in submitted_events)
+    checks['submitted_event_uses_one_location_basis'] = bool(submitted_events) and all(
+        event_location_basis(row) for row in submitted_events)
     checks['sdk_and_task_audit_committed_match'] = bool(accepted) and all(any(
         r['tool'] == s['tool'] and r['is_error'] is False and not r['binding_diagnostics']
         and same_json(r['args'], s['args']) and len(r['values']) == 1 and same_json(r['values'][0], s['result'])

@@ -25,6 +25,12 @@ def main():
     lines = [f"第{i:06d}段：人物在房间查看纸页，并记录本次内容。\n" for i in range(40000)]
     text = "".join(lines)
     quotes = [lines[i].strip() for i in range(0, 40000, 40)]
+    # 事件定位依据用原文位置锚点：每句引文所在行的字符起点现算，不手写偏移。
+    line_starts, cursor = [], 0
+    for line in lines:
+        line_starts.append(cursor)
+        cursor += len(line)
+    quote_starts = {quote: line_starts[index] for index, quote in zip(range(0, 40000, 40), quotes, strict=True)}
     def measure(function, count=5):
         values = []
         for _ in range(count):
@@ -51,10 +57,15 @@ def main():
     ops = Operations.create_graph_project(root / "automatic-submit.nproj")
     sid = ops.import_source("大原文定位基准", text)
     selected = quotes[::25]
-    nodes = [{"type": "person", "name": "人物", "quotes": [selected[0]]},
-             {"type": "scene", "name": "查阅记录", "quotes": [selected[0]]}]
-    nodes += [{"type": "event", "name": f"记录{i}", "scene": "查阅记录", "participants": ["人物"], "quotes": [quote]} for i, quote in enumerate(selected)]
-    properties = [{"node": "人物", "property": "当前记录", "category": "未分类", "value": f"第{i}次", "value_type": "string", "at_event": f"记录{i}", "quotes": [quote]} for i, quote in enumerate(selected)]
+    # 人物／场景与属性都不带 quotes（`U-09`：只有事件给定位依据）。
+    nodes = [{"type": "person", "name": "人物"},
+             {"type": "scene", "name": "查阅记录"},
+             {"type": "location", "name": "房间"}]
+    nodes += [{"type": "event", "name": f"记录{i}", "scene": "查阅记录", "participants": ["人物"], "location": "房间",
+               "anchor": {"start": quote_starts[quote], "end": quote_starts[quote] + len(quote)}}
+              for i, quote in enumerate(selected)]
+    properties = [{"node": "人物", "property": "当前记录", "category": "未分类", "op": "set", "value": f"第{i}次",
+                   "value_type": "string", "at_event": f"记录{i}"} for i in range(len(selected))]
     start = perf_counter()
     result = ops.submit_extraction(sid, {"nodes": nodes, "properties": properties})
     duration = (perf_counter() - start) * 1000

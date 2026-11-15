@@ -17,15 +17,22 @@ TASK = """这是剧本本地时间点增删改移动复制的最小验收。只�
 每步用刚返回的revision作为expected_timeline_revision参数，并用真实新ID，不重复大读、不创建其他内容、不改状态值。简述新建/复制/删除IDs。仅以上五次写操作，不另开任务或重试服务。"""
 
 
+def anchor(quote):
+    """事件定位依据：原文位置锚点 {start,end}，偏移从本文件的原文常量现算。"""
+    start = TEXT.index(quote)
+    return {"start": start, "end": start + len(quote)}
+
+
 def seed(ops):
     source_id = ops.import_source("本地时间点操作样本", TEXT)
+    # 人物／场景与属性都不带 quotes（`U-09`：只有事件给定位依据）。
     result = ops.submit_extraction(source_id, {"nodes": [
-        {"type": "person", "name": "甲", "quotes": ["甲"]},
-        {"type": "scene", "name": "开门场", "quotes": ["甲打开门。"]},
-        {"type": "scene", "name": "候场", "quotes": ["甲在门外稍候。"]},
-        {"type": "event", "name": "开门", "scene": "开门场", "participants": ["甲"], "quotes": ["甲打开门。"]},
-        {"type": "event", "name": "稍候", "scene": "候场", "participants": ["甲"], "quotes": ["甲在门外稍候。"]}],
-        "properties": [{"node": "稍候", "property": "情势"  , "category": "未分类", "value": "待删状态", "value_type": "string", "at_event": "稍候", "quotes": ["甲在门外稍候。"]}]})
+        {"type": "person", "name": "甲"},
+        {"type": "scene", "name": "开门场"},
+        {"type": "scene", "name": "候场"},
+        {"type": "event", "name": "开门", "scene": "开门场", "location": "未知", "participants": ["甲"], "anchor": anchor("甲打开门。")},
+        {"type": "event", "name": "稍候", "scene": "候场", "location": "未知", "participants": ["甲"], "anchor": anchor("甲在门外稍候。")}],
+        "properties": [{"node": "稍候", "property": "情势", "category": "未分类", "op": "set", "value": "待删状态", "value_type": "string", "at_event": "稍候"}]})
     assert result["status"] == "accepted", result
     ids = {row["name"]: row["id"] for row in ops.graph_snapshot()["nodes"]}
     adaptation = ops.import_adaptation([ids["开门场"], ids["候场"]], reason="隔离验收源改编")

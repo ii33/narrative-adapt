@@ -14,15 +14,22 @@ TASK = """请重写给定目标场次正文。先read_source读取这份短原�
 请按项目风格写约6至10个正文块，以具体可演动作与有潜台词的对白形成一段完整场景，双方都有对白，不把小说叙述拆成动作块。可在既定剧情内设计人物行为、停顿和场景细节。使用submit_script_unit一次原子替换本场旧正文，使用刚读取的真实修订/依据，不能手填程序内部任务档案。最后简述当前依据和实际完成情况，不另开任务或重试服务。"""
 
 
+def anchor(quote, text=TEXT):
+    """事件定位依据：原文位置锚点 {start,end}，偏移从本文件的原文常量现算。"""
+    start = text.index(quote)
+    return {'start': start, 'end': start + len(quote)}
+
+
 def seed(ops):
     source = ops.import_source("预算交接原作", TEXT)
+    # 人物／地点／场景与属性都不带 quotes（`U-09`：只有事件给定位依据）。
     result = ops.submit_extraction(source, {"nodes": [
-        {"type": "person", "name": "陈宁", "quotes": ["陈宁"]}, {"type": "person", "name": "方岳", "quotes": ["方岳"]},
-        {"type": "location", "name": "办公室", "quotes": ["办公室"]}, {"type": "location", "name": "大厅", "quotes": ["大厅"]},
-        {"type": "scene", "name": "办公室工作", "quotes": [TEXT]},
-        {"type": "event", "name": "交接预算表", "scene": "办公室工作", "participants": ["陈宁", "方岳"], "quotes": [FIRST]},
-        {"type": "event", "name": "播放录音宣布离职", "scene": "办公室工作", "participants": ["方岳"], "quotes": [REMOVED]}],
-        "properties": [{"node": event, "property": "地点"  , "category": "未分类", "op": "set", "value": place, "value_type": "node", "scope": "world", "at_event": event, "quotes": [quote]} for event, place, quote in (("交接预算表", "办公室", FIRST), ("播放录音宣布离职", "大厅", REMOVED))]})
+        {"type": "person", "name": "陈宁"}, {"type": "person", "name": "方岳"},
+        {"type": "location", "name": "办公室"}, {"type": "location", "name": "大厅"},
+        {"type": "scene", "name": "办公室工作"},
+        {"type": "event", "name": "交接预算表", "scene": "办公室工作", "participants": ["陈宁", "方岳"], "anchor": anchor(FIRST)},
+        {"type": "event", "name": "播放录音宣布离职", "scene": "办公室工作", "participants": ["方岳"], "anchor": anchor(REMOVED)}],
+        "properties": [{"node": event, "property": "地点", "category": "未分类", "op": "set", "value": place, "value_type": "node", "scope": "world", "at_event": event} for event, place in (("交接预算表", "办公室"), ("播放录音宣布离职", "大厅"))]})
     assert result["status"] == "accepted", result
     ids = {node["name"]: node["id"] for node in ops.graph_snapshot()["nodes"]}
     adaptation = ops.import_adaptation([ids["办公室工作"]], reason="隔离原作改编")

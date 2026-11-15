@@ -12,20 +12,29 @@ from accept_tool_loading import usage_breakdown
 
 TEXT = '林岚在档案室向周宁宣布暂停发布名单，周宁同意暂缓发布。'
 TASK = '请读取指定原文和提取暂存的检查问题，依据原始字段位置在一次patch_extraction_submission中局部修复已明确的问题，使其自动入库。保留其余内容，不重发整稿、不新增事实，不重复定位或复核已通过的数据。完成后自然结束。'
+# 两条问题都按原字段路径定位、各修一个字段：
+# - nodes[0] 是人物，却带了 quotes —— `U-09` 之后非事件节点不接受引文，修法是删掉该字段；
+# - properties[0] 缺 value，op=set 必须有值。
 EXPECTED_PATHS = {('nodes', 0, 'quotes'), ('properties', 0, 'value')}
+
+
+def anchor(quote):
+    """事件定位依据：原文位置锚点 {start,end}，偏移从本文件的原文常量现算。"""
+    start = TEXT.index(quote)
+    return {'start': start, 'end': start + len(quote)}
 
 
 def original_draft():
     return {'nodes': [
-        {'type': 'person', 'name': '林岚'},
-        {'type': 'person', 'name': '周宁', 'quotes': ['周宁同意暂缓发布']},
-        {'type': 'location', 'name': '档案室', 'quotes': ['档案室']},
-        {'type': 'scene', 'name': '档案室宣布暂缓发布', 'quotes': [TEXT]},
-        {'type': 'event', 'name': '宣布暂停发布名单并获同意', 'quotes': [TEXT],
+        {'type': 'person', 'name': '林岚', 'quotes': ['林岚']},
+        {'type': 'person', 'name': '周宁'},
+        {'type': 'location', 'name': '档案室'},
+        {'type': 'scene', 'name': '档案室宣布暂缓发布'},
+        {'type': 'event', 'name': '宣布暂停发布名单并获同意', 'anchor': anchor('林岚在档案室向周宁宣布暂停发布名单'),
          'scene': '@4', 'participants': ['@1', '@2'], 'location': '@3'},
     ], 'properties': [
-        {'node': '@5', 'property': '发布状态'  , 'op': 'set', 'value_type': 'string',
-         'scope': 'world', 'at_event': '@5', 'quotes': ['宣布暂停发布名单']},
+        {'node': '@5', 'property': '发布状态', 'category': '未分类', 'op': 'set', 'value_type': 'string',
+         'scope': 'world', 'at_event': '@5'},
     ]}
 
 
@@ -67,7 +76,9 @@ def assess_repair(steps, fixture, current):
     accepted = [s for s in patches if s.get('ok') is True and s.get('result', {}).get('status') == 'accepted'
         and s['result'].get('submission_status') == 'committed' and s['result'].get('validation_status') == 'valid']
     unchanged = deepcopy(current)
-    unchanged['nodes'][0].pop('quotes', None)
+    # 按原稿还原被诊断的两处：nodes[0] 的非法 quotes（人物不接受引文）与
+    # properties[0] 缺失的 value。其余任何改动都会被 only_reported_fields_changed 抓到。
+    unchanged['nodes'][0]['quotes'] = deepcopy(fixture['original_draft']['nodes'][0]['quotes'])
     unchanged['properties'][0].pop('value', None)
     changed = {tuple((p.get('section'), p.get('index'), p.get('field')))
         for s in patches for p in s.get('args', {}).get('patches', [])}

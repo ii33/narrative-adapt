@@ -14,13 +14,21 @@ TASK = """请完成一次最小原文复核与精准导入，不创建新人物/
 3. import_screenplay_timeline_candidates读取给定空剧本候选，仅以同一“争执后合作”event ID import_screenplay_timeline。不要改编重排、不要写场表正文；仅这三项必要业务写入。无需再读大快照。简述关系判断、实际关闭记录和导入单事件结果，不另开任务或重试服务。"""
 
 
+def anchor(quote):
+    """事件定位依据：原文位置锚点 {start,end}，偏移从本文件的原文常量现算。"""
+    start = TEXT.index(quote)
+    return {"start": start, "end": start + len(quote)}
+
+
 def seed(ops):
     source_id = ops.import_source("朋友关系变化与存续对照", TEXT)
+    # 人物／地点／场景与属性都不带 quotes（`U-09`：只有事件给定位依据）；地点走 location 快捷字段。
     result = ops.submit_extraction(source_id, {"nodes": [
-        *[{"type": "person", "name": name, "quotes": [name]} for name in "甲乙丙丁"],
-        {"type": "scene", "name": "送药风波", "quotes": [TEXT]},
-        *[{"type": "event", "name": name, "scene": "送药风波", "participants": list("甲乙丙丁"), "quotes": [quote]} for name, quote in zip(("建立友谊", "争执后合作", "明确断交", "继续送药"), QUOTES, strict=True)]],
-        "properties": [{"node": a, "property": "朋友"  , "category": "未分类", "value": b, "value_type": "node", "symmetric": True, "at_event": "建立友谊", "quotes": [QUOTES[0]]} for a, b in (("甲", "乙"), ("丙", "丁"))]})
+        *[{"type": "person", "name": name} for name in "甲乙丙丁"],
+        {"type": "location", "name": "药铺"},
+        {"type": "scene", "name": "送药风波"},
+        *[{"type": "event", "name": name, "scene": "送药风波", "location": "药铺", "participants": list("甲乙丙丁"), "anchor": anchor(quote)} for name, quote in zip(("建立友谊", "争执后合作", "明确断交", "继续送药"), QUOTES, strict=True)]],
+        "properties": [{"node": a, "property": "朋友", "category": "未分类", "op": "set", "value": b, "value_type": "node", "symmetric": True, "at_event": "建立友谊"} for a, b in (("甲", "乙"), ("丙", "丁"))]})
     assert result["status"] == "accepted", result
     document = ops.create_screenplay("关系复核精准导入", reason="独立验收空剧本") ["screenplay"]
     return {"source_id": source_id, "screenplay_id": document["id"], "ids": {row["name"]: row["id"] for row in ops.graph_snapshot()["nodes"]},

@@ -138,10 +138,6 @@ def test_malformed_property_id_stages_instead_of_crashing(project, malformed):
     assert project.graph_project_info()["revision"] == revision
 
 
-@pytest.mark.xfail(
-    reason="scripts/accept_screenplay.py 的 seed 夹具还给人物/地点/场景带 quotes；按 `U-09` 现在会被拒收。"
-           "该脚本不在本轮写入范围内，条目已列进交付报告的「仍假设 quotes 必填」清单，脚本修好后此用例自然变绿。",
-    strict=False)
 def test_screenplay_acceptance_seed_obeys_current_contract(project):
     seed = runpy.run_path(str(Path(__file__).parents[1] / "scripts" / "accept_screenplay.py"))["seed"]
     result = seed(project)

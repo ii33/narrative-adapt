@@ -16,7 +16,8 @@ PATCH = {'op': 'remove', 'path': ['result_note']}
 
 
 def original_draft():
-    return {'nodes': [{'type': 'person', 'name': '林岚', 'quotes': [TEXT]}],
+    # 只有一处故意错误：未知顶层字段 result_note。人物不带 quotes（`U-09`：只有事件给定位依据）。
+    return {'nodes': [{'type': 'person', 'name': '林岚'}],
             'properties': [], 'result_note': '模型附加说明，不属于草稿合同'}
 
 

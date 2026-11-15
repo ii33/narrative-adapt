@@ -60,7 +60,7 @@
 
 **反例（细则堆叠，概念后置）**
 
-> 提交草稿遵循 submit_extraction 工具 inputSchema……程序以精确引文位置生成 sequence，不手算 sequence，不填写有效期或 expirations……事件默认只提交一条有代表性的准确原文引文，不足以覆盖起因……（四百字以上的长段，概念定义在第 12 段）
+> 提交草稿遵循 submit_extraction 工具 inputSchema……程序以精确引文位置生成 sequence，不手算 sequence，不填写有效期或 expirations……事件必须给定位依据：原文位置锚点 anchor{"start", "end"}（推荐，程序按它截取逐字原文）或一条有代表性的准确原文引文，二者至少一个……（四百字以上的长段，概念定义在第 12 段）
 
 **正例（原则前置，可自检）**
 

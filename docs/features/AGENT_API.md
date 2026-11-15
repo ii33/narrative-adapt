@@ -1,6 +1,8 @@
 # 工程工具与统一对话
 
 > 本文只讲工具与统一对话的参数、返回和流程。提取规则（地点／参与者／持有者必填、属性状态推导、逐字证据、五层边界、诊断码）只看[提取任务规范](../extraction/SPEC.md)，本文只引用编号，不复述判断标准。
+>
+> 定位依据的裁定是 `U-09`（[提取规范](../extraction/SPEC.md) §0.1）：**只有事件需要定位依据**——`anchor{start,end}` 或一条逐字 `quotes`；其它节点与属性一律不填引文（填了会被 `DRAFT_SCHEMA` 拒收），实体的阅读位置由它最早挂靠的事件派生。
 
 Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力。工具名称、参数和读写标记以 `tool_api.describe()` 返回的当前工具表为准。当前数据库格式为 schema 11；旧版工程明确拒绝打开，不自动转换或修改原库。
 
@@ -10,7 +12,7 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 
 草稿合同17增加 `event.location` 快捷输入：地点节点ID/`@n`引用、“无”或“未知”。程序复用该事件引文，生成world地点记录的主体、自事件锚点、ID与序号；原始模型草稿仍完整保存。此字段和同事件的显式地点 `properties` 不可双写，冲突暂存反馈，不自动选择；省略也不自动补值。
 
-草稿合同18的默认指导是每个事件只提交一条代表性准确引文，支持事件身份与核心发生即可（判据与反例见[提取规范](../extraction/SPEC.md) §3 `E-09`、§4 `M-13`）。数组保留以支持明确的补证需求；不因多引文静态拒绝，不删除已有历史证据。
+草稿合同21规定：事件必须给定位依据——原文位置锚点 `anchor{"start","end"}`（推荐，程序按 Unicode 偏移截取逐字原文）或一条代表性 `quotes`，二者至少一个；同时给出时以 `anchor` 为准并回一条 info。其它节点与属性不填引文（填了会被 `DRAFT_SCHEMA` 拒收）；人物、群体、地点、物品、动作的阅读位置由它最早挂靠的事件派生，形状与逐字引文一致。判据与反例见[提取规范](../extraction/SPEC.md) §0.1 `U-09`、§3 `E-09`、§4 `M-13`。
 
 草稿合同19规定：场景、大事件和主要故事不由模型填写 `quotes` 或 `closing_quote`，只提交名称与直属层级关系（`children` 或下级父级引用）；程序从已验证下级逐层派生证据与阅读起点，沿用已有下级的真实来源和坐标，不要求把旧证据重新抄进本批范围。容器引文的下场与派生失败怎么反馈，见[提取规范](../extraction/SPEC.md) §3 `E-10`、§5 `I-10`。
 
@@ -59,10 +61,10 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 
 `patch_extraction_submission(submission_id, expected_revision, patches, reason)` 的 `expected_revision` 必须是刚返回的 **暂存** `submission_revision`，不是工程 `revision`。`patches` 支持：
 
-- `{"op":"set","section":"nodes","index":2,"field":"quotes","value":["修正后的准确引文"]}`：替换该问题字段。
+- `{"op":"set","section":"nodes","index":2,"field":"anchor","value":{"start":12,"end":24}}`：替换该问题字段（事件的定位依据）。
 - `{"op":"remove","section":"nodes","index":2,"field":"错误字段"}`：删除该字段。
 - `{"op":"remove","path":["result_note"]}`：仅删除 `result` 内未知的顶层字段；不能删除 `nodes/properties/uncertainties/exclusions`，不能替换整稿或改变外层目标。
-- `{"op":"append","section":"nodes","value":{"type":"person","name":"原文人物","quotes":["准确引文"]}}`：在末尾追加缺失项。
+- `{"op":"append","section":"nodes","value":{"type":"event","name":"原文事件","anchor":{"start":12,"end":24},"participants":["@1"],"scene":"@2"}}`：在末尾追加缺失项。
 
 `section` 为 `nodes/properties/uncertainties/exclusions`，补丁 `index` 从0起，节点引用 `@n` 仍从1起。禁止删除整行、splice或重排，保证原批引用不漂移；不能借补丁修改原 `source_id/start/end`。每次局部修补自动完整重检，仍有问题继续 `staged` 并返回新修订和问题，通过即 `accepted/unchanged`、`submission_status=committed`，无需人工接受，也不要重新发送整批。已提交的暂存稿不可再patch；新的独立事实批次照常使用submit。工具参数JSON不合法时，入口拒绝该非法调用，继续按原工具纠错规则处理。
 
@@ -73,7 +75,7 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 `Operations.check_project()` 与 `check_project` 工具在一个只读事务内采样固定修订，统一检查结构、证据、引用、活动属性定义、事件归属及物品持有者等约束。已失效的历史记录仅作为引用背景，不误当成当前违规；运行不创建候选、不提升修订号。
 返回 `checked_revision`、`current_revision`、严重级别计数和问题列表。问题携带可用的节点、属性记录及原文范围定位；无法唯一定位的引文不伪造高亮。左侧静态检查页可手动运行、筛选、查看详情和跳转，工程发生新修订时标明结果过期。
 
-检查错误统一保留 `message/reason`（具体原因）、`path`（原始字段路径数组）、`location`（可读路径）、`location_scope` 和可用的 `target`。`target.kind` 说明这条问题该跳到哪一类对象：`property_definition`、`property_change`、`node`、`event_location`、`participants`、`reference`、`storyline_range`；确实没有可定位对象时为 `project`，界面按工程级显示。判据是「有定位对象才给具体 kind」——只有身上带节点、属性记录、属性定义或原文来源时才落到具体类型；像「有 27 条属性暂时归入其他，分布在 14 个节点」这类全工程汇总没有任何定位字段，一律 `project`，不得沿用码名的前缀或默认值猜成某个定义或节点。`target` 同时带上 `property_id`／`node_id`／`record_id`／`source_id`／`start`／`end`／`quote`，与顶层的同名字段一致，只取既有证据、不新算坐标。提取路径相对原始 `result`，例如 `["nodes",2,"quotes"]`；通用内容路径相对操作参数，不混入模型类型标签。引用问题用 `related_paths` 指向被引用条目的根因，不能用后续引用错误盖住原始缺失引文等问题。路径索引沿用原始输入，不按解析或排序后的结果重编号。全局约束明确标为整体提交并说明范围，不伪造具体修补字段；工程静态检查用对象或属性记录ID定位，保留原文来源和坐标。
+检查错误统一保留 `message/reason`（具体原因）、`path`（原始字段路径数组）、`location`（可读路径）、`location_scope` 和可用的 `target`。`target.kind` 说明这条问题该跳到哪一类对象：`property_definition`、`property_change`、`node`、`event_location`、`participants`、`reference`、`storyline_range`；确实没有可定位对象时为 `project`，界面按工程级显示。判据是「有定位对象才给具体 kind」——只有身上带节点、属性记录、属性定义或原文来源时才落到具体类型；像「有 27 条属性暂时归入其他，分布在 14 个节点」这类全工程汇总没有任何定位字段，一律 `project`，不得沿用码名的前缀或默认值猜成某个定义或节点。`target` 同时带上 `property_id`／`node_id`／`record_id`／`source_id`／`start`／`end`／`quote`，与顶层的同名字段一致，只取既有证据、不新算坐标。提取路径相对原始 `result`，例如 `["nodes",2,"anchor"]`；通用内容路径相对操作参数，不混入模型类型标签。引用问题用 `related_paths` 指向被引用条目的根因，不能用后续引用错误盖住原始缺失引文等问题。路径索引沿用原始输入，不按解析或排序后的结果重编号。全局约束明确标为整体提交并说明范围，不伪造具体修补字段；工程静态检查用对象或属性记录ID定位，保留原文来源和坐标。
 
 ## 通用工程读写
 
@@ -108,30 +110,32 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 
 这些引用用于 `nodes.participants/scene/event/big_event/storyline/children`、`properties.node/holder/related_nodes/at_event`，以及 `value_type=node/either` 的节点值。`either` 的“无”“未知”保留字面值。属性变更中的节点选择、节点值及 `at_event` 使用同一规则；`existing_id` 必须是已存在的正式节点 ID，`context_id` 必须是现有语境 ID，不能写 `@序号`。
 
-`name`、`quotes`、来源信息与 `string/any` 属性值是普通内容，不因字面上像 `@1` 或 `P1` 就改写。越界序号、引用缺失及类型或语境不符均返回诊断；解析前后排序、过滤不会改变 `@序号` 指向的原数组位置。
+`name`、事件的 `quotes`／`anchor`、来源信息与 `string/any` 属性值是普通内容，不因字面上像 `@1` 或 `P1` 就改写。越界序号、引用缺失及类型或语境不符均返回诊断；解析前后排序、过滤不会改变 `@序号` 指向的原数组位置。
 
 
-例如，假设工程已有乙 `P2`，以下草稿仅声明甲、大事件、场景和事件一次：
+例如，假设工程已有乙 `P2`，以下草稿仅声明甲、大事件、场景和事件一次（原文“甲与乙握手。”）：
 
 ```json
 {
   "nodes": [
-    {"type":"person","name":"甲","quotes":["甲与乙握手。"]},
-    {"type":"big_event","name":"双方会面","quotes":["甲与乙握手。"]},
-    {"type":"scene","name":"会面","big_event":"@2","quotes":["甲与乙握手。"]},
-    {"type":"event","name":"握手","scene":"@3","participants":["@1","P2"],"quotes":["甲与乙握手。"]}
+    {"type":"person","name":"甲"},
+    {"type":"big_event","name":"双方会面"},
+    {"type":"scene","name":"会面","big_event":"@2"},
+    {"type":"event","name":"握手","scene":"@3","participants":["@1","P2"],"anchor":{"start":0,"end":6}}
   ],
   "properties": [
-    {"node":"@1","property":"经历","op":"set","value":"与乙握手","at_event":"@4","quotes":["甲与乙握手。"]}
+    {"node":"@1","property":"经历","category":"未分类","op":"set","value":"与乙握手","at_event":"@4"}
   ]
 }
 ```
+
+只有事件带定位依据：上面的 `anchor` 由程序按偏移截取逐字原文，等价于给一条 `quotes:["甲与乙握手。"]`；人物、大事件、场景和属性都不带 `quotes`（`U-09`）。
 
 
 只为已有 `P1` 增加一条以已有 `E1` 为披露锚点的属性时，不必再次声明这两个节点：
 
 ```json
-{"nodes":[],"properties":[{"node":"P1","property":"经历","op":"set","value":"与乙握手","at_event":"E1","quotes":["甲与乙握手。"]}]}
+{"nodes":[],"properties":[{"node":"P1","property":"经历","category":"未分类","op":"set","value":"与乙握手","at_event":"E1"}]}
 ```
 
 草稿节点可用 `existing_id` 引用当前工程已查证的节点，程序验证存在性、类型和语境；事件换了引文后仍可沿用原 ID，属性继续挂在同一事件上。`existing_id` 不与 `new_occurrence` 同时使用。
@@ -225,7 +229,7 @@ result = tool_api.call("event_state", {"event_id": "E1"}, project="C:/projects/e
 
 `Operations.load_project_settings()` / `save_project_settings({extraction_granularity, profile})` 读取和保存本工程的粒度与模型设置。粒度为 `standard`（阅读梳理）或 `fine`（默认精细，细查独立叙事转折和证据）。每个统一助手任务读取当时的设置，改变粒度不自动重提旧数据；只改粒度不固化原本继承的全局模型配置。
 
-事件的 `participants`、事件地点与粒度档的判据见[提取规范](../extraction/SPEC.md) §5 `I-01`、`I-25` 与 §3 `E-17`、`E-19`、`E-20`；本页只记草稿里怎么写：参与者写人物／群体节点引用，地点用属性 `地点` 引用 `location` 节点（`value_type=node`、`scope=world`、`at_event` 指向该事件，quotes 提供原文证据），地点不可证时不猜。上层容器通过成员派生，无需重复抄写。
+事件的 `participants`、事件地点与粒度档的判据见[提取规范](../extraction/SPEC.md) §5 `I-01`、`I-25` 与 §3 `E-17`、`E-19`、`E-20`；本页只记草稿里怎么写：参与者写人物／群体节点引用，地点用属性 `地点` 引用 `location` 节点（`value_type=node`、`scope=world`、`at_event` 指向该事件，原文证据由该事件自己的定位依据——`anchor` 或一条引文——提供），地点不可证时不猜。上层容器通过成员派生，无需重复抄写。
 
 标准、精细都默认不创建动作。明确请求动作提取时，草稿可使用 `type: action`，以 `event` 优先引用直属事件的正式 ID 或本批 `@序号`（唯一名称可作便利输入），并给出逐字原文引文。动作必须有且只有一个同语境父事件，不能直接归属场景或含子项。已有动作经查证后用 `existing_id` 复用。节点编辑器的“动作提取”按钮将明确父事件 ID 发送到当前统一对话，不另起专用进程。
 
@@ -254,7 +258,7 @@ result = tool_api.call("event_state", {"event_id": "E1"}, project="C:/projects/e
 
 ## 事件属性变更（当前唯一合同）
 
-草稿 `properties` 每项必填 `node/property/at_event/op/quotes`；`op` 为 `set/add/remove/clear/unknown`，不再接收 `expirations`／`valid_from`／`valid_to` 或模型填写的 `sequence`。取值、序号由谁生成、状态怎么折叠，见[提取规范](../extraction/SPEC.md) §5 `I-18`–`I-20`（`M-07`）与草稿合同的 `DRAFT_SCHEMA`。
+草稿 `properties` 每项必填 `node/property/category/at_event/op`（`set/add/remove` 另需 `value`），不接受 `quotes`；`op` 为 `set/add/remove/clear/unknown`，不再接收 `expirations`／`valid_from`／`valid_to` 或模型填写的 `sequence`。取值、序号由谁生成、状态怎么折叠，见[提取规范](../extraction/SPEC.md) §5 `I-18`–`I-20`（`M-07`）与草稿合同的 `DRAFT_SCHEMA`。
 
 手动补录使用 `record_property_change(node_id,property_id,event_id,op,expected_revision,reason,...)`，程序分配同事件后继 sequence。新剧情变化追加该记录；错误录入用 `correct_property(record_id,changes,expected_revision,reason)` 更正（sequence保留）或 `delete_property_records(record_ids,expected_revision,reason)` 物理删除。`clear` 表示明确清空，`unknown` 表示明确未知；缺失不自动等于两者。
 

@@ -34,7 +34,7 @@ def main():
         )
 
     text = "甲在村口告别。甲启程。甲抵达城门。甲入城。这次进城办事至此结束。"
-    task = "请依据完整原文，将前后两个明确阶段分别组织为两个大事件及其场景、事件。原文明示该篇过程已结束，请据此总结一个主要故事，用逐字闭合引文提交完成依据并实际入库。名称直接描述原文过程，不使用暂称；核对大事件的连续阅读区间。不要只描述计划。"
+    task = "请依据完整原文，将前后两个明确阶段分别组织为两个大事件及其场景、事件。原文明示该篇过程已结束，请据此总结一个主要故事并实际入库：只给名称与下级归属，完成依据与阅读起点由程序从下级已验证证据派生，不填 closing_quote，也不给容器 quotes。名称直接描述原文过程，不使用暂称；核对大事件的连续阅读区间。不要只描述计划。"
     ops = Operations.create_graph_project(directory / "大事件连续区间验收.nproj")
     sid = ops.import_source("合成告别启程与抵达入城原文", text)
     (directory / "input.txt").write_bytes(text.encode())
@@ -191,23 +191,28 @@ def main():
                 except (ValueError, TypeError):
                     pass
         save("raw-submitted-nodes.json", submitted_nodes)
-        closures = [
+        # `U-09`/`E-10` 之后容器不落模型引文：主要故事的阅读起点与完成依据由程序
+        # 从已下级的已验证证据派生。这里核对的是派生结果本身，不再回查某句模型引文。
+        # `authored` 只作为报告项（模型可能提交过被拒的旧写法），不参与通过判定。
+        authored = [
             n.get("closing_quote")
             for n in submitted_nodes
             if n.get("type") == "storyline" and isinstance(n.get("closing_quote"), str)
         ]
-        completion = majors[0].get("completion") if len(majors) == 1 else None
-        closure_matches = [
-            q
-            for q in closures
-            if q
-            and text.count(q) == 1
-            and completion == {"source_id": sid, "start": text.index(q) + len(q)}
+        nodes_by_id = {n["id"]: n for n in graph["nodes"]}
+        derived_spans = [
+            span
+            for identifier in (majors[0].get("events", []) if len(majors) == 1 else [])
+            for span in (nodes_by_id.get(identifier) or {}).get("evidence_spans", [])
         ]
-        closure_ok = bool(closure_matches) and majors[0].get("disclosure") == {
-            "source_id": sid,
-            "start": text.index(closure_matches[-1]),
-        }
+        completion = majors[0].get("completion") if len(majors) == 1 else None
+        closure_ok = (
+            bool(derived_spans)
+            and completion
+            == {"source_id": sid, "start": max(span["end"] for span in derived_spans)}
+            and majors[0].get("disclosure")
+            == {"source_id": sid, "start": min(span["start"] for span in derived_spans)}
+        )
         adjacent = (
             len(big_ranges) == 2
             and big_ranges[0]["start"] != big_ranges[1]["start"]
@@ -253,9 +258,9 @@ def main():
             graph_revision_token=graph["revision"],
             node_types=types,
             property_record_count=len(records),
-            closing_quotes=closures,
+            authored_closing_quotes=authored,
             completion=completion,
-            closing_quote_generated_completion=closure_ok,
+            completion_derived_from_children=closure_ok,
             adjacent_big_event_ranges=adjacent,
             completed_range_ends=completed_end,
             no_provisional_fields=no_legacy,

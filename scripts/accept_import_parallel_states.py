@@ -13,13 +13,20 @@ TASK = """这是导入状态的最小验收。当前只有一份确定性原提�
 3. 不需要再读大快照或写正文。两条源状态应忠实保留，不能为消除诊断删值、截断或将one改many；简述导入结果。仅这两次导入写入，不另开任务、不重试服务。"""
 
 
+def anchor(quote):
+    """事件定位依据：原文位置锚点 {start,end}，偏移从本文件的原文常量现算。"""
+    start = TEXT.index(quote)
+    return {"start": start, "end": start + len(quote)}
+
+
 def seed(ops):
     source_id = ops.import_source("并列下属状态验收", TEXT)
+    # 人物／场景与属性都不带 quotes（`U-09`：只有事件给定位依据）。
     result = ops.submit_extraction(source_id, {"nodes": [
-        *[{"type": "person", "name": name, "quotes": [name]} for name in ("甲", "乙", "丙")],
-        {"type": "scene", "name": "交办", "quotes": [TEXT]},
-        {"type": "event", "name": "交办任务", "scene": "交办", "participants": ["甲", "乙", "丙"], "quotes": [TEXT]}],
-        "properties": [{"node": "甲", "property": "下属"  , "category": "未分类", "value": name, "value_type": "node", "scope": "world", "at_event": "交办任务", "quotes": [TEXT]} for name in ("乙", "丙")]})
+        *[{"type": "person", "name": name} for name in ("甲", "乙", "丙")],
+        {"type": "scene", "name": "交办"},
+        {"type": "event", "name": "交办任务", "scene": "交办", "location": "未知", "participants": ["甲", "乙", "丙"], "anchor": anchor(TEXT)}],
+        "properties": [{"node": "甲", "property": "下属", "category": "未分类", "op": "set", "value": name, "value_type": "node", "scope": "world", "at_event": "交办任务"} for name in ("乙", "丙")]})
     assert result["status"] == "accepted", result
     script = ops.create_screenplay("并列状态导入验收", reason="隔离验收空剧本") ["screenplay"]
     return {"source_id": source_id, "screenplay_id": script["id"],

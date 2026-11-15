@@ -19,6 +19,15 @@ from pathlib import Path
 PROMPT_VERSION = "screenplay-writing-acceptance/2"
 FIXTURE_ORIGIN = "deterministic Operations fixture; real model output only for scene table and screenplay body"
 TEXT = "林岚走到旧车站门口。周川把铜钥匙交给林岚。林岚带着钥匙走向东仓，停下听见门内脚步。"
+def anchor(text, quote):
+    """事件定位依据：原文位置锚点 {start,end}，偏移从本文件已有的原文常量现算。
+
+    按 `U-09` 只有事件需要定位依据（锚点或一条逐字引文），其它节点与属性都不填引文。
+    """
+    start = text.index(quote)
+    return {"start": start, "end": start + len(quote)}
+
+
 TASK = """这是本次剧本功能验收的一个统一任务。原文、改编与绑定段落已经由合成fixture准备好，不能改写原文或改编。请在已授权目标段落内实际调用工具完成全部步骤，不只建议：
 1. 读取目标段落及read_scene_table_context，按输入范围拆成2场scene，完整plan至少含title/summary/location_text/time_label，可引用真实cast_ids/location_id。用submit_scene_table及刚读到的修订和指纹原子入库。
 2. 通过apply_scene_table_changes对第1场plan做一次明确修改（补充conflict“交接必须保持隐秘”）；完整plan其余字段保留。再adopt_scene_table记录工作标记（不是审批）。读取场表确认稳定场次ID。
@@ -109,21 +118,22 @@ def seed(ops):
     """Controlled synthetic input; never presented as a real extraction output."""
     sid = ops.import_source("合成钥匙交接", TEXT)
     first, second, third = "林岚走到旧车站门口。", "周川把铜钥匙交给林岚。", "林岚带着钥匙走向东仓，停下听见门内脚步。"
+    # 人物／地点／物品／场景与属性都不带 quotes（`U-09`：只有事件给定位依据）。
     draft = {"nodes": [
-        {"type": "person", "name": "林岚", "quotes": [first]},
-        {"type": "person", "name": "周川", "quotes": [second]},
-        {"type": "location", "name": "旧车站门口", "quotes": ["旧车站门口"]},
-        {"type": "location", "name": "东仓", "quotes": ["东仓"]},
-        {"type": "item", "name": "铜钥匙", "quotes": ["铜钥匙"]},
-        {"type": "scene", "name": "交接钥匙后接近东仓", "quotes": [TEXT]},
-        {"type": "event", "name": "林岚来到旧车站门口", "scene": "@6", "participants": ["@1"], "quotes": [first]},
-        {"type": "event", "name": "周川把铜钥匙交给林岚", "scene": "@6", "participants": ["@1", "@2"], "quotes": [second]},
-        {"type": "event", "name": "林岚到东仓听见脚步", "scene": "@6", "participants": ["@1"], "quotes": [third]},
+        {"type": "person", "name": "林岚"},
+        {"type": "person", "name": "周川"},
+        {"type": "location", "name": "旧车站门口"},
+        {"type": "location", "name": "东仓"},
+        {"type": "item", "name": "铜钥匙"},
+        {"type": "scene", "name": "交接钥匙后接近东仓"},
+        {"type": "event", "name": "林岚来到旧车站门口", "scene": "@6", "participants": ["@1"], "anchor": anchor(TEXT, first)},
+        {"type": "event", "name": "周川把铜钥匙交给林岚", "scene": "@6", "participants": ["@1", "@2"], "anchor": anchor(TEXT, second)},
+        {"type": "event", "name": "林岚到东仓听见脚步", "scene": "@6", "participants": ["@1"], "anchor": anchor(TEXT, third)},
     ], "properties": [
-        {"node": "@7", "property": "地点"  , "category": "未分类", "op": "set", "value": "@3", "value_type": "node", "scope": "world", "at_event": "@7", "quotes": ["旧车站门口"]},
-        {"node": "@8", "property": "地点", "category": "未分类", "op": "unknown", "value_type": "node", "scope": "world", "at_event": "@8", "quotes": [second]},
-        {"node": "@9", "property": "地点", "category": "未分类", "op": "set", "value": "@4", "value_type": "node", "scope": "world", "at_event": "@9", "quotes": ["东仓"]},
-        {"node": "@5", "property": "持有者", "category": "未分类", "op": "set", "value": "@1", "value_type": "either", "scope": "world", "at_event": "@8", "quotes": [second]},
+        {"node": "@7", "property": "地点", "category": "未分类", "op": "set", "value": "@3", "value_type": "node", "scope": "world", "at_event": "@7"},
+        {"node": "@8", "property": "地点", "category": "未分类", "op": "unknown", "value_type": "node", "scope": "world", "at_event": "@8"},
+        {"node": "@9", "property": "地点", "category": "未分类", "op": "set", "value": "@4", "value_type": "node", "scope": "world", "at_event": "@9"},
+        {"node": "@5", "property": "持有者", "category": "未分类", "op": "set", "value": "@1", "value_type": "either", "scope": "world", "at_event": "@8"},
     ]}
     result = ops.submit_extraction(sid, draft)
     if result["status"] != "accepted":

@@ -16,11 +16,13 @@ def seed(ops):
         'context_window': 1_000_000, 'output_reserve': 131_072, 'compaction_reserve': 65_536,
         'compaction_max_tokens': 32_768, 'max_tokens': 131_072})
     source_id = ops.import_source('暂存字段修补合成原文', TEXT)
+    # 只留一处故意错误：事件 location 指向不存在的 @99。人物／地点／场景不带 quotes，
+    # 事件保留一条逐字引文（`U-09`：事件给一条定位依据即可）。
     draft = {'nodes': [
-        {'type': 'person', 'name': '甲', 'quotes': ['甲']},
-        {'type': 'person', 'name': '乙', 'quotes': ['乙']},
-        {'type': 'location', 'name': '门口', 'quotes': ['门口']},
-        {'type': 'scene', 'name': '门口会面', 'quotes': []},
+        {'type': 'person', 'name': '甲'},
+        {'type': 'person', 'name': '乙'},
+        {'type': 'location', 'name': '门口'},
+        {'type': 'scene', 'name': '门口会面'},
         {'type': 'event', 'name': '甲乙会面', 'scene': '@4', 'location': '@99', 'participants': ['@1', '@2'], 'quotes': [TEXT]},
     ], 'properties': []}
     staged = ops.submit_extraction(source_id, draft)

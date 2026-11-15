@@ -16,21 +16,28 @@ TASK = '''请只为指定段落生成一场极简场表和一个简短动作正�
 本次明确省略plan.source_event_ids，验证它是可选信息；不要在正文中手写来源注记或未标注提示。先读read_scene_table_context再提交场表，然后read_script_unit_context并提交本场正文，使用实际修订与指纹。不要修改原文、提取、改编和本剧本时间线，不添加范围外情节，不为验收补事实；正常内容错误仅按诊断局部修补，不重发整稿。完成正文后自然结束。'''
 
 
+def anchor(quote, text=TEXT):
+    """事件定位依据：原文位置锚点 {start,end}，偏移从本文件的原文常量现算。"""
+    start = text.index(quote)
+    return {'start': start, 'end': start + len(quote)}
+
+
 def seed(ops):
     ops.save_harness_settings({'provider': 'ark', 'base_url': 'https://ark.cn-beijing.volces.com/api/plan/v3',
         'model': 'deepseek-v4.1-flash-economy', 'key_env': 'ARK_API_KEY', 'reasoning_effort': 'low'})
     source = ops.import_source('清晨档案室与夜间车站', TEXT)
+    # 人物／地点／场景都不带 quotes（`U-09`：只有事件给定位依据）。
     result = ops.submit_extraction(source, {'nodes': [
-        {'type': 'person', 'name': '林岚', 'quotes': [FIRST]},
-        {'type': 'person', 'name': '周宁', 'quotes': [SECOND]},
-        {'type': 'location', 'name': '档案室', 'quotes': ['档案室']},
-        {'type': 'location', 'name': '车站', 'quotes': ['车站']},
+        {'type': 'person', 'name': '林岚'},
+        {'type': 'person', 'name': '周宁'},
+        {'type': 'location', 'name': '档案室'},
+        {'type': 'location', 'name': '车站'},
         {'type': 'scene', 'name': '清晨档案室确认借阅'},
         {'type': 'scene', 'name': '夜间车站相约会合'},
         {'type': 'event', 'name': '林岚在档案室确认借阅获准', 'scene': '@5',
-         'participants': ['@1'], 'location': '@3', 'quotes': [FIRST]},
+         'participants': ['@1'], 'location': '@3', 'anchor': anchor(FIRST)},
         {'type': 'event', 'name': '林岚在车站向周宁报平安并约定会合', 'scene': '@6',
-         'participants': ['@1', '@2'], 'location': '@4', 'quotes': [SECOND]},
+         'participants': ['@1', '@2'], 'location': '@4', 'anchor': anchor(SECOND)},
     ], 'properties': []})
     if result.get('status') != 'accepted':
         raise RuntimeError('Current-contract isolated input did not commit: ' + json.dumps(result, ensure_ascii=False))

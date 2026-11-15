@@ -14,16 +14,25 @@ HIDDEN_PHRASES = ["七个星球", "遥远故乡", "慢镜哨兵", "特写哨兵"
 TASK = """请依据本段当前有效时间线重新编写场级场表并实际提交。先read_scene_table_context，遵守其中程序提供的拆场规则与有效事件来源；只根据有效范围的剧情决定场数，不把事件或招式逐条当作场，不写分镜、镜头或特效方案。旧场表只是待改输出，不是剧情依据。保留所有已有稳定ID，正文不变。用submit_scene_table提交完整场表，再read_scene_table_context和check_screenplay核对。不要写正文、读原文或全量时间线，不开启新任务，不重新请求服务。新建编号和单场来源由程序分配；依据编号和修订原样传回，不计算hash。"""
 
 
+def anchor(quote):
+    """事件定位依据：原文位置锚点 {start,end}，偏移从本文件的原文常量现算。"""
+    start = TEXT.index(quote)
+    return {"start": start, "end": start + len(quote)}
+
+
 def seed(ops):
     source_id = ops.import_source("连续石台对峙", TEXT)
-    nodes = [{"type": "person", "name": "林岚", "quotes": [QUOTES[0]]},
-             {"type": "person", "name": "周川", "quotes": [QUOTES[1]]},
-             {"type": "location", "name": "石台边", "quotes": ["石台边"]},
-             {"type": "scene", "name": "石台对峙", "quotes": [TEXT]}]
-    nodes += [{"type": "event", "name": name, "scene": "石台对峙", "participants": ["林岚", "周川"] if index else ["林岚"], "quotes": [quote]}
+    # 人物／地点／场景与属性都不带 quotes（`U-09`：只有事件给定位依据）。
+    nodes = [{"type": "person", "name": "林岚"},
+             {"type": "person", "name": "周川"},
+             {"type": "location", "name": "石台边"},
+             {"type": "scene", "name": "石台对峙"}]
+    # 事件地点走 location 快捷字段：程序复用本事件的定位依据生成 world 地点记录，
+    # 不与显式地点 properties 双写（`U-09`／`I-04`）。
+    nodes += [{"type": "event", "name": name, "scene": "石台对峙", "location": "石台边",
+               "participants": ["林岚", "周川"] if index else ["林岚"], "anchor": anchor(quote)}
               for index, (name, quote) in enumerate(zip(NAMES, QUOTES, strict=True))]
-    properties = [{"node": NAMES[index], "property": "地点", "value": "石台边", "value_type": "node", "scope": "world",
-        "at_event": NAMES[index], "quotes": [QUOTES[index]]} for index in (0, 5)]
+    properties = []
     accepted = ops.submit_extraction(source_id, {"nodes": nodes, "properties": properties})
     assert accepted["status"] == "accepted", accepted
     adaptation = ops.sync_adaptation()

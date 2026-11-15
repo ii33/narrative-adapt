@@ -1,4 +1,4 @@
-"""One real extraction submits quotes for program-owned location and validation."""
+"""One real extraction submits event location bases for program-owned location and validation."""
 from __future__ import annotations
 
 import json

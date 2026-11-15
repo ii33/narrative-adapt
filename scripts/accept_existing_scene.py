@@ -15,12 +15,16 @@ from qa_business_actions import staging_tables_absent
 
 def seed(ops):
     text = '甲与乙握手。甲向乙点头。'
+    quote = '甲与乙握手。'
     sid = ops.import_source('合成会面原文', text)
+    # 人物／场景不带 quotes；事件给位置锚点（`U-09`），偏移从本函数的原文常量现算。
+    start = text.index(quote)
     payload = {'nodes': [
-        {'type': 'person', 'name': '甲', 'quotes': ['甲与乙握手。']},
-        {'type': 'person', 'name': '乙', 'quotes': ['甲与乙握手。']},
-        {'type': 'scene', 'name': '会面', 'quotes': ['甲与乙握手。']},
-        {'type': 'event', 'name': '握手', 'scene': '会面', 'participants': ['甲', '乙'], 'quotes': ['甲与乙握手。']}], 'properties': []}
+        {'type': 'person', 'name': '甲'},
+        {'type': 'person', 'name': '乙'},
+        {'type': 'scene', 'name': '会面'},
+        {'type': 'event', 'name': '握手', 'scene': '会面', 'participants': ['甲', '乙'], 'location': '未知',
+         'anchor': {'start': start, 'end': start + len(quote)}}], 'properties': []}
     result = ops.submit_extraction(sid, payload, end=6)
     assert result['status'] == 'accepted'
     # Authorized isolated historical fixture only: reproduce the legacy writer's missing edge.
