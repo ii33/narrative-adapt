@@ -232,7 +232,7 @@ def startup_refusal(level: int | None, *, allow: bool) -> str | None:
         "带着 Low 完整性标签：Windows 对带 Low 标签的 exe 一律以 Low 启动，"
         "从资源管理器双击也一样；标签是低完整性进程（沙箱/代理会话里的 uv sync、"
         "setup-environment、localize_python）创建这些文件时打上的。"
-        f"start-desktop.ps1 会自动把 {', '.join(INTEGRITY_TREES)} 的标签改回 Medium，"
+        f"start-desktop.cmd 会自动把 {', '.join(INTEGRITY_TREES)} 的标签改回 Medium，"
         "现场诊断用 icacls <exe> | findstr Mandatory 与 whoami /groups | findstr Mandatory。\n\n"
         "另一种原因是从受限终端/沙箱启动，父进程的低完整性令牌被继承下来。"
         "两种情况的处理都一样：关闭这个进程，在资源管理器里双击 start-desktop.cmd"
@@ -343,7 +343,7 @@ def require_medium_integrity() -> None:
             "写不了普通用户目录和配置库（%USERPROFILE%\\.narrative）。"
             "这不是标签损坏，也不是应用自己降的——从受限终端、沙箱或代理里启动就会这样。"
             "请关闭后从桌面/资源管理器双击 start-desktop.cmd 重新启动；"
-            "没有中完整性（Medium）可用时，start-desktop.ps1 -AllowLowIntegrity"
+            "没有中完整性（Medium）可用时，start-desktop.cmd -AllowLowIntegrity"
             f"（或设 {ALLOW_LOW_INTEGRITY_ENV}=1）可以显式放行，"
             "但界面会一直提示「改动不会写进用户目录」。"
         )

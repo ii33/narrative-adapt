@@ -120,8 +120,8 @@ def _guard_integrity_labels(root: Path, env: dict) -> None:
             "rewritten carry a Low integrity label, and Windows will always start such exes "
             "as Low - the desktop app would then fail to write %USERPROFILE%\\.narrative "
             "(SQLite: \"attempt to write a readonly database\"). "
-            "Run scripts\\fix_venv_integrity.ps1 from a normal (Medium) terminal; the repair "
-            "cannot be done from a Low process.",
+            "Run scripts\\check_runtime.py --fix-integrity-labels from a normal (Medium) "
+            "terminal; the repair cannot be done from a Low process.",
             file=sys.stderr,
         )
     repair = _project_python(root, [str(root / "scripts/check_runtime.py"), "--fix-integrity-labels"], env)

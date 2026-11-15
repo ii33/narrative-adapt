@@ -40,7 +40,11 @@ def fix_integrity_labels() -> int:
     for line in integrity_label_status(targets):
         print(line)
     if report["failed"]:
-        print("标签修复未完成：请以中等权限运行 scripts/fix_venv_integrity.ps1", file=sys.stderr)
+        print(
+            "标签修复未完成：请从中完整性（正常）终端再运行一次"
+            " python scripts/check_runtime.py --fix-integrity-labels",
+            file=sys.stderr,
+        )
         return 1
     return 0
 

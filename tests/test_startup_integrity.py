@@ -243,7 +243,7 @@ def test_check_runtime_fix_mode_runs_the_repair(monkeypatch, capsys):
 
 
 def test_check_runtime_fix_mode_fails_loudly(monkeypatch, capsys):
-    """修不动不能当成功：退出码非 0，并指向人工脚本。"""
+    """修不动不能当成功：退出码非 0，并指向重新修复的确切命令。"""
     import runpy
 
     from narrative import runtime_security
@@ -259,4 +259,4 @@ def test_check_runtime_fix_mode_fails_loudly(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exit_info:
         runpy.run_path(str(script), run_name="__main__")
     assert exit_info.value.code == 1
-    assert "fix_venv_integrity.ps1" in capsys.readouterr().err
+    assert "--fix-integrity-labels" in capsys.readouterr().err

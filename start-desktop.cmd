@@ -1,38 +1,31 @@
 @echo off
 setlocal
-rem Low integrity here has two causes: the interpreter files may carry a Low integrity
-rem label (Windows starts any Low-labelled exe as Low, even from Explorer), and a
-rem restricted terminal / sandbox / agent shell passes its Low token down. Either way
-rem the app cannot write %%USERPROFILE%%\.narrative (SQLite: "readonly database").
-rem start-desktop.ps1 repairs the interpreter labels, logs who started it to
-rem .runtime\logs\launch.log, and blocks with a non-zero exit code if it is still Low.
-rem Escape hatch for QA: start-desktop.cmd -AllowLowIntegrity
-rem Windows PowerShell 5.1 is retired: this chain runs PowerShell 7 (pwsh) only.
-rem Do not rely on PATH alone. The Store alias lives in %LOCALAPPDATA%\Microsoft\WindowsApps
-rem and is missing from some launch contexts (trimmed PATH from a sandbox, task or agent),
-rem which used to print "pwsh was not found" even though it is installed.
-set "PWSH_EXE="
-for %%P in (pwsh.exe) do if not defined PWSH_EXE set "PWSH_EXE=%%~$PATH:P"
-if not defined PWSH_EXE if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" set "PWSH_EXE=%ProgramFiles%\PowerShell\7\pwsh.exe"
-if not defined PWSH_EXE if exist "%ProgramFiles%\PowerShell\7-preview\pwsh.exe" set "PWSH_EXE=%ProgramFiles%\PowerShell\7-preview\pwsh.exe"
-if not defined PWSH_EXE if exist "%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe" set "PWSH_EXE=%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe"
-if not defined PWSH_EXE (
+rem Pure batch entry point. All startup logic lives in Python: narrative.launcher.
+rem The only external program this chain needs is the project virtual environment
+rem Python below, so there is no shell engine to find, no execution policy and no
+rem alias lookup that can report "not found" on a trimmed PATH.
+rem
+rem Exit codes (documented in src\narrative\launcher.py):
+rem   0 ok, 2 bad arguments, 3 environment incomplete, 4 Low integrity blocked,
+rem   5 runtime preparation failed, 6 startup checks failed, 7 QA timed out.
+set "NARRATIVE_ROOT=%~dp0"
+set "NARRATIVE_PYTHON=%NARRATIVE_ROOT%.venv\Scripts\python.exe"
+if not exist "%NARRATIVE_PYTHON%" (
     echo.
-    echo PowerShell 7 ^(pwsh^) was not found.
-    echo Looked in PATH, "%ProgramFiles%\PowerShell\7", "%ProgramFiles%\PowerShell\7-preview"
-    echo and "%LOCALAPPDATA%\Microsoft\WindowsApps".
-    echo Install it with: winget install Microsoft.PowerShell
-    echo Then reopen this window and try again.
+    echo The project virtual environment is missing:
+    echo   %NARRATIVE_PYTHON%
+    echo Run setup-environment.cmd first - it syncs the dependencies and prepares
+    echo the local Python - then start this again.
     echo.
     pause
-    exit /b 1
+    exit /b 3
 )
-"%PWSH_EXE%" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-desktop.ps1" %*
+"%NARRATIVE_PYTHON%" -I -m narrative.launcher %*
 set "narrative_exit_code=%errorlevel%"
 if not "%narrative_exit_code%"=="0" (
     echo.
     echo Desktop startup did not complete ^(exit code %narrative_exit_code%^).
-    echo See the message above and .runtime\logs\launch.log.
+    echo See the message above and the launch log .runtime\logs\launch.log.
     pause
 )
 exit /b %narrative_exit_code%

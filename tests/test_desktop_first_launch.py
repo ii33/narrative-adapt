@@ -1,8 +1,17 @@
-"""Exercise first-launch preparation in an isolated Windows project directory."""
+"""首次启动：准备本地 Python 运行时、检查隔离，然后才起界面。
+
+这一层以前用 ``pwsh`` 跑 ``start-desktop.ps1``，而那个脚本已经不在了——启动逻辑现在
+在 :mod:`narrative.launcher`，逐条判定（``-PrepareOnly``、运行时准备、pyvenv 重指、
+重定向器哈希、低完整性硬拦）都由 ``tests/test_launcher.py`` 用注入边界的假进程覆盖，
+默认门禁里跑得又快又稳。这里只留两件必须动真东西的事：
+
+* ``scripts/localize_python.py`` 自己的行为（它复制整个 CPython，没法用假进程替）；
+* 真实子进程里 ``.venv\\Scripts\\python.exe -I -m narrative.launcher`` 这条命令行确实
+  能跑起来——``start-desktop.cmd`` 执行的就是它。
+"""
 
 import importlib.util
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -10,153 +19,37 @@ from types import SimpleNamespace
 
 import pytest
 
+ROOT = Path(__file__).resolve().parents[1]
+
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows desktop launcher")
 
 
-def copy_runtime(source, destination):
-    destination.mkdir(parents=True)
-    for name in ("python.exe", "pythonw.exe"):
-        shutil.copy2(source / name, destination / name)
-    for dll in source.glob("*.dll"):
-        shutil.copy2(dll, destination / dll.name)
-    shutil.copytree(source / "DLLs", destination / "DLLs")
-    shutil.copytree(source / "Lib", destination / "Lib", ignore=shutil.ignore_patterns("site-packages", "__pycache__", "test"))
+def test_launcher_module_is_runnable_the_way_the_batch_entry_calls_it():
+    """``start-desktop.cmd`` 只做一件事：``python.exe -I -m narrative.launcher %*``。
 
-
-@pytest.fixture
-def launcher(tmp_path):
-    root = tmp_path / "project"
-    scripts = root / "scripts"
-    scripts.mkdir(parents=True)
-    repo = Path(__file__).resolve().parents[1]
-    shutil.copy2(repo / "start-desktop.ps1", root / "start-desktop.ps1")
-    venv = root / ".venv"
-    (venv / "Scripts").mkdir(parents=True)
-    launchers = Path(sys.base_prefix) / "Lib/venv/scripts/nt"
-    shutil.copy2(launchers / "venvlauncher.exe", venv / "Scripts/python.exe")
-    shutil.copy2(launchers / "venvwlauncher.exe", venv / "Scripts/pythonw.exe")
-    (venv / "pyvenv.cfg").write_text(
-        f"home = {sys.base_prefix}\nversion_info = {sys.version_info.major}.{sys.version_info.minor}\n",
-        encoding="utf-8",
-    )
-    (scripts / "check_runtime.py").write_text(
-        "from pathlib import Path\n"
-        "root = Path(__file__).resolve().parents[1]\n"
-        "(root / 'checked.txt').write_text((root / '.venv/pyvenv.cfg').read_text())\n"
-        "raise SystemExit(17)\n",
-        encoding="utf-8",
-    )
-
-    def run(*args):
-        return subprocess.run(
-            ["pwsh", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(root / "start-desktop.ps1"), *args],
-            cwd=root, text=True, capture_output=True, timeout=30,
-        )
-
-    return root, run
-
-
-def test_first_launch_prepares_runtime_then_checks_isolation(launcher):
-    root, run = launcher
-    (root / "scripts/localize_python.py").write_text(
-        "from pathlib import Path\n"
-        "import shutil, sys\n"
-        "root = Path(__file__).resolve().parents[1]\n"
-        "runtime = root / '.runtime/python'\n"
-        "runtime.mkdir(parents=True)\n"
-        "source = Path(sys.base_prefix)\n"
-        "[shutil.copy2(p, runtime / p.name) for p in source.glob('*.dll')]\n"
-        "shutil.copy2(source / 'python.exe', runtime / 'python.exe')\n"
-        "shutil.copytree(source / 'DLLs', runtime / 'DLLs')\n"
-        "shutil.copytree(source / 'Lib', runtime / 'Lib', ignore=shutil.ignore_patterns('site-packages', '__pycache__', 'test'))\n"
-        "(root / 'prepared.txt').touch()\n",
-        encoding="utf-8",
-    )
-    result = run()
-    assert result.returncode != 0  # The isolation probe deliberately fails.
-    assert (root / "prepared.txt").exists()
-    assert "Preparing the project-local Python runtime" in result.stdout
-    assert (root / "checked.txt").exists(), result.stderr
-    assert f"home = {root / '.runtime/python'}" in (root / "checked.txt").read_text()
-    assert "Project startup checks failed" in result.stderr
-
-
-def test_existing_runtime_is_reused_and_moved_venv_repointed(launcher):
-    root, run = launcher
-    runtime = root / ".runtime/python"
-    copy_runtime(Path(sys.base_prefix), runtime)
-    (root / "scripts/localize_python.py").write_text("raise SystemExit(99)\n", encoding="utf-8")
-    result = run()
-    assert result.returncode != 0
-    assert "Preparing the project-local Python runtime" not in result.stdout
-    assert (root / "checked.txt").exists(), result.stderr
-    assert f"home = {runtime}" in (root / "checked.txt").read_text()
-
-
-def test_partial_runtime_is_not_overwritten(launcher):
-    root, run = launcher
-    runtime = root / ".runtime/python"
-    runtime.mkdir(parents=True)
-    (runtime / "keep.txt").write_text("keep", encoding="utf-8")
-    (root / "scripts/localize_python.py").write_text("raise SystemExit(99)\n", encoding="utf-8")
-    result = run()
-    assert result.returncode != 0
-    assert "Project runtime is incomplete" in result.stderr
-    assert (runtime / "keep.txt").read_text() == "keep"
-    assert not (root / "checked.txt").exists()
-
-
-def test_preparation_failure_stops_startup(launcher):
-    root, run = launcher
-    (root / "scripts/localize_python.py").write_text("raise SystemExit(23)\n", encoding="utf-8")
-    result = run()
-    assert result.returncode != 0
-    assert "Project runtime preparation failed" in result.stderr
-    assert not (root / "checked.txt").exists()
-
-
-def test_prepare_only_checks_without_starting_ui(launcher):
-    root, run = launcher
-    copy_runtime(Path(sys.base_prefix), root / ".runtime/python")
-    (root / "scripts/check_runtime.py").write_text("print('checks passed')\n", encoding="utf-8")
-    result = run("-PrepareOnly")
-    assert result.returncode == 0, result.stderr
-    assert "Project environment is ready" in result.stdout
-    assert "Native desktop started" not in result.stdout
-
-
-def test_mismatched_runtime_version_is_not_repaired(launcher):
-    root, run = launcher
-    copy_runtime(Path(sys.base_prefix), root / ".runtime/python")
-    cfg = root / ".venv/pyvenv.cfg"
-    cfg.write_text(cfg.read_text(encoding="utf-8").replace(
-        f"version_info = {sys.version_info.major}.{sys.version_info.minor}",
-        "version_info = 1.0",
-    ), encoding="utf-8")
-    launcher_before = (root / ".venv/Scripts/python.exe").read_bytes()
-    result = run("-PrepareOnly")
-    assert result.returncode != 0
-    assert "versions do not match" in result.stderr
-    assert (root / ".venv/Scripts/python.exe").read_bytes() == launcher_before
-
-
-def test_setup_runs_locked_sync_before_preparation(tmp_path):
-    repo = Path(__file__).resolve().parents[1]
-    shutil.copy2(repo / "setup-environment.ps1", tmp_path / "setup-environment.ps1")
-    (tmp_path / "start-desktop.ps1").write_text(
-        "param([switch]$PrepareOnly)\nif (-not $PrepareOnly) { throw 'Expected PrepareOnly' }\n"
-        "Set-Content -LiteralPath prepared.txt -Value ready\n", encoding="utf-8"
-    )
-    (tmp_path / "uv.cmd").write_text("@echo %* > sync-arguments.txt\n@exit /b 0\n", encoding="utf-8")
-    env = os.environ.copy()
-    env["PATH"] = str(tmp_path) + os.pathsep + env.get("PATH", "")
+    所以这条命令行必须自己就能跑：``-I`` 下不吃外部 PYTHONPATH／用户 site，靠 editable
+    安装在工程内的包解析模块。跑 ``-Help`` 是为了不碰环境、不起界面。
+    """
     result = subprocess.run(
-        ["pwsh", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(tmp_path / "setup-environment.ps1")],
-        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
+        [str(ROOT / ".venv" / "Scripts" / "python.exe"), "-I", "-m", "narrative.launcher", "-Help"],
+        cwd=ROOT, capture_output=True, text=True, timeout=120,
     )
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "sync-arguments.txt").read_text().strip() == "sync --locked --all-packages --all-extras --all-groups"
-    assert (tmp_path / "prepared.txt").exists()
+    assert "Usage: start-desktop.cmd" in result.stdout
+
+
+def test_prepare_only_reports_the_environment_without_a_shell(tmp_path):
+    """``-PrepareOnly`` 的契约：退出码 0、说「ready」、绝不起界面。
+
+    这里跑真实工程（``.runtime/python`` 已就位），因为「工程内的解释器真的自洽」只能
+    这么验；界面不会被拉起，命令本身也不写用户目录。
+    """
+    result = subprocess.run(
+        [str(ROOT / ".venv" / "Scripts" / "python.exe"), "-I", "-m", "narrative.launcher", "-PrepareOnly"],
+        cwd=ROOT, capture_output=True, text=True, timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Project environment is ready." in result.stdout
 
 
 def test_localization_shows_probe_import_error(tmp_path, monkeypatch, capsys):
@@ -181,7 +74,7 @@ def test_localization_shows_probe_import_error(tmp_path, monkeypatch, capsys):
         (root / ".venv/Scripts" / target).write_text(name, encoding="utf-8")
     for name in ("python.exe", "pythonw.exe"):
         (source / name).touch()
-    path = Path(__file__).resolve().parents[1] / "scripts/localize_python.py"
+    path = ROOT / "scripts/localize_python.py"
     spec = importlib.util.spec_from_file_location("localize_python_test", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
