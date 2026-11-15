@@ -29,5 +29,5 @@
 
 ## 另见
 
-- `docs/PROMPT_STYLE.md`、`docs/EXTRACTION_PROMPT_REWRITE.md`；`docs/MODEL.md`（规则编号只在这一侧改）
+- `docs/PROMPT_STYLE.md`、`docs/EXTRACTION_PROMPT_REWRITE.md`；`docs/extraction/SPEC.md`（规则编号只在这一侧改）
 - `src/narrative/prompt_defaults.py`、`src/narrative/prompt_settings.py`、`src/narrative/conversation_session.py`（`bind_prompt_snapshot` 调用点）

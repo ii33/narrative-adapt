@@ -5,21 +5,21 @@ database, writes nothing — safe in the default parallel suite.
 
 Every finding is a ``Problem`` carrying ``路径:行号``（相对仓库根）, so editors and agent
 tooling can jump straight to the line, e.g.
-``docs/INVARIANTS.md:42 引用 src/a.py::gone 已失效：文件里找不到该函数或类``。
+``docs/extraction/SPEC.md:42 引用 src/a.py::gone 已失效：文件里找不到该函数或类``。
 
 What is checked:
 
 * retired phrasings — wording that the current 五层 semantics replaced must not come
   back into the docs or the prompt defaults;
-* ID closure — ``I-xx`` in ``INVARIANTS.md`` must point at a real ``M-xx``; every
+* ID closure — ``I-xx`` in ``extraction/SPEC.md`` must point at a real ``M-xx``; every
   diagnostic code quoted in a doc must still exist in ``src/``; every glossary term
-  must appear in ``MODEL.md`` or name a schema field that exists;
+  must appear in ``MODEL.md``/``SPEC.md`` or name a schema field that exists;
 * link liveness — relative links between ``docs/*.md`` (and into ``docs/`` from
   ``AGENTS.md``/``README.md``) must resolve;
 * literal doc paths — ``docs/....md`` written into ``src/``/``tests/``/``scripts/``
   must exist, so moving a document cannot silently break code that reads it;
 * no line numbers — docs reference code as ``文件.py::符号``, never ``文件.py:行号``;
-* symbol existence — every ``文件.py::符号`` in ``INVARIANTS.md`` must be a real
+* symbol existence — every ``文件.py::符号`` in ``extraction/SPEC.md`` must be a real
   ``def``/``class`` in that file.
 
 文档绑「合同」（诊断码、工具名、提示词 key、符号名），不绑「位置」（行号、深层路径）。
@@ -47,7 +47,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 SOURCE = ROOT / "src"
-INVARIANTS = DOCS / "INVARIANTS.md"
+SPEC = DOCS / "extraction" / "SPEC.md"
 GLOSSARY = DOCS / "GLOSSARY.md"
 MODEL = DOCS / "MODEL.md"
 PROMPT_DEFAULTS = SOURCE / "narrative" / "prompt_defaults.py"
@@ -77,6 +77,11 @@ SYMBOL_REF = re.compile(r"([A-Za-z0-9_./\-]+\.py)::([A-Za-z_][A-Za-z0-9_]*)")
 ALLOWED_STALE_LITERALS: dict[str, str] = {
     # tests/test_prune_artifacts.py 在 tmp_path 下构造的合成目录，不是仓库里的真实路径。
     "docs/archive/old/note.md": "prune 用例的合成受保护目录（tmp_path 下），非仓库路径",
+    # tests/test_extraction_spec.py 断言这三份文档已并入 extraction/SPEC.md 后删除：路径本身
+    # 就是被检查对象，不是要读取的文件。
+    "docs/INVARIANTS.md": "提取规范搬运守卫：断言该文件已删除，不读取它",
+    "docs/data/PROPERTY_STATE_CONTRACT.md": "提取规范搬运守卫：断言该文件已删除，不读取它",
+    "docs/data/PROPERTY_CATEGORIES.md": "提取规范搬运守卫：断言该文件已删除，不读取它",
 }
 
 
@@ -198,8 +203,8 @@ def _docs(root: Path) -> Path:
     return root / "docs"
 
 
-def _invariants(root: Path) -> Path:
-    return _docs(root) / "INVARIANTS.md"
+def _spec(root: Path) -> Path:
+    return _docs(root) / "extraction" / "SPEC.md"
 
 
 def _glossary(root: Path) -> Path:
@@ -251,10 +256,15 @@ def _scene_policy_context(path: Path, lines: list[str], index: int) -> bool:
 # --- 各项检查 ---------------------------------------------------------------------
 
 
+def _doc_candidates_for_scan(root: Path) -> list[Path]:
+    """要扫旧口径的文档：docs/*.md 加搬进子目录的规范页（extraction/SPEC.md）。"""
+    return [*_doc_files(root), *([_spec(root)] if _spec(root).exists() else [])]
+
+
 def check_retired_phrasings(root: Path = ROOT) -> list[Problem]:
     """旧口径长句不得在文档或提示词默认值里复现。"""
     problems = []
-    for path in [*_prose_files(root), *_doc_files(root)]:
+    for path in [*_prose_files(root), *_doc_candidates_for_scan(root)]:
         lines = _read(path).splitlines()
         for index, line in enumerate(lines):
             for phrase, replacement in RETIRED.items():
@@ -272,7 +282,7 @@ def check_retired_phrasings(root: Path = ROOT) -> list[Problem]:
 
 def _invariant_rows(root: Path) -> list[tuple[int, list[str]]]:
     rows = []
-    for number, line in enumerate(_read(_invariants(root)).splitlines(), 1):
+    for number, line in enumerate(_read(_spec(root)).splitlines(), 1):
         if not line.startswith("| I-"):
             continue
         rows.append((number, [cell.strip() for cell in line.strip().strip("|").split("|")]))
@@ -282,10 +292,10 @@ def _invariant_rows(root: Path) -> list[tuple[int, list[str]]]:
 def check_invariant_table(root: Path = ROOT) -> list[Problem]:
     """每条不变量都要有唯一 ID 和五列（ID / 内容 / 校验点 / 诊断码 / 覆盖测试）。"""
     rows = _invariant_rows(root)
-    file = _rel(_invariants(root), root)
+    file = _rel(_spec(root), root)
     if not rows:
         return [Problem(check="invariant_table", file=file,
-                        message="INVARIANTS.md 里没有 I-xx 行",
+                        message="extraction/SPEC.md 里没有 I-xx 行",
                         fix="按 | ID | 不变量 | 校验点 | 诊断码 | 覆盖测试 | 建表")]
     problems = []
     seen: dict[str, int] = {}
@@ -303,26 +313,42 @@ def check_invariant_table(root: Path = ROOT) -> list[Problem]:
     return problems
 
 
+RULE_LINE = re.compile(r"^\s*-\s+`(M-\d{2})`")
+
+
 def _model_ids(root: Path) -> tuple[set[str], Path]:
-    """M-xx 的权威来源；MODEL.md 尚未落地时退到 GLOSSARY.md。"""
+    """M-xx 的权威来源：extraction/SPEC.md 第 4 节的规则条目。
+
+    I-xx → M-xx 的闭包也只在 SPEC 内成立：规则搬家后，不变量表引用的编号必须仍能在
+    同一页的 §4 里找到定义，不能靠别的文档兜底。
+    """
+    spec = _spec(root)
+    if spec.exists():
+        defined = set()
+        for line in _read(spec).splitlines():
+            match = RULE_LINE.match(line)
+            if match:
+                defined.add(match.group(1))
+        if defined:
+            return defined, spec
     authority = _model(root) if _model(root).exists() else _glossary(root)
     return set(MODEL_ID.findall(_read(authority))), authority
 
 
 def check_invariant_model_refs(root: Path = ROOT) -> list[Problem]:
-    """INVARIANTS.md 引用的 M-xx 必须在 MODEL.md 里存在。"""
+    """extraction/SPEC.md 引用的 M-xx 必须在同一页 §4 的规则条目里定义。"""
     identifiers, authority = _model_ids(root)
-    file = _rel(_invariants(root), root)
+    file = _rel(_spec(root), root)
     if not identifiers:
         return [Problem(check="invariant_model_refs", file=_rel(authority, root),
                         message="权威文档里没有任何 M-xx 编号",
-                        fix="在 MODEL.md 第 2 节补上带 M-xx 编号的规则")]
+                        fix="在 extraction/SPEC.md 第 4 节补上带 M-xx 编号的规则")]
     problems = []
-    for number, line in enumerate(_read(_invariants(root)).splitlines(), 1):
+    for number, line in enumerate(_read(_spec(root)).splitlines(), 1):
         for code in sorted(set(MODEL_ID.findall(line)) - identifiers):
             problems.append(Problem(check="invariant_model_refs", file=file, line=number,
                                     message=f"引用了 {_rel(authority, root)} 里不存在的编号 {code}",
-                                    fix="改成 MODEL.md 里现有的 M-xx"))
+                                    fix="改成 extraction/SPEC.md 第 4 节里现有的 M-xx"))
     return problems
 
 
@@ -335,7 +361,7 @@ def check_glossary_model_refs(root: Path = ROOT) -> list[Problem]:
             problems.append(Problem(check="glossary_model_refs", file=_rel(_glossary(root), root),
                                     line=number,
                                     message=f"引用了 {_rel(authority, root)} 里不存在的编号 {code}",
-                                    fix="改成 MODEL.md 里现有的 M-xx"))
+                                    fix="改成 extraction/SPEC.md 第 4 节里现有的 M-xx"))
     return problems
 
 
@@ -367,8 +393,9 @@ def _term_variants(term: str) -> list[str]:
 
 
 def check_glossary_terms(root: Path = ROOT) -> list[Problem]:
-    """术语词条必须落到 MODEL.md，或落到它自己标注的 schema 字段（且字段在 src/ 里存在）。"""
-    model_text = _read(_model(root)) if _model(root).exists() else ""
+    """术语词条必须落到 MODEL.md／SPEC.md，或落到它自己标注的 schema 字段（且字段在 src/ 里存在）。"""
+    texts = [path for path in (_model(root), _spec(root)) if path.exists()]
+    model_text = "\n".join(_read(path) for path in texts)
     source = _source_text(root)
     problems = []
     for number, term, line in _glossary_rows(root):
@@ -381,8 +408,8 @@ def check_glossary_terms(root: Path = ROOT) -> list[Problem]:
         if any(re.search(rf"\b{re.escape(field)}\b", source) for field in fields):
             continue
         problems.append(Problem(check="glossary_terms", file=_rel(_glossary(root), root), line=number,
-                                message=f"词条「{term}」既不在 MODEL.md 出现，也没标注可核对的 schema 字段",
-                                fix="在 MODEL.md 定义该概念，或在该行写出对应的代码字段名"))
+                                message=f"词条「{term}」既不在 MODEL.md／SPEC.md 出现，也没标注可核对的 schema 字段",
+                                fix="在 MODEL.md 定义该概念，或在 SPEC.md 写出它所在的规则，或在该行写出对应的代码字段名"))
     return problems
 
 
@@ -400,7 +427,7 @@ def check_diagnostic_codes(root: Path = ROOT) -> list[Problem]:
     source = _source_text(root)
     problems = []
     total = 0
-    for path in (path for path in (_invariants(root), _model(root)) if path.exists()):
+    for path in (path for path in (_spec(root), _model(root)) if path.exists()):
         for number, code in _quoted_codes(path):
             total += 1
             if re.search(rf"\b{code}\b", source):
@@ -409,9 +436,9 @@ def check_diagnostic_codes(root: Path = ROOT) -> list[Problem]:
                                     message=f"诊断码 {code} 在 src/ 里搜不到",
                                     fix="改成代码里实际抛出的码，或从文档删除"))
     if total < 15:
-        problems.append(Problem(check="diagnostic_codes", file=_rel(_invariants(root), root),
+        problems.append(Problem(check="diagnostic_codes", file=_rel(_spec(root), root),
                                 message=f"只提取到 {total} 个诊断码，表格格式或正则可能被改坏了",
-                                fix="检查 INVARIANTS.md 的诊断码列是否用反引号包住"))
+                                fix="检查 extraction/SPEC.md 的诊断码列是否用反引号包住"))
     return problems
 
 
@@ -432,7 +459,7 @@ def _relative_doc_links(path: Path, docs: Path) -> list[tuple[int, str, Path]]:
 def check_doc_links(root: Path = ROOT) -> list[Problem]:
     """docs/ 内部的相对链接必须指向真实文件。"""
     docs = _docs(root)
-    candidates = [*_doc_files(root),
+    candidates = [*_doc_candidates_for_scan(root),
                   *(path for path in (root / "AGENTS.md", root / "README.md") if path.exists())]
     problems = []
     for path in candidates:
@@ -519,10 +546,10 @@ def _symbol_refs(path: Path) -> list[tuple[int, str, str]]:
 
 
 def check_symbol_refs(root: Path = ROOT) -> list[Problem]:
-    """INVARIANTS.md 里的 `文件.py::符号` 必须文件存在且符号真实定义。"""
-    file = _rel(_invariants(root), root)
+    """extraction/SPEC.md 里的 `文件.py::符号` 必须文件存在且符号真实定义。"""
+    file = _rel(_spec(root), root)
     problems = []
-    for number, relative, symbol in _symbol_refs(_invariants(root)):
+    for number, relative, symbol in _symbol_refs(_spec(root)):
         target = root / relative
         if not target.is_file():
             problems.append(Problem(check="symbol_refs", file=file, line=number,
@@ -532,7 +559,7 @@ def check_symbol_refs(root: Path = ROOT) -> list[Problem]:
         if not re.search(rf"^\s*(def|class)\s+{re.escape(symbol)}\b", _read(target), re.M):
             problems.append(Problem(check="symbol_refs", file=file, line=number,
                                     message=f"引用 {relative}::{symbol} 已失效：文件里找不到该函数或类",
-                                    fix=f"若函数已改名，请同步 INVARIANTS；{relative} 里的 def/class 才是现行符号"))
+                                    fix=f"若函数已改名，请同步 extraction/SPEC.md；{relative} 里的 def/class 才是现行符号"))
     return problems
 
 
@@ -576,7 +603,7 @@ def test_invariant_table_is_well_formed():
 
 
 def test_invariant_model_refs_exist():
-    """INVARIANTS.md 引用的 M-xx 必须在 MODEL.md 里存在。"""
+    """extraction/SPEC.md 引用的 M-xx 必须在本页第 4 节的规则条目里存在。"""
     assert not _report(check_invariant_model_refs())
 
 
@@ -586,7 +613,7 @@ def test_glossary_refs_exist():
 
 
 def test_glossary_terms_appear_in_model():
-    """术语表的词条必须能落到 MODEL.md，或落到它自己标注的 schema 字段。"""
+    """术语表的词条必须能落到 MODEL.md／SPEC.md，或落到它自己标注的 schema 字段。"""
     assert not _report(check_glossary_terms())
 
 
@@ -612,7 +639,7 @@ def test_docs_avoid_line_number_references():
 
 
 def test_invariant_symbol_refs_exist():
-    """INVARIANTS.md 里的 `文件.py::符号` 必须文件存在且符号真实定义。"""
+    """extraction/SPEC.md 里的 `文件.py::符号` 必须文件存在且符号真实定义。"""
     assert not _report(check_symbol_refs())
 
 
@@ -679,11 +706,11 @@ def test_literal_doc_scanner_respects_whitelist(tmp_path):
 
 def test_symbol_guard_flags_injected_reference(tmp_path):
     """注入「符号已改名」与「文件不存在」两种失效引用，都必须被捕获。"""
-    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "extraction").mkdir(parents=True)
     (tmp_path / "src" / "narrative").mkdir(parents=True)
     (tmp_path / "src" / "narrative" / "guard.py").write_text(
         "def keep_me():\n    pass\n\n\nclass Still_Here:\n    pass\n", encoding="utf-8")
-    (tmp_path / "docs" / "INVARIANTS.md").write_text(
+    (tmp_path / "docs" / "extraction" / "SPEC.md").write_text(
         "| I-01 | a | `src/narrative/guard.py::keep_me` | `CODE` | t |\n"
         "| I-02 | b | `src/narrative/guard.py::Still_Here` | `CODE` | t |\n"
         "| I-03 | c | `src/narrative/guard.py::gone_away` | `CODE` | t |\n"
@@ -693,7 +720,7 @@ def test_symbol_guard_flags_injected_reference(tmp_path):
     problems = check_symbol_refs(tmp_path)
 
     assert [problem.location for problem in problems] == [
-        "docs/INVARIANTS.md:3", "docs/INVARIANTS.md:4"]
+        "docs/extraction/SPEC.md:3", "docs/extraction/SPEC.md:4"]
     assert "引用 src/narrative/guard.py::gone_away 已失效：文件里找不到该函数或类" == problems[0].message
     assert "引用 src/narrative/missing.py::keep_me 已失效：文件不存在" == problems[1].message
 
@@ -704,20 +731,20 @@ def test_symbol_guard_flags_injected_reference(tmp_path):
 def test_text_report_locates_every_problem(tmp_path):
     """文本报告以 路径:行号 开头、按文件分组，末尾给汇总行。"""
     problems = [
-        Problem(check="symbol_refs", file="docs/INVARIANTS.md", line=42,
+        Problem(check="symbol_refs", file="docs/extraction/SPEC.md", line=42,
                 message="引用 src/a.py::gone 已失效：文件里找不到该函数或类",
-                fix="若函数已改名，请同步 INVARIANTS"),
-        Problem(check="doc_links", file="docs/INVARIANTS.md", line=7,
+                fix="若函数已改名，请同步 extraction/SPEC.md"),
+        Problem(check="doc_links", file="docs/extraction/SPEC.md", line=7,
                 message="链接目标不存在：OLD.md", candidates=["docs/old/OLD.md"]),
         Problem(check="doc_links", file="README.md", line=3, message="链接目标不存在：docs/GONE.md"),
     ]
 
     text = render_text(problems, root=tmp_path)
 
-    assert "docs/INVARIANTS.md:42 引用 src/a.py::gone 已失效：文件里找不到该函数或类" in text
-    assert "docs/INVARIANTS.md（2 个）" in text
+    assert "docs/extraction/SPEC.md:42 引用 src/a.py::gone 已失效：文件里找不到该函数或类" in text
+    assert "docs/extraction/SPEC.md（2 个）" in text
     assert "README.md（1 个）" in text
-    assert "建议：若函数已改名，请同步 INVARIANTS" in text
+    assert "建议：若函数已改名，请同步 extraction/SPEC.md" in text
     assert "候选：docs/old/OLD.md" in text
     assert text.rstrip().endswith(summary_line(problems))
     assert summary_line(problems) == "共 3 个问题（error 3 / warning 0），涉及 2 个文件"

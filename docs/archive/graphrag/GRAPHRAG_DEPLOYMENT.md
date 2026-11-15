@@ -41,7 +41,7 @@ icacls ".venv-graphrag" /setintegritylevel "(OI)(CI)Medium" /T
 或直接运行：
 
 ```powershell
-./scripts/fix_venv_integrity.ps1
+python scripts/check_runtime.py --fix-integrity-labels
 ```
 
 `setup_graphrag_env.ps1` 已包含对 `.venv-graphrag` 的处理；`.venv` 需要在同一工作区单独执行一次。修复后 `uv run python -V`、`uv run pytest`、`graphrag.exe` 均恢复正常。

@@ -29,5 +29,5 @@
 ## 另见
 
 - 草稿版本 `conversation-draft/19` → `/20`（本次收窄）
-- `docs/MODEL.md` 硬约定「参与者与持有者」；`docs/GLOSSARY.md` G-02、G-15
+- `docs/extraction/SPEC.md` 硬约定「参与者与持有者」；`docs/GLOSSARY.md` G-02、G-15
 - `src/narrative/extraction_draft.py`（`RESULT_SCHEMA`）、`src/narrative/extraction.py`（`parse_nodes`、`ALLOWED_PARTICIPANTS`、`_participant_domain_error`）、`src/narrative/extraction_refs.py`（`PARTICIPANT_TYPES`）、`src/narrative/graph_service.py`（存储层 `PARTICIPANTS` 诊断）、`tests/test_extraction_identity.py`

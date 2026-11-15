@@ -46,99 +46,26 @@ flowchart TB
   P3 --> WS
 ```
 
-## 2. 怎么判断
+判断规则与硬约定已迁至 `docs/extraction/SPEC.md`，本页只保留概念。
 
-每条一到两句，都可判定。前缀编号用于引用。
+## 2. 规则索引
 
-**结构与边界**
+按下表跳到 `docs/extraction/SPEC.md` 的对应小节；编号不变，引用方式仍是「编号 + 结论」。
 
-- `M-01` 事件的边界看能否独立概括成一个情节，以及拿掉它前后情节是否仍成立；段落、章节、句子数、动词数都不作判据。
-- `M-02` 场景的边界看现场是否还连续：空间仍接近、事件仍连贯。同一地点但隔了很久，或同一时刻换到远处，另起一场。
-- `M-03` 大事件的边界看阶段是否换了：同一语境下连续的一大段进展，按披露顺序首尾相接。
-- `M-04` 主要故事的边界就是部／卷本身：一部一条或拆成多条都可以，未完结也能创建，完成度由程序从下级证据派生。
-- `M-05` 动作只在明确要求时提取；它直属恰好一个同语境事件，是最小包含层级。
-- `M-06` 章节标题、原文切片和提交批次只作阅读索引与处理范围，边界仍按 `M-01`–`M-03` 判断。
-
-**状态与属性**
-
-- `M-07` 属性变更只写在事件处，操作取 `set`／`add`／`remove`／`clear`／`unknown`；前三者带值，后两者不带。
-- `M-08` `scope` 决定这是谁的事实：`world` 是客观世界，`cognition` 是人物所知所信，`claim` 是言说主张；后两者用 `holder` 标明持有者，不覆盖 `world` 的取值。
-- `M-09` 人物标量关系按对方对象分别维护；`many` 只表示一个数组集合。移除一个对方不清空其他关系。读取时列出当前有效的全部值。
-- `M-10` 状态的答案是折叠结果而不是最后一条记录：同一事件同 `sequence` 的相容变更合并，不相容报冲突，不按记录 ID 猜测。
-- `M-11` 读取某个事件点时得到的是截至该点的状态（读工具的 `cut`），不是全篇终态。
-
-**证据与纠错**
-
-- `M-12` 每条事实的引文必须逐字命中原文；定位与唯一性由程序校验，模型不手算坐标。
-- `M-13` 事件默认给一条能支持身份与核心发生的代表性引文；引文数量不决定事件边界，属性与关系各自取证。
-- `M-14` 复核只修有据错漏：没再提及不等于失效，冲突或一次攻击也不等于终止；确认终止时保留建立事实，在终止事件追加 `remove`／`clear`。
-- `M-15` 两个疑似重复的事件是否同一次发生，看原文证据是否一致，同名或位置相近不作依据；先 `preview_event_merge`，再 `merge_events`。
-- `M-16` 容器属性若与某个下属事件的属性同组（主体除外其余全同），以事件记录为准，容器写入被丢弃并回一条 `info`。
-
-## 3. 硬约定
-
-以下条目都有真实校验，违反时返回诊断码或跳过原因。
-
-**事件地点**：每个活动事件必须在自身事件处记录 `world` 地点，主体与 `at_event` 都指向该事件。
-
-| 诊断码 | 触发 |
+| 内容 | 去哪找 |
 | --- | --- |
-| `EVENT_LOCATION_REQUIRED` | 事件没有自己的 `world` 地点，或清空、移除后未重新记为无／未知 |
-| `EVENT_LOCATION_ANCHOR` | 地点变更锚在别的事件上 |
-| `EVENT_LOCATION_VALUE` | 值既不是同语境 `location` 节点，也不是显式的无／未知 |
-| `EVENT_LOCATION_CONFLICT` | 同一事件点出现不相容的地点状态 |
-
-**参与者与持有者**
-
-- 事件草稿必须带 `participants` 键：`allOf` 对 `type=event` 强制 `required`，缺键返回 `EXTRACTION_CONTENT`。确无参与者或原文未交代时给空数组。
-- 每个活动物品必须有 `world` 持有状态（节点引用、无、未知），缺失或清除不等于未知：`ITEM_HOLDER_REQUIRED`。
-
-**结构与进展属性**
-
-| 诊断码 | 触发 |
-| --- | --- |
-| `EVENT_SCENE` | 活动事件没有经包含路径属于同语境的活动场景 |
-| `ACTION_EVENT` | 动作不是恰好直属一个同语境事件（直接挂场景或大事件） |
-| `ACTION_LEAF` | 动作包含子项 |
-| `STORYLINE_CHILD_TYPE` | 层级跳级，例如主要故事直属事件 |
-| `STORYLINE_POSITION` | 容器没有可定位的直属成员，无法确定阅读起点 |
-| `STORYLINE_OVERLAP` | 成员跨出已完成主要故事的区间，或与下一区间重叠 |
-| `STORYLINE_COMPLETION` | 主要故事的完成边界缺失，或早于所属成员的起点 |
-
-`storyline_progress` 写在直属大事件上，`big_event_progress` 写在直属场景上；写到更上层时该条写入被跳过（结果里的 `skipped` 附原因），程序不迁移旧层级。
-
-**属性记录与状态推导**
-
-- `property_change` 必带 `node_id`、`property_id`、`event_id`、`op`、`sequence`；`sequence` 由程序按引文起点生成，模型自带 `sequence` 会按 `DRAFT_SCHEMA` 拒收。
-- 折叠失败码：`STATE_CONFLICT`（同事件同序号不相容）、`EVENT_ORDER`（变更缺少正式顺序）、`SEQUENCE`（序号非法）、`STATE_GROUP`（跨分组）、`VALUE`（关系值不是单一有效对方）。
-- 证据问题用 `EVIDENCE`，草稿形状用 `DRAFT_SCHEMA`。
-
-**暂存、入库与编号**
-
-- 返回 `staged` 表示草稿只被暂存、未写入正式事实；修补用 `patch_extraction_submission`，`expected_revision` 填 `submission_revision`。通过后返回 `accepted` 或 `unchanged`。
-- `info` 不是必须清零的错误：容器属性判重（`CONTAINER_PROPERTY_DEDUP`，附 `duplicate_of`）即 `info`。
-- 本批引用 `@n` 从 1 起，数组索引从 0 起。
-- 合并事件用 `source_event_id`（并入方）、`target_event_id`（保留方）、`expected_revision`、`evidence`、`reason`；合并后不保留重定向或旧修订对象。
-
-### 数据流
-
-```mermaid
-flowchart LR
-  SRC["原文<br/>source_id + Unicode 坐标"] --> EX["提取<br/>submit_extraction / patch_extraction_submission"]
-  EX --> G["图：节点 + 属性定义 + 属性变更"]
-  G --> RED["状态推导<br/>按事件顺序与 cut"]
-  RED --> RD["读取：节点、属性、关系图<br/>截至某事件点"]
-  G --> SP["剧本层场表<br/>submit_scene_table（plan.source_event_ids 可选）"]
-  SP --> BODY["正文<br/>submit_script_unit：scene_description / action 块"]
-  BODY --> OUT["compile_screenplay"]
-  RD -. 核对依据 .-> SP
-```
-
-场表与正文是可选的消费层：`source_event_ids` 不填不阻止写作；生成结束后程序区分 `used_event_ids`、`unused_event_ids`、`unknown_event_ids`，未绑定部分不冒充已使用。
+| 模型判断规则 `M-01`–`M-16`（结构与边界／状态与属性／证据与纠错） | [SPEC 第 4 节](extraction/SPEC.md#4-模型判断规则m-xx) |
+| 硬约定（事件地点、参与者与持有者、结构与进展属性、属性记录与状态推导、暂存入库与编号） | [SPEC 第 5 节](extraction/SPEC.md#5-程序强制i-xx与属性状态合同) |
+| 诊断码（`EVENT_LOCATION_*`、`EVENT_SCENE`、`STORYLINE_*`、`STATE_*` 等） | [SPEC 第 5 节「硬校验」表](extraction/SPEC.md#硬校验) |
+| 不变量 `I-01`–`I-33`（校验点、码、覆盖测试） | [SPEC 第 5 节](extraction/SPEC.md#5-程序强制i-xx与属性状态合同) |
+| 属性状态合同、属性分类（schema 11） | [SPEC 第 5 节](extraction/SPEC.md#属性状态合同schema-11) |
+| 提示词要求但程序不校验的约束 | [SPEC 第 5 节「仅提示词约束」](extraction/SPEC.md#仅提示词约束未程序强制靠验收与复核) |
+| 数据流 | [SPEC 第 5 节「数据流」](extraction/SPEC.md#数据流) |
+| 模型职责（`E-xx`）、诊断码总表、提示词索引 | [SPEC 第 3 节](extraction/SPEC.md#3-模型职责e-xx)、[第 6 节](extraction/SPEC.md#6-诊断码总表)、[第 7 节](extraction/SPEC.md#7-提示词索引) |
 
 ## 另见
 
-- 属性记录逐字段说明：[属性状态合同](data/PROPERTY_STATE_CONTRACT.md)
+- 属性记录逐字段说明：[属性状态合同](extraction/SPEC.md#属性状态合同schema-11)
 - 存储与包含关系：[数据模型](data/DATA_MODEL.md)
 - 工具参数与返回：[工程工具与统一对话](features/AGENT_API.md)
 - 提示词写法：[提示词写作风格](PROMPT_STYLE.md)

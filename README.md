@@ -6,11 +6,11 @@
 
 ## 启动
 
-Windows 首次安装前需先安装 `uv` 并确保它在 PATH 中；环境脚本不会自动安装 uv。启动脚本只走 **PowerShell 7（`pwsh`）**：`.cmd` 入口会先探测 `pwsh`，找不到就明确报错并退出（`winget install Microsoft.PowerShell`），不会静默回退到 Windows PowerShell 5.1。双击 `setup-environment.cmd` 完成准备，或在终端运行 `./setup-environment.ps1`。准备完成后双击 `start-desktop.cmd`，或执行：
+Windows 首次安装前需先安装 `uv` 并确保它在 PATH 中；环境脚本不会自动安装 uv。双击 `setup-environment.cmd` 完成准备（纯批处理，不需要 PowerShell）；准备完成后双击 `start-desktop.cmd`。启动链是 `start-desktop.cmd` → `.venv\Scripts\python.exe -m narrative.launcher` → `pythonw`，启动逻辑与退出码见 `src/narrative/launcher.py`。也可在终端执行：
 
-```powershell
-./start-desktop.ps1
-./start-desktop.ps1 -Project D:/小说/作品.nproj
+```bat
+start-desktop.cmd
+start-desktop.cmd -Project D:/小说/作品.nproj
 ```
 
 环境配置脚本执行以下依赖同步，再准备和检查工程内 Python，不启动界面：

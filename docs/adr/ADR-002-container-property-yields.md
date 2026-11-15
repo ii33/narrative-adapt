@@ -28,5 +28,5 @@
 
 ## 另见
 
-- `docs/MODEL.md` `M-16`、`M-04`；`docs/GLOSSARY.md` G-07、G-11、G-12
+- `docs/extraction/SPEC.md` `M-16`、`M-04`；`docs/GLOSSARY.md` G-07、G-11、G-12
 - `src/narrative/property_core.py`（`container_property_duplicate`、`change_group`）、`src/narrative/extraction.py`、`src/narrative/container_evidence.py`

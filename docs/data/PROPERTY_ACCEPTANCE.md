@@ -7,7 +7,7 @@ This file records the expected synthetic example and the local verification
 below.
 
 All cases use fresh isolated projects and the contract in
-`PROPERTY_STATE_CONTRACT.md`. `holder` is an item property with a single node
+`docs/extraction/SPEC.md` section 5. `holder` is an item property with a single node
 reference; `held_items(person)` must be an inverse query, never a stored second
 truth. A and B are independent branches between E0 and E9.
 

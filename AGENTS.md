@@ -36,10 +36,10 @@
 
 ## 环境准备与完整性（硬规则）
 
-- **禁止在低完整性会话（沙箱、受限终端、代理 shell）里运行环境准备类脚本**（`uv sync`、`setup-environment.cmd`／`setup-environment.ps1`、`scripts/localize_python.py`）。它们创建的解释器文件会被打上 **Low 完整性标签**，而 Windows 对带 Low 标签的 exe **一律以 Low 启动**——父进程是不是 Medium 都救不回来。之后应用写不了 `%USERPROFILE%\.narrative`，SQLite 报 `attempt to write a readonly database`，最近工程与模型设置静默失败。这也**不是**「改仓库目录的标签」能解的：解释器树才是要修的那一层。
-- 已经在低完整性会话里跑过，必须复核并修复：`icacls .venv\Scripts\pythonw.exe | findstr /I Mandatory`（出现 `Low Mandatory Level` 就是它），然后**从中完整性（正常）终端**运行 `scripts\fix_venv_integrity.ps1`，或 `python scripts\check_runtime.py --fix-integrity-labels`。`start-desktop.ps1` 每次启动都会自动修一次，但**低完整性进程抬不高标签**，那次修复在受限会话里必然失败，只能到正常终端修。
+- **禁止在低完整性会话（沙箱、受限终端、代理 shell）里运行环境准备类脚本**（`uv sync`、`setup-environment.cmd`、`scripts/localize_python.py`）。它们创建的解释器文件会被打上 **Low 完整性标签**，而 Windows 对带 Low 标签的 exe **一律以 Low 启动**——父进程是不是 Medium 都救不回来。之后应用写不了 `%USERPROFILE%\.narrative`，SQLite 报 `attempt to write a readonly database`，最近工程与模型设置静默失败。这也**不是**「改仓库目录的标签」能解的：解释器树才是要修的那一层。
+- 已经在低完整性会话里跑过，必须复核并修复：`icacls .venv\Scripts\pythonw.exe | findstr /I Mandatory`（出现 `Low Mandatory Level` 就是它），然后**从中完整性（正常）终端**运行 `python scripts\check_runtime.py --fix-integrity-labels`。`start-desktop.cmd`（逻辑在 `src/narrative/launcher.py`）每次启动都会自动修一次，但**低完整性进程抬不高标签**，那次修复在受限会话里必然失败，只能到正常终端修。
 - `scripts/check_runtime.py` 每次运行都会打印解释器标签状态（`integrity_label … level=Medium|Low|absent`）：看到 `Low` 就按上一条处理。
-- 启动链与所有 `.ps1`／`.cmd` 一律 **PowerShell 7（`pwsh`）**：`start-desktop.cmd` → `pwsh` → `start-desktop.ps1` → `pythonw`。Windows PowerShell 5.1 已停用，不要在 `.cmd`／脚本／文档里写回 `powershell.exe`（`.cmd` 先探测 `pwsh`，缺失就报错退出，不静默回退），`.ps1` 用 `#requires -Version 7.0`。
+- 启动链不用 PowerShell：`start-desktop.cmd`（纯批处理，只找 `.venv\Scripts\python.exe`）→ `python -m narrative.launcher` → `pythonw -m narrative.native_app`。不许在 `.cmd` 里出现任何 PowerShell 字样、不许写中文、必须纯 ASCII + CRLF（`tests/test_launcher_scripts.py` 会拦）。
 
 ## 运行产物与历史代码边界
 

@@ -1,7 +1,7 @@
 # 开发者手册
 
 面向：要在这个仓库里加功能、改合同、排错的人。
-概念与判断规则的唯一来源是[叙事模型](MODEL.md)（`M-01`…`M-16`）与[术语表](GLOSSARY.md)（`G-01`…`G-21`）；程序真正会拒绝的约束及其校验点见[数据不变量清单](INVARIANTS.md)（`I-01`…`I-33`）。本文只讲「代码怎么落地」。
+概念以[叙事模型](MODEL.md)为唯一来源，判断规则（`M-01`…`M-16`）与程序真正会拒绝的约束及其校验点（`I-01`…`I-33`）见[提取任务规范](extraction/SPEC.md)；术语见[术语表](GLOSSARY.md)（`G-01`…`G-21`）。本文只讲「代码怎么落地」。
 
 配套阅读：`AGENTS.md`（协作与验收约定）、[提示词写作风格](PROMPT_STYLE.md)、[测试约定](TESTING.md)、[数据模型](data/DATA_MODEL.md)、[文档索引](README.md)。
 
@@ -31,8 +31,8 @@
 
 ## 2. 环境与启动
 
-- 解释器在仓库内的 `.venv`：命令用 `.venv\Scripts\python.exe`，GUI 用 `pythonw.exe`。venv 不完整时先 `uv sync --locked --all-extras`（`start-desktop.ps1` 的报错原文），或跑 `setup-environment.cmd`。
-- 启动桌面：`pwsh -File start-desktop.ps1 -Project <工程.nproj>`；加 `-PrepareOnly` 只做启动自检不打开窗口（实测输出 `Project environment is ready.`），`-QaExitAfterSeconds N` 定时退出，`-RenderLog <相对路径>` 记录实际渲染后端。
+- 解释器在仓库内的 `.venv`：命令用 `.venv\Scripts\python.exe`，GUI 用 `pythonw.exe`。venv 不完整时先 `uv sync --locked --all-extras`（`start-desktop.cmd` → `src/narrative/launcher.py` 的报错原文），或跑 `setup-environment.cmd`。
+- 启动桌面：`start-desktop.cmd -Project <工程.nproj>`；加 `-PrepareOnly` 只做启动自检不打开窗口（实测输出 `Project environment is ready.`），`-QaExitAfterSeconds N` 定时退出，`-RenderLog <相对路径>` 记录实际渲染后端。启动逻辑与退出码在 `src/narrative/launcher.py::main`。
 - 默认套件不需要任何 GUI 变量：`pytest` 已按 `addopts` 排除 `ui`／`native`／`integration` 并开 `-n auto`。
 - UI 用例一律离屏跑：`QT_QPA_PLATFORM=offscreen`、`QT_QUICK_BACKEND=software`；再用 `NARRATIVE_PROVIDER_DB` 指向临时库隔离 provider 配置（已实测：`pytest tests/test_lazy_pages_ui.py -m ui -n 0` → 4 passed）。
 - 工程与临时产物都落在调用方给的路径（`tmp_path`、`artifacts/logs/`），不要写用户目录（`AGENTS.md`「运行产物与历史代码边界」）。
@@ -73,7 +73,7 @@ flowchart LR
 
 1. 判断它属于哪一层：值类型与字段形状 → `property_core.validate_records`；事件地点 → `event_location.event_location_issues`；图结构 → `graph_service.GraphService.normalize`／`precheck`。
 2. 在那一层用该模块自带的 issue 构造函数追加（`_issue(CODE, 消息, object_id, severity=...)`），消息要能被模型直接改成操作，不写「请检查」。
-3. 记下新码 `CODE`，并在[数据不变量清单](INVARIANTS.md)补一行（码／校验点／覆盖测试）：这份表是防漂移测试 `tests/test_doc_consistency.py` 的锚点，文档引用但 `src/` 搜不到的码会让它变红。
+3. 记下新码 `CODE`，并在[提取任务规范](extraction/SPEC.md)第 5 节「硬校验」补一行（码／校验点／覆盖测试）：这份表是防漂移测试 `tests/test_doc_consistency.py` 的锚点，文档引用但 `src/` 搜不到的码会让它变红。
 4. 写测试：优先纯函数直接构造 `records`／`snapshot` 断言 `code` 与 `object_id`；需要持久化时复制会话模板 `project_template`。
 5. `ruff check src tests` + 针对性后台 `pytest -n 0`。
 
@@ -90,7 +90,7 @@ flowchart LR
 1. 选层：草稿期在 `extraction_draft`（`DRAFT_SCHEMA`／`EXTRACTION_CONTENT`／`EXTRACTION_INFO`）；入库期在 `property_core`／`graph_service`／`event_location`／`containment_refs`。
 2. 决定级别：`error` 阻止入库，`warning`／`info` 只提示。给「程序替用户做的决定」用 `info`（实例见 `I-09` 的 `CONTAINER_PROPERTY_DEDUP`），不要用 `error`。
 3. 带上可修的位置：`path`（如 `['properties', i]` 这类草稿槽位）、`object_id`、必要时 `related_paths`；`extraction_staging._problems` 会把它们归一成 `targets` 与 `location`。
-4. 测试断言 `code` + `path`，并确认非 error 的码不会让 `valid` 变假；新码同步写进[数据不变量清单](INVARIANTS.md)。
+4. 测试断言 `code` + `path`，并确认非 error 的码不会让 `valid` 变假；新码同步写进[提取任务规范](extraction/SPEC.md)第 5 节「硬校验」。
 
 ### 4.4 加一个 UI 页面
 

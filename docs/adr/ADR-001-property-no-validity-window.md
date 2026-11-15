@@ -29,5 +29,5 @@
 
 ## 另见
 
-- `docs/MODEL.md` `M-07`、`M-10`、`M-11`；`docs/GLOSSARY.md` G-09、G-10、G-16
-- `docs/data/PROPERTY_STATE_CONTRACT.md`；`src/narrative/property_core.py`、`src/narrative/property_store.py`
+- `docs/extraction/SPEC.md` `M-07`、`M-10`、`M-11`；`docs/GLOSSARY.md` G-09、G-10、G-16
+- `docs/extraction/SPEC.md`（属性状态合同）；`src/narrative/property_core.py`、`src/narrative/property_store.py`
