@@ -10,8 +10,8 @@ pytestmark = pytest.mark.slow
 def seed(ops):
     source = ops.import_source("视觉元素", "甲在门口停下。")
     saved = ops.submit_extraction(source, {"nodes": [
-        {"type": "person", "name": "甲", "quotes": ["甲在门口停下。"]},
-        {"type": "location", "name": "门口", "quotes": ["门口"]},
+        {"type": "person", "name": "甲"},
+        {"type": "location", "name": "门口"},
         {"type": "scene", "name": "门口停步"},
         {"type": "event", "name": "停步", "scene": "@3", "location": "@2", "participants": ["@1"], "quotes": ["甲在门口停下。"]},
     ], "properties": []})

@@ -5,10 +5,12 @@ import pytest
 from agent_fixtures import TEXT, draft_result
 from agent_fixtures import project as project
 
+BAD_INDEX = 4  # draft_result 里的第一个事件：只有事件能带 quotes（U-09）
+
 
 def bad_draft():
     draft = draft_result(ended=False)
-    draft['nodes'][0]['quotes'] = ['不在原文中的句子']
+    draft['nodes'][BAD_INDEX]['quotes'] = ['不在原文中的句子']
     return draft
 
 
@@ -23,11 +25,11 @@ def test_invalid_submit_persists_only_draft_patch_auto_commits_and_reopen_reads(
     identifier = result['submission_id']
     summary = project.read_extraction_submission(identifier)
     assert 'entries' not in summary
-    partial = project.read_extraction_submission(identifier, section='nodes', indices=[0])
-    assert partial['entries'][0]['reference'] == '@1'
+    partial = project.read_extraction_submission(identifier, section='nodes', indices=[BAD_INDEX])
+    assert partial['entries'][0]['reference'] == '@5'
     assert partial['entries'][0]['item']['quotes'] == ['不在原文中的句子']
     fixed = project.patch_extraction_submission(identifier, 1,
-        [{'op': 'set', 'section': 'nodes', 'index': 0, 'field': 'quotes', 'value': ['甲约好接乙。']}], '更正证据')
+        [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['甲约好接乙。']}], '更正证据')
     assert fixed['status'] == 'accepted' and fixed['submission_status'] == 'committed'
     assert fixed['submission_revision'] == 2 and not fixed['problems']
     assert fixed['committed_changes'] and len(project.graph_snapshot()['nodes']) == 6
@@ -39,7 +41,7 @@ def test_invalid_submit_persists_only_draft_patch_auto_commits_and_reopen_reads(
     with project.project.store.connect() as db:
         summaries = [json.loads(r[0]) for r in db.execute("SELECT summary FROM actions WHERE action='extraction_staging' ORDER BY rowid")]
     assert [r['submission_revision'] for r in summaries] == [1, 2]
-    assert summaries[-1]['changed_fields'] == [{'op': 'set', 'section': 'nodes', 'index': 0, 'field': 'quotes'}]
+    assert summaries[-1]['changed_fields'] == [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes'}]
     assert all('result' not in r for r in summaries)
 
 
@@ -48,7 +50,7 @@ def test_patch_stale_revision_and_illegal_splice_are_atomic(project):
     initial = project.submit_extraction(sid, bad_draft())
     identifier = initial['submission_id']
     changed = project.patch_extraction_submission(identifier, 1,
-        [{'op': 'set', 'section': 'nodes', 'index': 0, 'field': 'quotes', 'value': ['依旧不存在']}], '仍待修')
+        [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['依旧不存在']}], '仍待修')
     assert changed['status'] == 'staged' and changed['submission_revision'] == 2
     before = project.read_extraction_submission(identifier, section='nodes')
     with pytest.raises(ValueError, match='revision'):
@@ -66,7 +68,7 @@ def test_formal_changes_between_read_and_patch_are_revalidated(project):
     accepted = project.submit_extraction(sid, draft_result(ended=False))
     assert accepted['status'] == 'accepted'
     fixed = project.patch_extraction_submission(staged['submission_id'], 1,
-        [{'op': 'set', 'section': 'nodes', 'index': 0, 'field': 'quotes', 'value': ['甲约好接乙。']}], '在新正式资料重检')
+        [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['甲约好接乙。']}], '在新正式资料重检')
     assert fixed['status'] == 'unchanged' and fixed['submission_status'] == 'committed'
     assert len(project.graph_snapshot()['nodes']) == 6
 
@@ -84,7 +86,7 @@ def test_callback_failure_rolls_back_facts_and_submission_together(project, monk
     monkeypatch.setattr(extraction_staging, '_save', fail)
     with pytest.raises(RuntimeError, match='注入'):
         project.patch_extraction_submission(staged['submission_id'], 1,
-            [{'op': 'set', 'section': 'nodes', 'index': 0, 'field': 'quotes', 'value': ['甲约好接乙。']}], '回滚测试')
+            [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['甲约好接乙。']}], '回滚测试')
     assert (project.graph_snapshot(), project.property_records()) == before
     assert project.read_extraction_submission(staged['submission_id'])['submission_revision'] == 1
 
@@ -117,7 +119,7 @@ def test_append_preserves_prior_at_reference_indices(project):
     draft['properties'][0]['holder'] = '@7'
     staged = project.submit_extraction(sid, draft)
     fixed = project.patch_extraction_submission(staged['submission_id'], 1,
-        [{'op': 'append', 'section': 'nodes', 'value': {'type': 'person', 'name': '额外称谓', 'quotes': ['乙收起便笺。']}}], '补齐明确引用')
+        [{'op': 'append', 'section': 'nodes', 'value': {'type': 'person', 'name': '额外称谓'}}], '补齐明确引用')
     assert fixed['status'] == 'accepted'
     assert set(fixed['node_ids']) >= {'@1', '@7'}
 
@@ -131,7 +133,7 @@ def test_conflicting_formal_revision_retains_draft_without_committing(project, m
         return commit(prepared, reason, **kwargs)
     monkeypatch.setattr(project, 'commit_changes', concurrent)
     result = project.patch_extraction_submission(staged['submission_id'], 1,
-        [{'op': 'set', 'section': 'nodes', 'index': 0, 'field': 'quotes', 'value': ['甲约好接乙。']}], '并发重检')
+        [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['甲约好接乙。']}], '并发重检')
     assert result['status'] == 'staged' and result['submission_revision'] == 2
     assert result['problems'][0]['code'] == 'FORMAL_REVISION_CHANGED'
     assert not project.graph_snapshot()['nodes']
@@ -149,7 +151,7 @@ def test_unchanged_formal_revision_conflict_is_staged_not_error(project, monkeyp
         return result
     monkeypatch.setattr(extraction_draft, '_prepare', concurrent)
     result = project.patch_extraction_submission(staged['submission_id'], 1,
-        [{'op': 'set', 'section': 'nodes', 'index': 0, 'field': 'quotes', 'value': ['甲约好接乙。']}], '无变化并发')
+        [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['甲约好接乙。']}], '无变化并发')
     assert result['status'] == 'staged' and result['problems'][0]['code'] == 'FORMAL_REVISION_CHANGED'
     assert len(project.graph_snapshot()['nodes']) == 6
 
@@ -184,15 +186,15 @@ def test_concurrent_draft_patch_before_commit_rolls_back_canonical_delta(project
     def concurrent(prepared, reason, **kwargs):
         # Another editor successfully stores a different unresolved revision.
         competing = project.patch_extraction_submission(staged['submission_id'], 1,
-            [{'op': 'set', 'section': 'nodes', 'index': 0, 'field': 'quotes', 'value': ['另一个错误引文']}], '另编辑者')
+            [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['另一个错误引文']}], '另编辑者')
         assert competing['submission_revision'] == 2
         return commit(prepared, reason, **kwargs)
     monkeypatch.setattr(project, 'commit_changes', concurrent)
     with pytest.raises(ValueError, match='revision'):
         project.patch_extraction_submission(staged['submission_id'], 1,
-            [{'op': 'set', 'section': 'nodes', 'index': 0, 'field': 'quotes', 'value': ['甲约好接乙。']}], '落后修改')
+            [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['甲约好接乙。']}], '落后修改')
     assert not project.graph_snapshot()['nodes']
-    current = project.read_extraction_submission(staged['submission_id'], section='nodes', indices=[0])
+    current = project.read_extraction_submission(staged['submission_id'], section='nodes', indices=[BAD_INDEX])
     assert current['submission_revision'] == 2 and current['entries'][0]['item']['quotes'] == ['另一个错误引文']
 
 
@@ -201,9 +203,9 @@ def test_static_problem_targets_exact_original_property_row_not_same_name_other_
     draft = draft_result(ended=False)
     draft['properties'] = [
         {'node': '甲', 'property': '计数', "category": "未分类" , 'value_type': 'number', 'value': 7,
-         'op': 'set', 'at_event': '甲约好接乙', 'quotes': ['甲约好接乙。']},
+         'op': 'set', 'at_event': '甲约好接乙'},
         {'node': '乙', 'property': '计数', "category": "未分类" , 'value_type': 'number', 'value': '不是数值',
-         'op': 'set', 'at_event': '甲接到乙后离开', 'quotes': ['甲接到乙后离开。']},
+         'op': 'set', 'at_event': '甲接到乙后离开'},
     ]
     staged = project.submit_extraction(sid, draft)
     assert staged['status'] == 'staged'

@@ -14,9 +14,9 @@ QUOTES = ["甲敲门。", "甲开门。", "甲进屋。", "甲坐下。"]
 
 def seed(project):
     sid = project.import_source("剧本合成", TEXT)
-    nodes = [{"type": "person", "name": "甲", "quotes": [QUOTES[0]]},
-             {"type": "big_event", "name": "入屋", "quotes": [TEXT]},
-             {"type": "scene", "name": "门口与屋内", "big_event": "入屋", "quotes": [TEXT]}]
+    nodes = [{"type": "person", "name": "甲"},
+             {"type": "big_event", "name": "入屋"},
+             {"type": "scene", "name": "门口与屋内", "big_event": "入屋"}]
     nodes += [{"type": "event", "name": quote[:-1], "scene": "门口与屋内", "location": "未知",
                "participants": ["甲"], "quotes": [quote]} for quote in QUOTES]
     result = project.submit_extraction(sid, {"nodes": nodes, "properties": []})

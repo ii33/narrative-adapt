@@ -34,22 +34,29 @@ def test_same_value_in_distinct_scope_or_holder_is_not_dropped(project, scopes):
     assert (project.graph_snapshot(), project.property_records()) == before
 
 
-def test_same_anchor_and_value_at_different_disclosure_positions_are_preserved(project):
+def test_one_event_point_is_one_change_and_another_point_is_another(project):
+    """属性不填引文（`U-09`）：身份由 `at_event` 决定。
+
+    同一事件点的两行同一事实是同一件事（逐字对话里重复抄一遍不构成第二条），
+    换到另一个事件点才是另一条变更。
+    """
     sid = project.import_source("原文", TEXT)
     data = draft_result(ended=False)
     original = next(row for row in data["properties"] if row["property"] == "朋友")
-    data["properties"] = [original, original | {"quotes": ["甲接到乙后离开。"]}]
+    data["properties"] = [original, dict(original)]
     assert project.submit_extraction(sid, data)["status"] == "accepted"
+    assert len(friend_rows(project)) == 1
+    later = {"nodes": [], "properties": [dict(original, at_event="甲接到乙后离开")]}
+    assert project.submit_extraction(sid, later)["status"] == "accepted"
     records = friend_rows(project)
-    assert len(records) == 2
-    assert len({row["disclosure"]["start"] for row in records}) == 2
+    assert len(records) == 2 and len({row["event_id"] for row in records}) == 2
 
 
 def test_typed_json_value_is_preserved_without_model_stringification(project):
     sid = project.import_source("原文", TEXT)
     data = draft_result(ended=False)
     data["properties"] = [{"node": "甲", "property": "备注", "category": "未分类", "op": "set", "value_type": "any",
-                            "value": {"items": [1, False]}, "quotes": ["甲约好接乙。"], "at_event": "甲约好接乙"}]
+                            "value": {"items": [1, False]}, "at_event": "甲约好接乙"}]
     assert project.submit_extraction(sid, data)["status"] == "accepted"
     row = next(row for row in project.property_records() if row.get("property_id") == "备注")
     assert row["value"] == {"items": [1, False]}

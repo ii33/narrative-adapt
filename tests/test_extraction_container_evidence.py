@@ -21,7 +21,7 @@ def hierarchy(quote, participant):
         {'type': 'scene', 'name': '登记处办理', 'children': ['@4']},
         {'type': 'event', 'name': '登记完成', 'quotes': [quote], 'location': '未知',
          'participants': [participant]},
-        {'type': 'person', 'name': participant, 'quotes': [quote]},
+        {'type': 'person', 'name': participant},
     ], 'properties': []}
 
 
@@ -60,14 +60,23 @@ def test_reverse_parent_fields_supply_direct_children(project):
     assert nodes['storyline']['events'] == [nodes['big_event']['id']]
 
 
-def test_model_upper_quotes_are_not_independent_evidence_or_validation_requirements(project):
+def test_model_upper_quotes_are_rejected_outright(project):
+    """容器不填引文（`U-09`／`I-10`）：模型给容器写 quotes 直接拒收，不静默忽略。"""
     quote = '丙完成登记。'
     source = project.import_source('登记', quote)
     raw = hierarchy(quote, '丙')
     for row in raw['nodes'][:3]:
         row['quotes'] = ['模型不应填写的概括而非原文']
     result = project.submit_extraction(source, raw)
-    assert result['status'] == 'accepted', result
+    assert result['status'] == 'staged'
+    paths = {tuple(row['path']) for row in result['problems']}
+    assert {('nodes', 0, 'quotes'), ('nodes', 1, 'quotes'), ('nodes', 2, 'quotes')} <= paths
+    assert not project.graph_snapshot()['nodes']
+    fixed = {'nodes': [row for row in raw['nodes']], 'properties': []}
+    for row in fixed['nodes'][:3]:
+        row.pop('quotes', None)
+    accepted = project.submit_extraction(source, fixed)
+    assert accepted['status'] == 'accepted', accepted
     for n in project.graph_snapshot()['nodes']:
         assert all(s['quote'] == quote for s in n['evidence_spans'])
 
@@ -122,20 +131,21 @@ def test_invalid_leaf_evidence_remains_root_cause(project):
     assert not any(p['path'] == ['nodes', 0, 'quotes'] for p in result['problems'])
 
 
-def test_missing_leaf_quotes_is_not_excused_by_ancestor_derivation(project):
+def test_missing_leaf_locator_is_not_excused_by_ancestor_derivation(project):
+    """事件没有定位依据（anchor 或 quotes）时，不能靠上层容器派生糊过去。"""
     source = project.import_source('缺证据', '正文。')
     raw = hierarchy('正文。', '甲')
     raw['nodes'][3].pop('quotes')
     result = project.submit_extraction(source, raw)
     assert result['status'] == 'staged'
-    assert [p['path'] for p in result['problems']] == [['nodes', 3, 'quotes']]
+    assert [p['path'] for p in result['problems']] == [['nodes', 3, 'anchor']]
 
 
 def test_wrong_child_type_stages_at_original_child_reference(project):
     source = project.import_source('错类型', '甲完成登记。')
     result = project.submit_extraction(source, {'nodes': [
         {'type': 'big_event', 'name': '登记', 'children': ['@2']},
-        {'type': 'person', 'name': '甲', 'quotes': ['甲完成登记。']},
+        {'type': 'person', 'name': '甲'},
     ], 'properties': []})
     assert result['status'] == 'staged'
     assert any(p['path'] == ['nodes', 0, 'children', 0] for p in result['problems'])
@@ -147,7 +157,7 @@ def test_existing_event_new_source_evidence_keeps_original_container_start(proje
         {'type': 'scene', 'name': '持续办理'},
         {'type': 'event', 'name': '办理事项', 'scene': '@1', 'quotes': ['甲开始办理。'], 'location': '未知',
          'participants': ['@3']},
-        {'type': 'person', 'name': '甲', 'quotes': ['甲开始办理。']},
+        {'type': 'person', 'name': '甲'},
     ], 'properties': []}
     assert project.submit_extraction(first, raw)['status'] == 'accepted'
     nodes = {n['node_type']: n for n in project.graph_snapshot()['nodes']}
@@ -177,8 +187,8 @@ def test_same_name_unquoted_containers_with_different_children_remain_distinct(p
         {'type': 'scene', 'name': '办公室'},
         {'type': 'event', 'name': '第二件事', 'scene': '@3', 'quotes': ['乙办理第二件事。'], 'location': '未知',
          'participants': ['@6']},
-        {'type': 'person', 'name': '甲', 'quotes': ['甲办理第一件事。']},
-        {'type': 'person', 'name': '乙', 'quotes': ['乙办理第二件事。']},
+        {'type': 'person', 'name': '甲'},
+        {'type': 'person', 'name': '乙'},
     ], 'properties': []})
     assert result['status'] == 'accepted', result
     scenes = [n for n in project.graph_snapshot()['nodes'] if n['node_type'] == 'scene']

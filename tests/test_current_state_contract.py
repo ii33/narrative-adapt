@@ -250,8 +250,8 @@ def test_source_order_precedes_unicode_offset_for_changes_and_suffix_rollback(pr
     later = project.import_source("后导入原文", later_text)
     payload = {
         "nodes": [
-            {"type": "person", "name": "甲", "existing_id": ids["甲"], "quotes": [later_text]},
-            {"type": "scene", "name": "后来称呼", "quotes": [later_text]},
+            {"type": "person", "name": "甲", "existing_id": ids["甲"]},
+            {"type": "scene", "name": "后来称呼"},
             # 事件参与者必填：这里改称的当事人就是甲（原文「甲改称D」）。
             {"type": "event", "location": "未知", "name": "改称D", "scene": "后来称呼",
              "participants": ["甲"], "quotes": [later_text]},
@@ -263,7 +263,6 @@ def test_source_order_precedes_unicode_offset_for_changes_and_suffix_rollback(pr
                 "value": "D",
                 "value_type": "string",
                 "at_event": "改称D",
-                "quotes": [later_text],
             }
         ],
     }

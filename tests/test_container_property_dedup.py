@@ -16,8 +16,8 @@ TEXT = "甲进城。乙开门。甲离开。"
 def draft(container_properties):
     return {
         "nodes": [
-            {"type": "person", "name": "甲", "quotes": ["甲进城。"]},
-            {"type": "person", "name": "乙", "quotes": ["乙开门。"]},
+            {"type": "person", "name": "甲"},
+            {"type": "person", "name": "乙"},
             {"type": "scene", "name": "进城"},
             {"type": "event", "name": "甲进城", "scene": "进城", "participants": ["甲"], "location": "未知",
              "quotes": ["甲进城。"]},
@@ -26,7 +26,7 @@ def draft(container_properties):
         ],
         "properties": [
             {"node": "甲", "property": "情绪", "category": "未分类"  , "value": "紧张", "value_type": "string",
-             "at_event": "甲进城", "op": "set", "quotes": ["甲进城。"]},
+             "at_event": "甲进城", "op": "set"},
         ] + container_properties,
     }
 
@@ -41,10 +41,10 @@ def test_container_write_duplicating_a_descendant_event_is_dropped_with_info(pro
     result = project.submit_extraction(sid, draft([
         # The fact already belongs to the event itself.
         {"node": "甲进城", "property": "气氛", "category": "未分类", "value": "紧张", "value_type": "string",
-         "at_event": "甲进城", "op": "set", "quotes": ["甲进城。"]},
+         "at_event": "甲进城", "op": "set"},
         # Same property on its scene: derived from the event, so it is ignored.
         {"node": "进城", "property": "气氛", "category": "未分类", "value": "紧张", "value_type": "string",
-         "at_event": "乙开门", "op": "set", "quotes": ["乙开门。"]},
+         "at_event": "乙开门", "op": "set"},
     ]))
     assert result["status"] == "accepted" and result["valid"], result
     nodes = {node["name"]: node["id"] for node in project.graph_snapshot()["nodes"]}
@@ -71,9 +71,9 @@ def test_container_property_absent_from_events_is_stored(project):
     sid = project.import_source("容器属性存入", TEXT)
     result = project.submit_extraction(sid, draft([
         {"node": "甲进城", "property": "气氛", "category": "未分类", "value": "紧张", "value_type": "string",
-         "at_event": "甲进城", "op": "set", "quotes": ["甲进城。"]},
+         "at_event": "甲进城", "op": "set"},
         {"node": "进城", "property": "目的", "category": "未分类", "value": "见乙", "value_type": "string",
-         "at_event": "乙开门", "op": "set", "quotes": ["乙开门。"]},
+         "at_event": "乙开门", "op": "set"},
     ]))
     assert result["status"] == "accepted" and result["valid"], result
     nodes = {node["name"]: node["id"] for node in project.graph_snapshot()["nodes"]}
@@ -87,10 +87,10 @@ def test_a_different_scope_is_not_a_duplicate(project):
     result = project.submit_extraction(sid, draft([
         # What 甲 believes about the event, anchored on that event.
         {"node": "甲进城", "property": "判断", "category": "未分类", "value": "安全", "value_type": "string",
-         "scope": "cognition", "holder": "甲", "at_event": "甲进城", "op": "set", "quotes": ["甲进城。"]},
+         "scope": "cognition", "holder": "甲", "at_event": "甲进城", "op": "set"},
         # What the story world states about the scene: a different group.
         {"node": "进城", "property": "判断", "category": "未分类", "value": "危险", "value_type": "string",
-         "at_event": "乙开门", "op": "set", "quotes": ["乙开门。"]},
+         "at_event": "乙开门", "op": "set"},
     ]))
     assert result["status"] == "accepted" and result["valid"], result
     nodes = {node["name"]: node["id"] for node in project.graph_snapshot()["nodes"]}
@@ -140,7 +140,7 @@ def test_the_shortcut_write_belongs_to_the_event_so_only_the_container_drops(pro
     sid = project.import_source("快捷地点判重", TEXT)
     result = project.submit_extraction(sid, draft([
         {"node": "进城", "property": "地点", "category": "未分类", "value": "未知", "value_type": "either",
-         "at_event": "甲进城", "op": "set", "quotes": ["甲进城。"]},
+         "at_event": "甲进城", "op": "set"},
     ]))
     assert result["status"] == "accepted" and result["valid"], result
     notices = [row for row in result["problems"] if row["code"] == "CONTAINER_PROPERTY_DEDUP"]
@@ -165,18 +165,18 @@ MANY_EVENTS = ["甲进城", "乙开门", "甲离开", "乙回头", "甲停下", 
 def many_duplicates_draft():
     """Six scene writes that each restate the same property of one event."""
     nodes = [
-        {"type": "person", "name": "甲", "quotes": ["甲进城。"]},
-        {"type": "person", "name": "乙", "quotes": ["乙开门。"]},
+        {"type": "person", "name": "甲"},
+        {"type": "person", "name": "乙"},
         {"type": "scene", "name": "进城"},
     ] + [{"type": "event", "name": name, "scene": "进城", "participants": ["甲"],
           "location": "未知", "quotes": [quote]}
          for name, quote in zip(MANY_EVENTS, MANY_QUOTES, strict=True)]
     properties = []
-    for index, (name, quote) in enumerate(zip(MANY_EVENTS, MANY_QUOTES, strict=True)):
+    for index, name in enumerate(MANY_EVENTS):
         properties.append({"node": name, "property": "气氛", "category": "未分类", "value": f"事实{index}", "value_type": "string",
-                           "at_event": name, "op": "set", "quotes": [quote]})
+                           "at_event": name, "op": "set"})
         properties.append({"node": "进城", "property": "气氛", "category": "未分类", "value": f"归纳{index}", "value_type": "string",
-                           "at_event": name, "op": "set", "quotes": [quote]})
+                           "at_event": name, "op": "set"})
     return {"nodes": nodes, "properties": properties}
 
 

@@ -159,7 +159,7 @@ def seed_adjacent_big_events(project, *, same_name=False):
 def child_scene_payload(parent):
     return {
         "nodes": [
-            {"type": "scene", "name": "点头回应", "big_event": parent, "quotes": ["甲向乙点头。"]},
+            {"type": "scene", "name": "点头回应", "big_event": parent},
             {
                 "type": "event", "location": "未知",
                 "name": "甲向乙点头",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-DRAFT_VERSION = "conversation-draft/20"
+DRAFT_VERSION = "conversation-draft/21"
 # How many info notices preview repeats verbatim; the rest is only counted.
 INFO_PREVIEW_LIMIT = 5
 
@@ -14,14 +14,19 @@ RESULT_SCHEMA = {
     "properties": {
         "nodes": {"type": "array", "items": {"type": "object", "required": ["name", "type"],
             "allOf": [{"if": {"properties": {"type": {"const": "event"}}},
-                       "then": {"required": ["participants"]}}],
+                       "then": {"required": ["participants"],
+                                "anyOf": [{"required": ["anchor"]}, {"required": ["quotes"]}]}}],
             "properties": {
                 "name": {"type": "string"},
                 "type": {"type": "string", "enum": ["person", "group", "item", "location", "storyline", "big_event", "scene", "event", "action"],
                     "description": "event是介于场景与动作之间、有自身推进与落点的完整情节单元；同场同总目标可有多个事件，不按章节或实施步骤机械拆分。action仅在明确请求动作提取时使用。"},
                 "quotes": {"type": "array", "items": {"type": "string"},
-                    "description": "事件及实体的准确原文证据；event默认一条代表性引文。scene/big_event/storyline不填，程序从直属下级自动派生。属性与关系证据单独记录。"},
-                "location": {"type": "string", "description": "仅event：明确地点location节点ID/@引用，或无/未知；程序复用本事件quotes生成自身world地点变更，不与显式地点properties双写；省略不自动补未知"},
+                    "description": "仅event可填：准确的原文证据，给了就逐字校验。场景／大事件／主要故事由下级派生，其它节点与属性以参与的事件为出处，都不填quotes（填了会被拒）"},
+                "anchor": {"type": "object", "required": ["start", "end"], "additionalProperties": False,
+                    "description": "仅event：原文Unicode位置锚点{start,end}（左闭右开），程序按它截取逐字原文作为本事件证据，推荐用它代替回抄引文；与quotes同时给出时以anchor为准",
+                    "properties": {"start": {"type": "integer", "description": "原文Unicode起点，含"},
+                                   "end": {"type": "integer", "description": "原文Unicode终点，不含"}}},
+                "location": {"type": "string", "description": "仅event：明确地点location节点ID/@引用，或无/未知；程序复用本事件的定位依据（anchor 截取的文本，或 quotes）生成自身world地点变更，不与显式地点properties双写；省略不自动补未知"},
                 "aliases": {"type": "array", "items": {"type": "string"}},
                 "existing_id": {"type": "string", "description": "查证后引用本工程已有节点；不新建同一事件"},
                 "new_occurrence": {"type": "boolean", "description": "同名但原文明确是另一次发生时声明"},
@@ -34,18 +39,17 @@ RESULT_SCHEMA = {
                 "big_event": {"type": "string", "description": "scene所属阶段性大事件的B编号或本批@序号"},
                 "storyline": {"type": "string", "description": "big_event所属已结束主要故事的T编号或本批@序号；未总结篇章可省略"},
             }, "additionalProperties": False}},
-        "properties": {"type": "array", "items": {"type": "object", "required": ["node", "property", "category", "at_event", "op", "quotes"],
+        "properties": {"type": "array", "items": {"type": "object", "required": ["node", "property", "category", "at_event", "op"],
             "properties": {
                 "node": {"type": "string", "description": "属性主体；身份、关系或作用角色中为参照方A"}, "property": {"type": "string", "description": "关系描述对方相对node的身份、关系或作用中的角色；node=A,property=父亲,value=B表示B是A的父亲；事件地点使用属性名‘地点’并引用地点节点"},
                 "op": {"type": "string", "enum": ["set", "add", "remove", "clear", "unknown"], "description": "在at_event处建立/设置、增添、移除、明确清空或变为未知；不填写有效期"},
                 "value": {"description": "node/either节点引用表示被指向的对方ID；普通string/any值保持字面内容；每个event必须有自身world地点，value引用location节点或显式‘无’‘未知’，也可op=unknown不携value"}, "value_type": {"type": "string", "enum": ["string", "number", "boolean", "node", "either", "any"], "description": "节点引用用node/either；事件地点建议either以支持location引用及‘无’‘未知’，已有node定义可引用location；string/any即使内容像P编号也是字面值"},
-                "quotes": {"type": "array", "items": {"type": "string"}},
                 "cardinality": {"type": "string", "enum": ["one", "many"], "description": "新定义默认one；多值状态显式many且value为数组。已有定义省略沿用，显式冲突拒绝，须显式修改定义"},
                 "symmetric": {"type": "boolean", "description": "该关系性质对称时显式true；单向false，不按名称猜测"},
                 "category": {"type": "string", "description": "必填：填该节点类型分类表里的一个大类；原文看不出归类时显式填「未分类」，程序不会按属性名或取值猜分类"}, "scope": {"type": "string", "enum": ["world", "cognition", "claim"], "description": "world为原文支持的客观事实；事件地点为world；cognition为某人物所知所信/主观判断，claim为人物言说主张，二者须给holder；对白可有客观事实依据，不机械全记claim"},
                 "holder": {"type": ["string", "null"], "description": "cognition的认知者或claim的说话人ID/@引用；node仍是被认知/被谈论的主体，可与holder不同；例如甲以为乙是教师：node乙、scope=cognition、holder甲；world不填"}, "source": {"type": "string"},
                 "related_nodes": {"type": "array", "items": {"type": "string"}},
-                "at_event": {"type": "string", "description": "必须给本次建立/变更/失效所在事件ID或@引用；程序按事件顺序推状态，sequence由已定位引文生成"},
+                "at_event": {"type": "string", "description": "必须给本次建立/变更/失效所在事件ID或@引用；程序按事件顺序推状态，sequence由已定位引文或事件位置与提交顺序生成"},
             }, "additionalProperties": False}},
         "uncertainties": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
         "exclusions": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
@@ -131,21 +135,42 @@ def _draft_input_diagnostics(result):
         for key in ('storyline', 'big_event', 'scene', 'event'):
             if key in row and key != expected_parent:
                 issue(path + [key], f'父级字段{key}不适用于节点类型{row.get("type")}')
-        if row.get('type') not in {'scene', 'big_event', 'storyline'}:
-            quotes = row.get('quotes')
-            if not isinstance(quotes, list) or not quotes:
-                issue(path + ['quotes'], '缺少非空quotes原文引文数组；节点自身也必须提供逐字证据')
-            else:
-                for quote_index, quote in enumerate(quotes):
-                    if not isinstance(quote, str) or not quote.strip():
-                        issue(path + ['quotes', quote_index], '引文必须是非空原文字符串')
+        if 'quotes' in row and row.get('type') != 'event':
+            issue(path + ['quotes'],
+                  f'nodes[{index}].quotes仅event可填：其它节点以它参与的事件为出处，'
+                  '场景／大事件／主要故事由下级派生，都不提供自身引文')
+        elif 'quotes' in row and not isinstance(row['quotes'], list):
+            issue(path + ['quotes'], 'quotes必须是字符串数组')
+        elif isinstance(row.get('quotes'), list):
+            for quote_index, quote in enumerate(row['quotes']):
+                if not isinstance(quote, str) or not quote.strip():
+                    issue(path + ['quotes', quote_index], '引文必须是非空原文字符串')
+        if 'anchor' in row:
+            anchor = row['anchor']
+            if row.get('type') != 'event':
+                issue(path + ['anchor'], f'nodes[{index}].anchor仅event可填：原文位置锚点只给事件定位')
+            elif not isinstance(anchor, dict) or set(anchor) != {'start', 'end'}:
+                issue(path + ['anchor'], 'anchor必须只含start与end两个整数Unicode偏移')
+            elif (type(anchor['start']) is not int or type(anchor['end']) is not int
+                    or not 0 <= anchor['start'] < anchor['end']):
+                issue(path + ['anchor'], 'anchor必须满足 0 <= start < end（原文Unicode偏移，左闭右开）')
+        if row.get('type') == 'event':
+            located = 'anchor' in row or any(
+                isinstance(quote, str) and quote.strip() for quote in row.get('quotes') or [])
+            if not located:
+                issue(path + ['anchor'],
+                      '事件必须给定位依据：anchor{start,end}（推荐，程序按偏移截取逐字原文）'
+                      '或非空quotes逐字引文，二者至少一个')
     for index, row in enumerate(result.get('properties') if isinstance(result.get('properties'), list) else []):
         path = ['properties', index]
         if not isinstance(row, dict):
             issue(path, '属性行必须是对象')
             continue
-        for key in set(row) - set(_PROPERTY_DRAFT_SCHEMA['properties']):
+        for key in set(row) - set(_PROPERTY_DRAFT_SCHEMA['properties']) - {'quotes'}:
             issue(path + [key], f'未知属性字段：{key}；只使用事件变更合同，不接受有效期或模型sequence')
+        if 'quotes' in row:
+            issue(path + ['quotes'],
+                  '属性不接受quotes：属性的出处就是at_event指向的那个事件，逐字证据记在事件上')
         for field in ('node', 'property'):
             if not isinstance(row.get(field), str) or not row.get(field, '').strip():
                 issue(path + [field], f'{field}必须是非空字符串')
@@ -155,12 +180,42 @@ def _draft_input_diagnostics(result):
             issue(path + ['at_event'], '必须明确at_event事件引用')
         if not isinstance(row.get('op'), str) or row['op'] not in {'set', 'add', 'remove', 'clear', 'unknown'}:
             issue(path + ['op'], '必须明确有效op：set/add/remove/clear/unknown')
-        quotes = row.get('quotes')
-        if not isinstance(quotes, list) or not quotes:
-            issue(path + ['quotes'], '缺少非空quotes原文引文数组')
+        if 'quotes' in row:
+            issue(path + ['quotes'],
+                  '属性不接受quotes：属性的出处就是at_event指向的那个事件，逐字证据记在事件上')
         if not isinstance(row.get('category'), str) or not row['category'].strip():
             issue(path + ['category'], '必须明确category：填该节点类型分类表里的一个大类，或显式填「未分类」；程序不猜分类')
     return issues
+
+
+def _validate_anchors(rows, text: str, start: int, end: int) -> dict[int, tuple[int, int]]:
+    """检查每个事件的原文位置锚点，返回提交范围内的相对 (start, end)。
+
+    ``anchor`` 是原文全局 Unicode 偏移（左闭右开）：越界、反向或不在本批范围内
+    都直接拒绝，并把路径指到这个字段——不猜、不夹到边界。形状由
+    :func:`_draft_input_diagnostics` 先查过，这里只查与原文/批次位置有关的部分。
+    """
+    spans: dict[int, tuple[int, int]] = {}
+    problems = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict) or not isinstance(row.get('anchor'), dict):
+            continue
+        anchor = row['anchor']
+        start_at, end_at = anchor.get('start'), anchor.get('end')
+        if type(start_at) is not int or type(end_at) is not int or not 0 <= start_at < end_at:
+            continue
+        where = ['nodes', index, 'anchor']
+        if end_at > len(text):
+            problems.append({'severity': 'error', 'code': 'DRAFT_SCHEMA', 'path': where,
+                'message': f'anchor超出原文末尾：原文共{len(text)}个Unicode字符，end不得超过它'})
+        elif not (start <= start_at and end_at <= end):
+            problems.append({'severity': 'error', 'code': 'DRAFT_SCHEMA', 'path': where,
+                'message': f'anchor不在本次提交范围内：本批范围是[{start}, {end})，越界锚点不许用'})
+        else:
+            spans[index] = (start_at - start, end_at - start)
+    if problems:
+        raise ExtractionDraftValidationError(problems)
+    return spans
 
 
 def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
@@ -199,7 +254,19 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
     from copy import deepcopy
 
     from .extraction_refs import bind
+    anchor_spans = _validate_anchors(result['nodes'], source['text'], start, end)
     original = deepcopy(result)
+    # 位置锚点在草稿层就换成逐字原文：下游（证据、披露起点、容器派生、审计）形状不变，
+    # 模型也不必回抄原文。同一行同时给了 anchor 与 quotes 时以 anchor 为准，
+    # 但要说出来——静默丢弃输入是最难查的那种行为。
+    anchor_notices = []
+    for index, (span_start, span_end) in anchor_spans.items():
+        row = original['nodes'][index]
+        if row.get('quotes'):
+            anchor_notices.append({'severity': 'info', 'code': 'EXTRACTION_INFO',
+                'path': ['nodes', index, 'quotes'],
+                'message': '同时给了anchor与quotes：已按anchor截取的原文作为本事件证据，quotes未使用'})
+        row['quotes'] = [source['text'][start + span_start:start + span_end]]
     current_graph = reader.graph_snapshot()
     current_records = reader.property_records()
     definitions = {row['id']: row for row in current_records if row.get('kind') == 'property_definition'}
@@ -227,6 +294,10 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
             # 与模型自己写地点属性时一致；不能用「未分类」敷衍。
             'category': LOCATION_CATEGORY,
             'value_type': location_definition['value_type'] if location_definition else 'either'}
+        if index in anchor_spans:
+            # 本事件用位置锚点时，这条程序生成的地点变更沿用同一段原文的精确坐标，
+            # 不回到引文里再搜一次（同一句在批内出现两次时会搜到错的那一处）。
+            generated['_anchor_span'] = anchor_spans[index]
         if location != '未知':
             generated['value'] = ([location] if location_definition and location_definition.get('cardinality') == 'many' else location)
         if location_definition:
@@ -243,7 +314,10 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
             row['value_type'] = definitions[row['property']]['value_type']
         if isinstance(row, dict) and 'cardinality' not in row and row.get('property') in definitions:
             row['cardinality'] = definitions[row['property']].get('cardinality', 'one')
-    data = parse_nodes(original, selected)
+    data = parse_nodes(original, selected, node_spans=anchor_spans,
+                       property_spans={position: row['_anchor_span']
+                                       for position, row in enumerate(original['properties'])
+                                       if isinstance(row, dict) and '_anchor_span' in row})
     for key in ("uncertainties", "exclusions"):
         rows = result.get(key) or []
         if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
@@ -256,9 +330,9 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
         generated_index = explicit_count + shortcut_indices.index(index)
         generated = next((row for row in data['properties'] if row.get('_draft_index') == generated_index), None)
         if generated is None:
-            message = f'nodes[{index}].location无法定位事件地点证据，请核对本事件quotes'
+            message = f'nodes[{index}].location无法定位事件地点证据，请核对本事件的anchor或quotes'
             data['rejected'].append({'name': owner, 'path': ['nodes', index, 'location'], 'message': message, 'reason': message,
-                                     'related_paths': [['nodes', index, 'quotes']]})
+                                     'related_paths': [['nodes', index, 'anchor' if index in anchor_spans else 'quotes']]})
             continue
         if generated.get('op') != 'unknown':
             values = generated.get('value')
@@ -288,6 +362,10 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
     issues = content_diagnostics(data, selected, source["title"])
     for kind in ("nodes", "properties"):
         for row in data[kind]:
+            if row["start"] is None:
+                # 没有定位依据的行没有原文坐标（证据是它参与的事件），
+                # 不把 0 平移成批首再冒称一个位置。
+                continue
             row["start"] += start
             if kind == "nodes":
                 for span in row.get("evidence_spans") or []:
@@ -296,9 +374,10 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
     from .extraction_containers import derive
     data = derive(data, current_graph, reader, source_id)
     if data.get("rejected"):
-        diagnostics = [{"severity": "error", "code": "EXTRACTION_CONTENT", **item,
-                        "object_id": item.get("name"), "message": item.get("message") or item.get("reason")}
-                       for item in data["rejected"]]
+        diagnostics = list(anchor_notices) + [
+            {"severity": "error", "code": "EXTRACTION_CONTENT", **item,
+             "object_id": item.get("name"), "message": item.get("message") or item.get("reason")}
+            for item in data["rejected"]]
         outcome = {"valid": False, "revision": snapshot.revision, "diagnostics": diagnostics}
         return data, {}, None, outcome
     data.update(source_id=source_id, chapter=source["title"],
@@ -317,7 +396,7 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
                 break
     issues += list(built.get("skipped") or [])
     prepared = None
-    diagnostics = [{"severity": "error", "code": "EXTRACTION_CONTENT",
+    diagnostics = list(anchor_notices) + [{"severity": "error", "code": "EXTRACTION_CONTENT",
                     "object_id": item.get("name"), "message": item.get("reason") or str(item),
                     **{key: item[key] for key in ('path', 'related_paths', 'quote', 'positions_sample', 'position_basis') if key in item}} for item in issues]
     # Notices the build raised about rows it deliberately did not store. They

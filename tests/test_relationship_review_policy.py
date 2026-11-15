@@ -17,10 +17,10 @@ def relationship_project(tmp_path, monkeypatch):
     ops = Operations.create_graph_project(entry)
     source = ops.import_source("友谊变化", TEXT)
     result = ops.submit_extraction(source, {"nodes": [
-        *[{"type": "person", "name": name, "quotes": [name]} for name in "甲乙丙丁"],
-        {"type": "scene", "name": "送药风波", "quotes": [TEXT]},
+        *[{"type": "person", "name": name} for name in "甲乙丙丁"],
+        {"type": "scene", "name": "送药风波"},
         *[{"type": "event", "location": "未知", "name": name, "scene": "送药风波", "participants": list("甲乙丙丁"), "quotes": [quote]} for name, quote in zip(("建立友谊", "争执后合作", "明确断交", "继续送药"), QUOTES, strict=True)]],
-        "properties": [{"node": a, "property": "朋友"  , "category": "未分类", "value": b, "value_type": "node", "symmetric": True, "at_event": "建立友谊", "op": "set", "quotes": [QUOTES[0]]} for a, b in (("甲", "乙"), ("丙", "丁"))]})
+        "properties": [{"node": a, "property": "朋友"  , "category": "未分类", "value": b, "value_type": "node", "symmetric": True, "at_event": "建立友谊", "op": "set"} for a, b in (("甲", "乙"), ("丙", "丁"))]})
     assert result["status"] == "accepted", result
     ids = {node["name"]: node["id"] for node in ops.graph_snapshot()["nodes"]}
     return ops, entry, source, ids
@@ -52,7 +52,7 @@ def test_review_expiry_preserves_true_history_and_quarrelling_friends(relationsh
             "quote": QUOTES[2], "source_id": source, "reason": "原文明示绝交且友谊结束"}, project=entry)
     else:
         result = ops.submit_extraction(source, {"nodes": [], "properties": [{"node": ids["甲"], "property": "朋友", "category": "未分类"  ,
-            "op": "remove", "value": ids["乙"], "at_event": ids["明确断交"], "quotes": [QUOTES[2]]}]})
+            "op": "remove", "value": ids["乙"], "at_event": ids["明确断交"]}]})
     assert result["status"] == "accepted"
     current = {row["id"]: row for row in ops.property_records() if row.get("kind") == "property_change"}
     assert current[ended["id"]] == ended

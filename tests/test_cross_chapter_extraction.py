@@ -14,11 +14,11 @@ def test_cross_chapter_batches_reuse_scene_and_event_preserving_evidence_and_mem
     source = ops.import_source('跨章连续会议', text)
     boundary = text.index('第二章')
     first = ops.submit_extraction(source, {'nodes': [
-        {'type': 'location', 'name': '会议室', 'quotes': ['会议室']},
+        {'type': 'location', 'name': '会议室'},
         {'type': 'scene', 'name': '会议室交付条件核对与签约'},
         {'type': 'event', 'name': '双方核对交付条件', 'scene': '@2',
          'location': '@1', 'quotes': [beginning], 'participants': ['@4']},
-        {'type': 'group', 'name': '双方', 'quotes': [beginning]},
+        {'type': 'group', 'name': '双方'},
     ], 'properties': []}, start=0, end=boundary)
     assert first['status'] == 'accepted', first
     before = ops.graph_snapshot()
@@ -35,7 +35,7 @@ def test_cross_chapter_batches_reuse_scene_and_event_preserving_evidence_and_mem
          'scene': '@1', 'quotes': [continuation], 'participants': ['@4']},
         {'type': 'event', 'name': '双方签署交付协议', 'scene': '@1',
          'location': location['id'], 'quotes': [conclusion], 'participants': ['@4']},
-        {'type': 'group', 'name': '双方', 'quotes': [conclusion]},
+        {'type': 'group', 'name': '双方'},
     ], 'properties': []}, start=boundary, end=len(text))
     assert second['status'] == 'accepted', second
     assert second['submission_status'] == 'committed'

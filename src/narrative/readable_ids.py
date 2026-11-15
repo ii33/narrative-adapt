@@ -1,6 +1,8 @@
 """Transaction-local allocation of stable readable business identities.
 
-IDs express type and identity only. They never define reading or display order.
+这里发的是**业务可读 ID**（例如 `P3-card-1`）：它只表达「属于哪个对象、第几个」，
+不表达阅读或显示顺序——记录的顺序看事件链与 `sequence`。
+节点编号是另一套机制（`order_ids.py`）：同一类型内按“读者遇到它的顺序”发号，编号即顺序。
 Counters live in the caller's existing meta table and roll back with its write.
 """
 from __future__ import annotations

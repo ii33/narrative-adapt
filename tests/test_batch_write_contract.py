@@ -17,7 +17,7 @@ def setup(project):
     text = '甲。'
     source = project.import_source('事务测试', text)
     result = project.submit_extraction(source, {'nodes': [
-        {'type': 'person', 'name': '甲', 'quotes': [text]},
+        {'type': 'person', 'name': '甲'},
     ], 'properties': []})
     assert result['status'] == 'accepted', result
 

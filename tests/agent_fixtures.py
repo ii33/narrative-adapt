@@ -29,10 +29,10 @@ def location_record(event_id, source_id, start, quote, *, value="未知"):
 def draft_result(*, note=False, ended=True):
     result = {
         "nodes": [
-            {"type": "person", "name": "甲", "quotes": ["甲约好接乙。"]},
-            {"type": "person", "name": "乙", "quotes": ["甲约好接乙。"]},
-            {"type": "big_event", "name": "接人", "quotes": [TEXT]},
-            {"type": "scene", "name": "甲约定并完成接乙", "big_event": "接人", "quotes": [TEXT]},
+            {"type": "person", "name": "甲"},
+            {"type": "person", "name": "乙"},
+            {"type": "big_event", "name": "接人"},
+            {"type": "scene", "name": "甲约定并完成接乙", "big_event": "接人"},
             {"type": "event", "name": "甲约好接乙", "scene": "甲约定并完成接乙",
              "location": "未知", "participants": ["甲", "乙"], "quotes": ["甲约好接乙。"]},
             {"type": "event", "name": "甲接到乙后离开", "scene": "甲约定并完成接乙",
@@ -40,10 +40,9 @@ def draft_result(*, note=False, ended=True):
         ],
         "properties": [
             {"node": "甲", "property": "计划", "value": "接乙", "value_type": "string",
-             "scope": "claim", "holder": "甲", "category": "心理与意图", "source": "speech",
-             "quotes": ["甲约好接乙。"], "at_event": "甲约好接乙"},
+             "scope": "claim", "holder": "甲", "category": "心理与意图", "source": "speech", "at_event": "甲约好接乙"},
             {"node": "甲", "property": "朋友", "value": "乙", "value_type": "node",
-             "category": "关系", "quotes": ["甲约好接乙。"], "at_event": "甲约好接乙"},
+             "category": "关系", "at_event": "甲约好接乙"},
         ],
         "uncertainties": [], "exclusions": [],
     }
@@ -51,11 +50,11 @@ def draft_result(*, note=False, ended=True):
         row["op"] = "set"
     if ended:
         result["properties"].append({"node": "甲", "property": "计划", "category": "未分类", "at_event": "甲接到乙后离开",
-            "op": "clear", "scope": "claim", "holder": "甲", "quotes": ["甲接到乙后离开。"]})
+            "op": "clear", "scope": "claim", "holder": "甲"})
     if note:
-        result["nodes"].append({"type": "item", "name": "便笺", "quotes": ["乙收起便笺。"]})
+        result["nodes"].append({"type": "item", "name": "便笺"})
         result["properties"].append({"node": "便笺", "property": "持有者", "value": "乙", "value_type": "either",
-                                     "op": "set", "scope": "world", "category": "归属与持有", "quotes": ["乙收起便笺。"],
+                                     "op": "set", "scope": "world", "category": "归属与持有",
                                      "at_event": "甲接到乙后离开"})
     return result
 

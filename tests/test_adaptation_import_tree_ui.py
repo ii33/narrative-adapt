@@ -22,8 +22,8 @@ def test_adaptation_columns_import_multiselect_filter_cancel_and_source_isolatio
             quote = f'{branch}走进屋内，停下。{branch}篇结束。'
             sid = ops.import_source(f'{branch}篇', quote)
             result = ops.submit_extraction(sid, {'nodes': [
-                {'type': 'big_event', 'name': branch + '大事', 'quotes': [quote]},
-                {'type': 'scene', 'name': branch + '场景', 'big_event': branch + '大事', 'quotes': [quote]},
+                {'type': 'big_event', 'name': branch + '大事'},
+                {'type': 'scene', 'name': branch + '场景', 'big_event': branch + '大事'},
                 # 事件必须显式给 participants；这份种子只有两个分支、没有人物节点，
                 # 空数组即「确无参与者」，不额外造人物以免影响候选集合的精确断言。
                 {'type': 'event', "location": "未知", 'name': branch + '事件', 'scene': branch + '场景', 'participants': [], 'quotes': [quote]},
@@ -31,7 +31,7 @@ def test_adaptation_columns_import_multiselect_filter_cancel_and_source_isolatio
             assert result['status'] == 'accepted', result
             named = {n['name']: n['id'] for n in ops.graph_snapshot()['nodes']}
             result = ops.submit_extraction(sid, {'nodes': [
-                {'type': 'action', 'name': branch + '动作', 'event': named[branch + '事件'], 'quotes': [quote]},
+                {'type': 'action', 'name': branch + '动作', 'event': named[branch + '事件']},
                 {'type': 'storyline', 'name': branch + '故事', 'children': [named[branch + '大事']]},
             ], 'properties': []})
             assert result['status'] == 'accepted', result

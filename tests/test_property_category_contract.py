@@ -16,12 +16,12 @@ def ops(tmp_path, monkeypatch):
 
 def draft(*, category="未分类", property_name="身高", node="甲"):
     row = {"node": node, "property": property_name, "value": "一米七", "value_type": "string",
-           "scope": "world", "at_event": EVENT, "op": "set", "quotes": [TEXT]}
+           "scope": "world", "at_event": EVENT, "op": "set"}
     if category is not None:
         row["category"] = category
     return {"nodes": [
-        {"type": "person", "name": PERSON, "quotes": [TEXT]},
-        {"type": "scene", "name": SCENE, "quotes": [TEXT]},
+        {"type": "person", "name": PERSON},
+        {"type": "scene", "name": SCENE},
         {"type": "event", "name": EVENT, "scene": SCENE, "participants": [PERSON],
          "location": "未知", "quotes": [TEXT]},
     ], "properties": [row]}
@@ -78,12 +78,12 @@ def test_a_category_holds_several_properties_side_by_side(ops):
     source = ops.import_source("并列属性", TEXT)
     rows = [
         {"node": "甲", "property": name, "value": value, "value_type": "string",
-         "scope": "world", "at_event": EVENT, "op": "set", "quotes": [TEXT], "category": "外貌"}
+         "scope": "world", "at_event": EVENT, "op": "set", "category": "外貌"}
         for name, value in (("身高", "一米七"), ("发型", "短马尾"), ("瞳色", "灰蓝"))
     ]
     nodes = [
-        {"type": "person", "name": PERSON, "quotes": [TEXT]},
-        {"type": "scene", "name": SCENE, "quotes": [TEXT]},
+        {"type": "person", "name": PERSON},
+        {"type": "scene", "name": SCENE},
         {"type": "event", "name": EVENT, "scene": SCENE, "participants": [PERSON],
          "location": "未知", "quotes": [TEXT]},
     ]
@@ -144,9 +144,9 @@ def test_event_location_shortcut_generates_a_categorized_record(ops, location):
     text = "林岚在会议室的会开完了。"
     source = ops.import_source("快捷地点", text)
     accepted = ops.submit_extraction(source, {"nodes": [
-        {"type": "person", "name": "林岚", "quotes": ["林岚"]},
-        {"type": "location", "name": "会议室", "quotes": ["会议室"]},
-        {"type": "scene", "name": "会议", "quotes": [text]},
+        {"type": "person", "name": "林岚"},
+        {"type": "location", "name": "会议室"},
+        {"type": "scene", "name": "会议"},
         {"type": "event", "name": "会议结束", "scene": "@3", "quotes": [text],
          "participants": ["@1"], "location": location},
     ], "properties": []})

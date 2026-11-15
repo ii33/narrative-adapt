@@ -24,14 +24,14 @@ def broken_draft():
     """属性缺 op/value：每条都会触发两条 DRAFT_SCHEMA，正好复现"重复几十遍"。"""
     return {
         "nodes": [
-            {"type": "person", "name": "李强", "quotes": ["李强"]},
-            {"type": "scene", "name": "出场", "quotes": [TEXT]},
+            {"type": "person", "name": "李强"},
+            {"type": "scene", "name": "出场"},
             {"type": "event", "name": "李强出场", "scene": "出场", "participants": ["李强"],
              "location": "未知", "quotes": [TEXT]},
         ],
         "properties": [
             {"node": "李强", "property": f"属性{i}", "value": "某个值", "value_type": "string",
-             "scope": "world", "at_event": "李强出场", "quotes": [TEXT], "category": "未分类"}
+             "scope": "world", "at_event": "李强出场", "category": "未分类"}
             for i in range(PROPERTY_COUNT)
         ],
     }

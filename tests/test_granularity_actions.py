@@ -195,7 +195,7 @@ def test_action_draft_references_existing_event_without_relisting_it(project, pa
     sid, _obj = base(project)
     original = copy.deepcopy(next(n for n in project.graph_snapshot()["nodes"] if n["id"] == "E9"))
     payload = {
-        "nodes": [{"type": "action", "name": "走进屋内", "event": parent, "quotes": [FIRST]}],
+        "nodes": [{"type": "action", "name": "走进屋内", "event": parent}],
         "properties": [],
     }
     result = project.submit_extraction(sid, payload)

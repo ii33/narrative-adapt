@@ -13,11 +13,11 @@ def project(tmp_path, monkeypatch):
     ops = Operations.create_graph_project(tmp_path / "state-values.nproj")
     sid = ops.import_source("值列表", TEXT)
     accepted = ops.submit_extraction(sid, {"nodes": [
-        {"type": "person", "name": "郭靖", "quotes": [QUOTES[0]]},
-        {"type": "person", "name": "江南七怪", "quotes": [QUOTES[0]]},
-        {"type": "person", "name": "洪七公", "quotes": [QUOTES[1]]},
-        {"type": "person", "name": "哲别", "quotes": [QUOTES[2]]},
-        {"type": "scene", "name": "拜师", "quotes": [TEXT]},
+        {"type": "person", "name": "郭靖"},
+        {"type": "person", "name": "江南七怪"},
+        {"type": "person", "name": "洪七公"},
+        {"type": "person", "name": "哲别"},
+        {"type": "scene", "name": "拜师"},
         {"type": "event", "name": "拜江南七怪", "scene": "@5", "participants": ["@1", "@2"],
          "location": "未知", "quotes": [QUOTES[0]]},
         {"type": "event", "name": "拜洪七公", "scene": "@5", "participants": ["@1", "@3"],

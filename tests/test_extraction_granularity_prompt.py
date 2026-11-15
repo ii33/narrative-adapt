@@ -27,7 +27,7 @@ def test_standard_and_fine_are_distinct_but_both_leave_actions_opt_in(project):
     assert "上层容器由成员派生人物与地点集合" in standard
     assert "场景不拥有单一地点" in standard
     assert all("标准与精细粒度都默认不提取动作" in text for text in (standard, fine))
-    assert DRAFT_VERSION == "conversation-draft/20"
+    assert DRAFT_VERSION == "conversation-draft/21"
     property_fields = RESULT_SCHEMA["properties"]["properties"]["items"]["properties"]
     node_fields = RESULT_SCHEMA["properties"]["nodes"]["items"]["properties"]
     assert "事件地点使用属性名‘地点’" in property_fields["property"]["description"]
@@ -45,16 +45,16 @@ def test_operations_accepts_event_location_reference_and_secondary_people(projec
     text = "旅客甲和旅客乙跟着无名侍者走进客栈后院。"
     source_id = project.import_source("精细地点和次要人物", text)
     draft = {"nodes": [
-        {"type": "person", "name": "旅客甲", "quotes": [text]},
-        {"type": "person", "name": "旅客乙", "quotes": [text]},
-        {"type": "person", "name": "无名侍者", "quotes": ["无名侍者"]},
-        {"type": "location", "name": "客栈后院", "quotes": ["客栈后院"]},
-        {"type": "scene", "name": "进入客栈后院", "quotes": [text]},
+        {"type": "person", "name": "旅客甲"},
+        {"type": "person", "name": "旅客乙"},
+        {"type": "person", "name": "无名侍者"},
+        {"type": "location", "name": "客栈后院"},
+        {"type": "scene", "name": "进入客栈后院"},
         {"type": "event", "name": "跟随侍者进入后院", "scene": "@5",
          "participants": ["@1", "@2", "@3"], "quotes": [text]},
     ], "properties": [{
         "node": "@6", "op": "set", "property": "地点", "category": "未分类"  , "value": "@4", "value_type": "node",
-        "scope": "world", "at_event": "@6", "quotes": ["客栈后院"],
+        "scope": "world", "at_event": "@6",
     }]}
     accepted = project.submit_extraction(source_id, draft)
     assert accepted["status"] == "accepted", accepted
@@ -77,7 +77,8 @@ def test_operations_accepts_event_location_reference_and_secondary_people(projec
             location_property["value"], location_definition["value_type"],
             location_property["scope"], location_property["event_id"]) == (
                 event["id"], "地点", location["id"], "node", "world", event["id"])
-    assert location_property["disclosure"]["start"] == text.index("客栈后院")
+    # 属性不填引文：它的披露位置就是 at_event 事件的（`U-09`）。
+    assert location_property["disclosure"] == event["disclosure"]
     summary = project.property_node_summary(event["id"])
     # 分类只是浏览分组：属性名/取值不再参与推断，未显式给分类的记录落「未分类」；
     # 事件地点是否由写入方补默认分类属实现细节，这里只锁「有分类且是可枚举值」。
@@ -121,15 +122,18 @@ def test_chapters_slices_and_batches_do_not_define_narrative_boundaries(project)
         assert '语境或情节单元真的变了才拆' in prompt
 
 
-def test_events_default_to_one_representative_quote_without_changing_evidence_storage(project):
+def test_events_need_a_locator_while_other_nodes_and_properties_do_not(project):
     for mode in ('standard', 'fine'):
         prompt = loaded_extraction_guide(project, mode)
-        assert '事件默认只提交一条有代表性的准确原文引文' in prompt
-        assert '足以支持该事件的身份与核心发生即可' in prompt
-        assert '属性与关系各自取证' in prompt
-    quote_schema = RESULT_SCHEMA['properties']['nodes']['items']['properties']['quotes']
-    assert 'maxItems' not in quote_schema
-    assert '一条' in quote_schema['description']
+        assert '事件必须给定位依据' in prompt
+        assert '其它节点与属性不必给引文' in prompt
+        assert '事件是时间点，事件链就是时间轴' in prompt
+        assert '不要为了凑证据回抄原文' in prompt
+    node_schema = RESULT_SCHEMA['properties']['nodes']['items']['properties']
+    assert 'maxItems' not in node_schema['quotes'] and '仅event' in node_schema['quotes']['description']
+    assert node_schema['anchor']['required'] == ['start', 'end']
+    properties = RESULT_SCHEMA['properties']['properties']['items']['properties']
+    assert 'quotes' not in properties
 
 
 def test_default_remains_fine_and_independently_consequential_action_can_be_an_event(project):
@@ -138,11 +142,11 @@ def test_default_remains_fine_and_independently_consequential_action_can_be_an_e
     text = '甲销毁唯一副本，计划因此无法继续。'
     sid = project.import_source('独立后果', text)
     result = project.submit_extraction(sid, {'nodes': [
-        {'type': 'person', 'name': '甲', 'quotes': [text]},
-        {'type': 'scene', 'name': '计划中断', 'quotes': [text]},
+        {'type': 'person', 'name': '甲'},
+        {'type': 'scene', 'name': '计划中断'},
         {'type': 'event', 'name': '销毁副本使计划中断', 'scene': '@2', 'participants': ['@1'], 'quotes': [text]},
     ], 'properties': [{'node': '@3', 'property': '地点', "category": "未分类"  , 'value_type': 'either',
-        'scope': 'world', 'at_event': '@3', 'op': 'unknown', 'quotes': [text]}]})
+        'scope': 'world', 'at_event': '@3', 'op': 'unknown'}]})
     assert result['status'] == 'accepted'
     assert [n['node_type'] for n in project.graph_snapshot()['nodes']].count('event') == 1
     assert not any(n['node_type'] == 'action' for n in project.graph_snapshot()['nodes'])

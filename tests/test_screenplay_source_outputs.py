@@ -15,9 +15,9 @@ def source_script(tmp_path, monkeypatch):
     text = '甲在门口等候。乙在门口到达。'
     source = ops.import_source('场次来源', text)
     accepted = ops.submit_extraction(source, {'nodes': [
-        {'type': 'person', 'name': '甲', 'quotes': ['甲在门口等候。']},
-        {'type': 'person', 'name': '乙', 'quotes': ['乙在门口到达。']},
-        {'type': 'location', 'name': '门口', 'quotes': ['甲在门口等候。']},
+        {'type': 'person', 'name': '甲'},
+        {'type': 'person', 'name': '乙'},
+        {'type': 'location', 'name': '门口'},
         {'type': 'scene', 'name': '门口会合'},
         {'type': 'event', 'name': '甲等候', 'scene': '@4', 'location': '@3',
          'participants': ['@1'], 'quotes': ['甲在门口等候。']},

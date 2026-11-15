@@ -17,7 +17,7 @@ def project(tmp_path, monkeypatch):
         {"type": "scene", "name": "门外等候", "children": ["@3"]},
         {"type": "event", "name": "甲等候", "quotes": [quote], "location": "未知",
          "participants": ["@4"]},
-        {"type": "person", "name": "甲", "quotes": [quote]},
+        {"type": "person", "name": "甲"},
     ], "properties": []})
     assert accepted["status"] == "accepted", accepted
     adaptation = ops.sync_adaptation()

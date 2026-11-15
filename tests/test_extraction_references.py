@@ -13,29 +13,31 @@ TEXT = '甲先走。甲再停。'
 
 def draft():
     return {'nodes': [
-        {'type': 'person', 'name': '甲', 'quotes': ['甲先走。']},
-        {'type': 'scene', 'name': '行走停步', 'quotes': [TEXT]},
+        {'type': 'person', 'name': '甲'},
+        {'type': 'scene', 'name': '行走停步'},
         {'type': 'event', "location": "未知", 'name': '行走', 'scene': '@2', 'participants': ['@1'], 'quotes': ['甲先走。']},
         {'type': 'event', "location": "未知", 'name': '停步', 'scene': '@2', 'participants': ['@1'], 'quotes': ['甲再停。']},
     ], 'properties': []}
 
 
 def test_original_indices_survive_sorting_and_rejected_nodes():
-    # 本批唯一人物行（坏行）本身因引文不成立会被拒收，事件无从引用它：
-    # 参与者键照新合同显式给出，内容为空表示本批未登记任何人物。
-    payload = {'nodes': [{'type': 'person', 'name': '坏行', 'quotes': ['不存在']},
+    # 被拒收的行仍然是「原文数组的第几个」：坏行是事件（只有事件带 quotes，`U-09`），
+    # 它的引文不成立被拒，后面那行的 @ 引用不变。
+    payload = {'nodes': [{'type': 'event', 'name': '坏事件', 'participants': [], 'quotes': ['原文没有这句']},
                          {'type': 'event', "location": "未知", 'name': '后发生', 'participants': [],
                           'quotes': ['甲再停。']},
-                         {'type': 'scene', 'name': '先披露', 'quotes': ['甲先走。']}], 'properties': []}
+                         {'type': 'scene', 'name': '先披露'}], 'properties': []}
     parsed = parse_nodes(payload, TEXT)
     assert [(row['name'], row['reference']) for row in parsed['nodes']] == [('先披露', '@3'), ('后发生', '@2')]
+    assert {tuple(row['path']) for row in parsed['rejected']} == {
+        ('nodes', 0, 'quotes'), ('nodes', 0, 'quotes', 0)}
 
 
 def test_event_owner_event_target_and_existing_definition_type_are_preserved(project):
     sid = project.import_source('事件引用', TEXT)
     payload = draft()
     payload['properties'] = [{'node': '@3', 'property': '对应过程', "category": "未分类" , 'value': '@4', 'value_type': 'node',
-                              'op': 'set', 'at_event': '@3', 'related_nodes': ['@4'], 'quotes': ['甲先走。']}]
+                              'op': 'set', 'at_event': '@3', 'related_nodes': ['@4']}]
     original = copy.deepcopy(payload)
     result = project.submit_extraction(sid, payload)
     assert result['status'] == 'accepted', result
@@ -45,7 +47,7 @@ def test_event_owner_event_target_and_existing_definition_type_are_preserved(pro
     assert (row['node_id'], row['value'], row['event_id']) == (first, second, first)
     assert row['related_nodes'] == [second]
     follow = {'nodes': [], 'properties': [{'node': first, 'property': '对应过程', "category": "未分类"  , 'value': second,
-                                          'op': 'set', 'at_event': second, 'quotes': ['甲再停。']}]}
+                                          'op': 'set', 'at_event': second}]}
     assert project.submit_extraction(sid, follow)['status'] == 'accepted'
     values = [row for row in project.property_records() if row['kind'] == 'property_change' and row['property_id'] == '对应过程']
     assert len(values) == 2 and all(row['value'] == second for row in values)
@@ -55,8 +57,8 @@ def test_node_selector_expiry_resolves_local_target_to_formal_id(project):
     sid = project.import_source('指向失效', TEXT)
     payload = draft()
     payload['properties'] = [{'node': '@1', 'property': '对应过程', "category": "未分类" , 'value': '@3', 'value_type': 'node',
-                              'op': 'set', 'at_event': '@3', 'quotes': ['甲先走。']}]
-    payload['properties'].append({'node': '@1', 'property': '对应过程' , "category": "未分类", 'op': 'clear', 'at_event': '@4', 'quotes': ['甲再停。']})
+                              'op': 'set', 'at_event': '@3'}]
+    payload['properties'].append({'node': '@1', 'property': '对应过程' , "category": "未分类", 'op': 'clear', 'at_event': '@4'})
     result = project.submit_extraction(sid, payload)
     assert result['status'] == 'accepted', result
     row = next(row for row in project.property_records() if row['kind'] == 'property_change' and row['property_id'] == '对应过程')
@@ -84,7 +86,7 @@ def test_unknown_explicit_reference_never_silently_disappears(project, field):
         payload['nodes'][2][field] = ['@99']
     else:
         payload['properties'] = [{'node': '@1', 'property': '状态' , "category": "未分类", 'value': '行走', 'op': 'set', 'at_event': '@3',
-                                  'related_nodes': ['@99'], 'quotes': ['甲先走。']}]
+                                  'related_nodes': ['@99']}]
     result = project.preview_extraction(sid, payload)
     assert not result['valid']
     assert any('@99' in row['message'] for row in result['diagnostics'])

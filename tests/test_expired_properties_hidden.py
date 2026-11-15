@@ -27,8 +27,8 @@ def ops(tmp_path, monkeypatch):
     source = project.import_source("外貌", TEXT)
     accepted = project.submit_extraction(source, {
         "nodes": [
-            {"type": "person", "name": "李强", "quotes": ["李强"]},
-            {"type": "scene", "name": "出场", "quotes": ["李强今年二十九岁"]},
+            {"type": "person", "name": "李强"},
+            {"type": "scene", "name": "出场"},
             {"type": "event", "name": FIRST, "scene": "出场", "participants": ["李强"],
              "location": "未知", "quotes": ["个头矮小，皮肤黝黑"]},
             {"type": "event", "name": SECOND, "scene": "出场", "participants": ["李强"],
@@ -36,10 +36,10 @@ def ops(tmp_path, monkeypatch):
         ],
         "properties": [
             {"node": "李强", "property": "外貌", "value": "矮小黑瘦", "value_type": "string",
-             "scope": "world", "at_event": FIRST, "op": "set", "quotes": ["个头矮小，皮肤黝黑"],
+             "scope": "world", "at_event": FIRST, "op": "set",
              "category": "外貌"},
             {"node": "李强", "property": "外貌", "value": "身高一百八十公分", "value_type": "string",
-             "scope": "world", "at_event": SECOND, "op": "set", "quotes": ["如今身高一百八十公分"],
+             "scope": "world", "at_event": SECOND, "op": "set",
              "category": "外貌"},
         ],
     })

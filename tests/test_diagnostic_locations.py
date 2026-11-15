@@ -70,7 +70,7 @@ def test_material_title_check_has_public_input_location_and_fixed_target(project
     text = '林岚。'
     source = project.import_source('资料测试', text)
     accepted = project.submit_extraction(source, {'nodes': [
-        {'type': 'person', 'name': '林岚', 'quotes': [text]}], 'properties': []})
+        {'type': 'person', 'name': '林岚'}], 'properties': []})
     assert accepted['status'] == 'accepted'
     person = next(n['id'] for n in project.graph_snapshot()['nodes'] if n['name'] == '林岚')
     staged = project.material_add_card(person, '', '正文保留')
@@ -100,9 +100,9 @@ def test_property_checks_report_public_argument_not_generated_record_path(projec
     text = '林岚在会议室宣布延期。'
     source = project.import_source('属性位置', text)
     result = project.submit_extraction(source, {'nodes': [
-        {'type': 'person', 'name': '林岚', 'quotes': [text]},
-        {'type': 'location', 'name': '会议室', 'quotes': ['会议室']},
-        {'type': 'scene', 'name': '会议延期', 'quotes': [text]},
+        {'type': 'person', 'name': '林岚'},
+        {'type': 'location', 'name': '会议室'},
+        {'type': 'scene', 'name': '会议延期'},
         {'type': 'event', 'name': '宣布延期', 'scene': '@3', 'location': '@2', 'quotes': [text],
          'participants': ['@1']},
     ], 'properties': []})

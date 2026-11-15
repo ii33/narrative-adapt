@@ -23,8 +23,8 @@ TEXT="甲进屋。甲离开。"
 
 def draft(name="甲进出屋"):
     return {"nodes":[
-        {"type":"person","name":"甲","quotes":["甲进屋。"]},
-        {"type":"location","name":"屋","quotes":["甲进屋。"]},
+        {"type":"person","name":"甲"},
+        {"type":"location","name":"屋"},
         {"type":"big_event","name":name},
         {"type":"scene","name":"屋内行动","big_event":"@3"},
         {"type":"event","name":"甲进屋","scene":"@4","participants":["@1"],"location":"@2","quotes":["甲进屋。"]},

@@ -23,9 +23,9 @@ def draft(quotes=None, *, name='甲乙握手', new_occurrence=False, existing_id
         event['new_occurrence'] = True
     if existing_id:
         event['existing_id'] = existing_id
-    nodes = [{'type': 'person', 'name': '甲', 'quotes': [Q1]},
-             {'type': 'person', 'name': '乙', 'quotes': [Q1]},
-             {'type': 'scene', 'name': '会面', 'quotes': [Q1]}, event]
+    nodes = [{'type': 'person', 'name': '甲'},
+             {'type': 'person', 'name': '乙'},
+             {'type': 'scene', 'name': '会面'}, event]
     if extra_event:
         nodes.append({'type': 'event', "location": "未知", 'name': '甲向乙点头', 'scene': '会面',
                       'participants': ['甲', '乙'], 'quotes': [Q3]})
@@ -166,7 +166,7 @@ def test_invalid_existing_id_rejects_the_whole_extraction_without_pending(projec
         target['retracted'] = True
         assert project.apply_changes([target], [], project.graph_project_info()['revision'], reason='合成工程修订')['status'] == 'accepted'
         payload['nodes'][-1]['existing_id'] = target['id']
-    payload['nodes'].append({'type': 'item', 'name': '手', 'quotes': ['手']})
+    payload['nodes'].append({'type': 'item', 'name': '手'})
     before = copy.deepcopy(project.graph_snapshot())
     records = copy.deepcopy(project.property_records())
     assert not preview_first_day(project, sid, payload)['valid']
@@ -225,7 +225,7 @@ def test_legacy_primary_exact_match_does_not_invent_missing_or_override_conflict
     nodes = [event]
     if context_input == 'scene_conflict':
         event['scene'] = '另一场景'
-        nodes.append({'type': 'scene', 'name': '另一场景', 'quotes': [Q1]})
+        nodes.append({'type': 'scene', 'name': '另一场景'})
     elif context_input == 'participants_conflict':
         event['participants'] = ['甲']
     payload = {'nodes': nodes, 'properties': []}

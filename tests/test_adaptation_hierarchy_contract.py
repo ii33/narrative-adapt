@@ -14,8 +14,8 @@ def seed(ops):
     for index, (name, quote) in enumerate(zip(("开门", "入屋", "过桥", "停步"), ("甲开门。", "甲入屋。", "乙过桥。", "乙停步。"), strict=True)):
         branch = "屋内" if index < 2 else "桥上"
         if index in (0, 2):
-            nodes.extend([{"type": "big_event", "name": branch, "quotes": [text[:8] if index == 0 else text[8:]]},
-                          {"type": "scene", "name": branch + "场", "big_event": branch, "quotes": [text[:8] if index == 0 else text[8:]]}])
+            nodes.extend([{"type": "big_event", "name": branch},
+                          {"type": "scene", "name": branch + "场", "big_event": branch}])
         # 本批只登记大事件/场景/事件，不建人物节点（下面的候选与导入集合是精确断言），
         # 原文里的甲乙在本批没有可引用的节点，故参与者键显式给空数组。
         nodes.append({"type": "event", "location": "未知", "name": name, "scene": branch + "场",
@@ -23,7 +23,7 @@ def seed(ops):
     result = ops.submit_extraction(sid, {"nodes": nodes, "properties": []})
     assert result["status"] == "accepted", result
     ids = {n["name"]: n["id"] for n in ops.graph_snapshot()["nodes"]}
-    assert ops.submit_extraction(sid, {"nodes": [{"type": "action", "name": "开门动作", "event": ids["开门"], "quotes": ["甲开门"]}], "properties": []})["status"] == "accepted"
+    assert ops.submit_extraction(sid, {"nodes": [{"type": "action", "name": "开门动作", "event": ids["开门"]}], "properties": []})["status"] == "accepted"
     return {n["name"]: n["id"] for n in ops.graph_snapshot()["nodes"]}
 
 

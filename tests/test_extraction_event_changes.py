@@ -14,17 +14,17 @@ def project(tmp_path, monkeypatch):
     text = '😀甲和乙在大厅见面。甲与乙成为朋友。后来甲明确结束友谊。'
     sid = ops.import_source('变化', text)
     nodes = [
-        {'type': 'person', 'name': name, 'quotes': [text]} for name in ['甲', '乙']
+        {'type': 'person', 'name': name} for name in ['甲', '乙']
     ] + [
-        {'type': 'scene', 'name': '大厅会面', 'quotes': [text]},
+        {'type': 'scene', 'name': '大厅会面'},
         {'type': 'event', "location": "未知", 'name': '结交', 'scene': '大厅会面', 'participants': ['甲', '乙'], 'quotes': ['甲与乙成为朋友。']},
         {'type': 'event', "location": "未知", 'name': '绝交', 'scene': '大厅会面', 'participants': ['甲', '乙'], 'quotes': ['后来甲明确结束友谊。']},
     ]
     draft = {'nodes': nodes, 'properties': [
         {'node': '甲', 'property': '朋友'  , "category": "未分类", 'at_event': '结交', 'op': 'set', 'value': '乙',
-         'value_type': 'node', 'quotes': ['甲与乙成为朋友。']},
+         'value_type': 'node'},
         {'node': '甲', 'property': '朋友' , "category": "未分类", 'at_event': '绝交', 'op': 'remove', 'value': '乙',
-         'value_type': 'node', 'quotes': ['后来甲明确结束友谊。']},
+         'value_type': 'node'},
     ]}
     return ops, sid, text, draft
 
@@ -35,7 +35,10 @@ def test_extraction_sequences_quotes_identity_and_current_relationship(project):
     assert result['status'] == 'accepted', result
     changes = [r for r in ops.property_records() if r['kind'] == 'property_change' and r['property_id'] == '朋友']
     assert len(changes) == 2
-    assert {r['sequence'] for r in changes} == {text.index('甲与乙成为朋友。'), text.index('后来甲明确结束友谊。')}
+    # 属性不填引文（`U-09`）：序号取 at_event 事件的披露起点，同事件内依次递增。
+    # 事件自己的「地点未知」变更先占了事件起点，所以这两条从起点 +1 开始。
+    starts = [text.index('甲与乙成为朋友。') + 1, text.index('后来甲明确结束友谊。') + 1]
+    assert [r['sequence'] for r in sorted(changes, key=lambda row: row['sequence'])] == starts
     assert not any({'valid_from', 'valid_to'} & r.keys() for r in changes)
     ids = {n['name']: n['id'] for n in ops.graph_snapshot()['nodes']}
     assert ops.property_state(ids['甲'], '朋友')['state'] == {'kind': 'absent'}
@@ -91,7 +94,8 @@ def test_collection_relationship_projection_retains_original_change_evidence(pro
     ops, sid, _, draft = project
     draft['properties'] = [draft['properties'][0] | {'cardinality': 'many', 'value': ['乙']}]
     assert ops.submit_extraction(sid, draft)['status'] == 'accepted'
-    stored = next(r for r in ops.property_records() if r['kind'] == 'property_change')
+    stored = next(r for r in ops.property_records()
+                  if r['kind'] == 'property_change' and r['property_id'] == '朋友')
     edge = _relation_map(ops, {})['edges'][0]
     assert edge['records'][0]['value'] == stored['value']
     assert edge['records'][0]['evidence'] == stored['evidence']
@@ -110,8 +114,7 @@ def test_false_zero_unknown_and_exact_schema_contract(project):
     assert ops.property_state(names['甲'], '计数')['state']['values'] == [0]
     assert ops.property_state(names['甲'], '开启')['state']['values'] == [False]
     unknown = {'nodes': [], 'properties': [{
-        'node': names['甲'], 'property': '计数'  , "category": "未分类", 'at_event': names['绝交'], 'op': 'unknown',
-        'quotes': ['后来甲明确结束友谊。']}]}
+        'node': names['甲'], 'property': '计数'  , "category": "未分类", 'at_event': names['绝交'], 'op': 'unknown'}]}
     assert ops.submit_extraction(sid, unknown)['status'] == 'accepted'
     assert ops.property_state(names['甲'], '计数')['state'] == {'kind': 'unknown'}
     fields = RESULT_SCHEMA['properties']['properties']['items']['properties']
@@ -120,12 +123,17 @@ def test_false_zero_unknown_and_exact_schema_contract(project):
     assert 'expirations' not in RESULT_SCHEMA['properties']
 
 
-def test_node_editor_anchor_steps_include_actions_in_source_order(project):
+def test_node_editor_anchor_steps_include_actions_at_their_event_position(project):
+    """动作不填引文：它的披露位置就是直属事件的，所以与所属事件同点（已知缺口见交付报告）。"""
     ops, sid, _, draft = project
-    draft['nodes'].append({'type': 'action', 'name': '确认友谊', 'event': '@4',
-                           'quotes': ['成为朋友。']})
+    draft['nodes'].append({'type': 'action', 'name': '确认友谊', 'event': '@4'})
     assert ops.submit_extraction(sid, draft)['status'] == 'accepted'
     names = {n['name']: n['id'] for n in ops.graph_snapshot()['nodes']}
     editor = ops.node_editor(names['甲'])
-    assert [r['id'] for r in editor['anchor_steps']] == [names['结交'], names['确认友谊'], names['绝交']]
+    steps = {r['id']: r for r in editor['anchor_steps']}
+    assert set(steps) == {names['结交'], names['确认友谊'], names['绝交']}
+    action = next(row for row in ops.graph_snapshot()['nodes'] if row['node_type'] == 'action')
+    event = next(row for row in ops.graph_snapshot()['nodes'] if row['id'] == names['结交'])
+    assert action['disclosure'] == event['disclosure']
+    assert steps[names['确认友谊']]['start'] == event['disclosure']['start']
     assert all(r['kind'] == 'event' for r in editor['events'])

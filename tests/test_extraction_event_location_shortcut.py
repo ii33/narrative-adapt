@@ -16,11 +16,11 @@ def project(tmp_path, monkeypatch):
 
 
 def draft(location='@3'):
-    return {'nodes': [{'type': 'scene', 'name': '会场', 'quotes': [TEXT]},
+    return {'nodes': [{'type': 'scene', 'name': '会场'},
         # 原文只有厅与灯，没有出场人物：参与者键必填但内容确实为空。
         {'type': 'event', 'name': '会议结束', 'scene': '@1', 'quotes': [TEXT], 'location': location,
          'participants': []},
-        {'type': 'location', 'name': '大厅', 'quotes': ['大厅']}], 'properties': []}
+        {'type': 'location', 'name': '大厅'}], 'properties': []}
 
 
 @pytest.mark.parametrize('location,op', [('@3', 'set'), ('无', 'set'), ('未知', 'unknown')])
@@ -77,7 +77,7 @@ def test_shortcut_plus_explicit_location_is_never_silently_selected(project, pro
     ops, sid = project
     raw = draft()
     raw['properties'] = [{'node': '@2', 'at_event': '@2', 'property': property_id , "category": "未分类",
-        'op': 'unknown', 'value_type': 'either', 'quotes': [TEXT]}]
+        'op': 'unknown', 'value_type': 'either'}]
     result = ops.submit_extraction(sid, raw)
     assert result['status'] == 'staged', result
     assert any('nodes[1].location' in p['message'] and '双写' in p['message'] for p in result['problems'])

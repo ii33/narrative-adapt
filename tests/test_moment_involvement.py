@@ -18,19 +18,19 @@ QUOTES = ["甲带乙在院门停步。", "丙在茶馆候着。", "甲进入后�
 
 def install(ops):
     sid = ops.import_source("场所与参与者", TEXT)
-    nodes = [{"type": "person", "name": name, "quotes": [QUOTES[1] if name == "丙" else QUOTES[0]]} for name in "甲乙丙"]
-    nodes += [{"type": "location", "name": name, "quotes": [QUOTES[index]]} for index, name in enumerate(["院门", "茶馆", "后院"])]
+    nodes = [{"type": "person", "name": name} for name in "甲乙丙"]
+    nodes += [{"type": "location", "name": name} for index, name in enumerate(["院门", "茶馆", "后院"])]
     nodes += [
-        {"type": "big_event", "name": "会合经过", "quotes": [TEXT]},
-        {"type": "scene", "name": "门前与茶馆", "big_event": "@7", "quotes": [QUOTES[0]+QUOTES[1]]},
-        {"type": "scene", "name": "后院", "big_event": "@7", "quotes": [QUOTES[2]]},
+        {"type": "big_event", "name": "会合经过"},
+        {"type": "scene", "name": "门前与茶馆", "big_event": "@7"},
+        {"type": "scene", "name": "后院", "big_event": "@7"},
         {"type": "event", "name": "门前停步", "scene": "@8", "participants": ["@1"], "quotes": [QUOTES[0]]},
         {"type": "event", "name": "茶馆等候", "scene": "@8", "participants": ["@3"], "quotes": [QUOTES[1]]},
         {"type": "event", "name": "走入后院", "scene": "@9", "participants": ["@1"], "quotes": [QUOTES[2]]},
-        {"type": "action", "name": "同行停下", "event": "@10", "participants": ["@2"], "quotes": [QUOTES[0]]},
+        {"type": "action", "name": "同行停下", "event": "@10", "participants": ["@2"]},
         {"type": "storyline", "name": "会合篇章", "children": ["@7"]},
     ]
-    props = [{"node": f"@{10+i}", "property": "地点", "category": "未分类", "op": "set", "value": f"@{4+i}", "value_type": "node", "scope": "world", "at_event": f"@{10+i}", "quotes": [quote]} for i, quote in enumerate(QUOTES)]
+    props = [{"node": f"@{10+i}", "property": "地点", "category": "未分类", "op": "set", "value": f"@{4+i}", "value_type": "node", "scope": "world", "at_event": f"@{10+i}"} for i, quote in enumerate(QUOTES)]
     payload = {"nodes": nodes, "properties": props}
     result = ops.submit_extraction(sid, payload)
     assert result["status"] == "accepted", result

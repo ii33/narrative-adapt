@@ -312,7 +312,7 @@ def test_source_locator_returns_all_unicode_boundaries_without_mutation(tmp_path
     text = "😀" + title + "\n甲出门。\n😀" + title + "\n乙出门。"
     source_id = ops.import_source("重复标题合成原文", text)
     before = ops.graph_snapshot()
-    result = tool_api.call("locate_source", {"source_id": source_id, "quotes": [title]}, project=entry)
+    result = tool_api.call("locate_source", {"source_id": source_id}, project=entry)
     first = text.index(title)
     second = text.index(title, first + len(title))
     assert result["results"][0]["matches"] == [{"start": start, "end": start + len(title)} for start in (first, second)]

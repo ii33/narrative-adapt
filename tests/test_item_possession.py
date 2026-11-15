@@ -18,9 +18,9 @@ PARTICIPANTS = ([], ["甲"], ["甲", "乙"], ["乙"])
 def setup(project):
     sid = project.import_source("合成物体流转原文", TEXT)
     nodes = [
-        {"type": "scene", "name": "石头流转", "quotes": [TEXT]},
-        {"type": "person", "name": "甲", "quotes": [SENTENCES[1] + "。"]},
-        {"type": "person", "name": "乙", "quotes": [SENTENCES[2] + "。"]},
+        {"type": "scene", "name": "石头流转"},
+        {"type": "person", "name": "甲"},
+        {"type": "person", "name": "乙"},
     ]
     nodes += [
         {"type": "event", "name": sentence, "scene": "石头流转", "location": "未知",

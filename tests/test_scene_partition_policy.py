@@ -18,17 +18,17 @@ def context(tmp_path, monkeypatch):
     text = first + HIDDEN + last
     source = ops.import_source('拆场规则', text)
     accepted = ops.submit_extraction(source, {'nodes': [
-        {'type': 'person', 'name': '甲', 'quotes': [first]},
-        {'type': 'person', 'name': '乙', 'quotes': [HIDDEN]},
-        {'type': 'location', 'name': '城门', 'quotes': ['城门']},
-        {'type': 'location', 'name': '密室', 'quotes': ['密室']},
+        {'type': 'person', 'name': '甲'},
+        {'type': 'person', 'name': '乙'},
+        {'type': 'location', 'name': '城门'},
+        {'type': 'location', 'name': '密室'},
         {'type': 'big_event', 'name': '等候'},
         {'type': 'scene', 'name': '相隔两地的等候', 'big_event': '@5'},
         {'type': 'event', 'name': '入城', 'scene': '@6', 'participants': ['@1'], 'location': '@3', 'quotes': [first]},
         {'type': 'event', 'name': '焚图', 'scene': '@6', 'participants': ['@2'], 'location': '@4', 'quotes': [HIDDEN]},
         {'type': 'event', 'name': '继续等候', 'scene': '@6', 'participants': ['@1'], 'location': '@3', 'quotes': [last]},
     ], 'properties': [{'node': '@1', 'property': '身份', "category": "未分类"  , 'value': '来客', 'value_type': 'string',
-        'scope': 'world', 'at_event': '@7', 'op': 'set', 'quotes': [first]}]})
+        'scope': 'world', 'at_event': '@7', 'op': 'set'}]})
     assert accepted['status'] == 'accepted', accepted
     ids = {n['name']: n['id'] for n in ops.graph_snapshot()['nodes']}
     adaptation = ops.import_adaptation([ids['等候']], 0, '隔离改编')

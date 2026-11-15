@@ -29,8 +29,8 @@ def _build_sources(root):
     text = '甲在车站收到通知。甲在车站确认新安排。'
     source = ops.import_source('来源标注', text)
     result = ops.submit_extraction(source, {'nodes': [
-        {'type': 'person', 'name': '甲', 'quotes': ['甲在车站收到通知。']},
-        {'type': 'location', 'name': '车站', 'quotes': ['车站']},
+        {'type': 'person', 'name': '甲'},
+        {'type': 'location', 'name': '车站'},
         {'type': 'scene', 'name': '车站沟通'},
         {'type': 'event', 'name': '收到通知', 'scene': '@3', 'location': '@2',
          'participants': ['@1'], 'quotes': ['甲在车站收到通知。']},

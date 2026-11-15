@@ -10,7 +10,7 @@ def test_finished_story_reuses_existing_phase_without_repeating_children(project
         {"type": "scene", "name": "屋内", "big_event": "@1"},
         {"type": "event", "location": "未知", "name": "进屋离去", "scene": "@2", "quotes": ["甲进屋。甲离开。"],
          "participants": ["@4"]},
-        {"type": "person", "name": "甲", "quotes": ["甲进屋。"]},
+        {"type": "person", "name": "甲"},
     ], "properties": []}
     first = project.submit_extraction(sid, unfinished)
     assert first["status"] == "accepted", first
@@ -41,7 +41,7 @@ def test_closing_quote_is_rejected_and_storyline_requires_child_evidence(project
     empty = project.preview_extraction(sid, {"nodes": [{"type": "storyline", "name": "全篇"}], "properties": []})
     assert not empty["valid"]
     assert any(d["path"] == ["nodes", 0, "children"] for d in empty["diagnostics"])
-    misplaced = project.preview_extraction(sid, {"nodes": [{"type": "scene", "name": "旧直属", "quotes": ["甲进屋。"], "storyline": "T1"}], "properties": []})
+    misplaced = project.preview_extraction(sid, {"nodes": [{"type": "scene", "name": "旧直属", "storyline": "T1"}], "properties": []})
     assert not misplaced["valid"]
     assert any(d["path"] == ["nodes", 0, "storyline"] for d in misplaced["diagnostics"])
     repeated = project.import_source("重复闭合", "结束。结束。")
@@ -59,7 +59,7 @@ def test_same_parent_declared_from_both_sides_is_one_edge(project):
         {"type": "scene", "name": "屋内", "big_event": "@2", "children": ["@4"]},
         {"type": "event", "location": "未知", "name": "进屋离去", "scene": "@3", "quotes": ["甲进屋。甲离开。"],
          "participants": ["@5"]},
-        {"type": "person", "name": "甲", "quotes": ["甲进屋。"]},
+        {"type": "person", "name": "甲"},
     ], "properties": []}
     original = deepcopy(payload)
     outcome = project.submit_extraction(sid, payload)
@@ -81,7 +81,7 @@ def test_conflicting_distinct_parents_are_not_deduplicated_away(project):
         {"type": "scene", "name": "屋内", "big_event": "@3", "children": ["@5"]},
         {"type": "event", "location": "未知", "name": "进屋", "scene": "@4", "quotes": ["甲进屋。"],
          "participants": ["@6"]},
-        {"type": "person", "name": "甲", "quotes": ["甲进屋。"]},
+        {"type": "person", "name": "甲"},
     ], "properties": []}
     before = project.graph_snapshot()
     result = project.submit_extraction(sid, payload)

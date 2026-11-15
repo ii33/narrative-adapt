@@ -9,7 +9,7 @@ from narrative.tool_api import TOOLS
 
 
 def draft():
-    return {'nodes': [{'type': 'person', 'name': '甲', 'quotes': ['甲。']}],
+    return {'nodes': [{'type': 'person', 'name': '甲'}],
             'properties': [], 'result_note': '仅用于说明的多余字段'}
 
 

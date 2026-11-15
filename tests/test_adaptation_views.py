@@ -21,11 +21,11 @@ def project(tmp_path, monkeypatch):
     text = TEXT.replace("甲约好接乙。", "甲在门口约好接乙。")
     raw = json.dumps(draft_result(ended=False), ensure_ascii=False)
     draft = json.loads(raw.replace(TEXT, text).replace("甲约好接乙。", "甲在门口约好接乙。"))
-    draft["nodes"].append({"type": "location", "name": "门口", "quotes": ["甲在门口约好接乙。"]})
+    draft["nodes"].append({"type": "location", "name": "门口"})
     # The first event's location is expressed explicitly below, never twice.
     next(node for node in draft["nodes"] if node["name"] == "甲约好接乙").pop("location", None)
     draft["properties"].append({"node": "甲约好接乙", "property": "发生地点", "value": "门口",
-        "value_type": "node", "scope": "world", "category": "空间与位置", "quotes": ["甲在门口约好接乙。"],
+        "value_type": "node", "scope": "world", "category": "空间与位置",
         "at_event": "甲约好接乙", "op": "set"})
     source = ops.import_source("合成投影", text)
     assert ops.submit_extraction(source, draft)["status"] == "accepted"

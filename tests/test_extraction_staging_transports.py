@@ -100,14 +100,17 @@ def test_pending_submissions_are_discoverable_without_draft_payload(project, cap
 def test_one_patch_array_fixes_multiple_reported_nodes_without_read_or_resubmit(project):
     sid = project.import_source('多点局部修补', TEXT)
     draft = draft_result(ended=False)
-    draft['nodes'][0]['quotes'] = ['甲的错误引文']
-    draft['nodes'][1]['quotes'] = ['乙的错误引文']
+    # 只有事件带 quotes（`U-09`）：两条事件的引文都写错，问题分别落在各自的原始槽上。
+    draft['nodes'][4]['quotes'] = ['甲的错误引文']
+    draft['nodes'][5]['quotes'] = ['乙的错误引文']
     entry = str(layout(project.project_info().path).entry)
     staged = tool_api.call('submit_extraction', {'source_id': sid, 'result': draft}, project=entry)
     assert staged['status'] == 'staged'
     targeted = {target['index'] for problem in staged['problems'] for target in problem.get('targets', []) if target['section'] == 'nodes'}
-    assert {0, 1} <= targeted
+    assert {4, 5} <= targeted
     fixed = tool_api.call('patch_extraction_submission', {'submission_id': staged['submission_id'],
         'expected_revision': staged['submission_revision'], 'reason': '按已给反馈一次修复两个引文字段',
-        'patches': [{'op': 'set', 'section': 'nodes', 'index': index, 'field': 'quotes', 'value': ['甲约好接乙。']} for index in [0, 1]]}, project=entry)
+        'patches': [{'op': 'set', 'section': 'nodes', 'index': 4, 'field': 'quotes', 'value': ['甲约好接乙。']},
+                    {'op': 'set', 'section': 'nodes', 'index': 5, 'field': 'quotes', 'value': ['甲接到乙后离开。']}]},
+        project=entry)
     assert fixed['status'] == 'accepted' and fixed['submission_revision'] == 2 and not fixed['problems']

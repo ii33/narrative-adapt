@@ -21,15 +21,16 @@ def context(tmp_path, monkeypatch):
 
 
 def staged(ops, source):
+    """一份故意过不了静态检查的草稿：事件没有定位依据（`U-09`，`anchor` 或 quotes 二选一）。"""
     return ops.submit_extraction(source, {'nodes': [
-        {'type': 'person', 'name': '待修人物', 'quotes': ['原文没有的句子']},
+        {'type': 'event', 'name': '待修事件', 'participants': [], 'location': '未知'},
     ], 'properties': []})
 
 
 def test_delete_removes_only_selected_draft_preserves_facts_history_and_counter(context):
     ops, entry, source = context
     accepted = ops.submit_extraction(source, {'nodes': [
-        {'type': 'person', 'name': '甲', 'quotes': ['甲。']},
+        {'type': 'person', 'name': '甲'},
     ], 'properties': []})
     assert accepted['status'] == 'accepted'
     first, second = staged(ops, source), staged(ops, source)
@@ -63,7 +64,7 @@ def test_stale_or_committed_submission_is_not_deleted(context):
         ops.delete_extraction_submission(draft['submission_id'], 2, '过期删除')
     assert ops.read_extraction_submission(draft['submission_id'])['submission_revision'] == 1
     committed = ops.submit_extraction(source, {'nodes': [
-        {'type': 'person', 'name': '甲', 'quotes': ['甲。']},
+        {'type': 'person', 'name': '甲'},
     ], 'properties': []})
     facts = ops.graph_snapshot(), ops.property_records()
     with pytest.raises(ContentGuardError, match='入库'):

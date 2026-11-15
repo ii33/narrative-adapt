@@ -10,12 +10,11 @@ from test_screenplay_timeline import create, import_points
 def seed_relations(ops):
     sid = ops.import_source("并列关系", "甲让乙办事。甲让丙办事。")
     result = ops.submit_extraction(sid, {"nodes": [
-        {"type": "person", "name": name, "quotes": ["甲让乙办事。" if name != "丙" else "甲让丙办事。"]} for name in ("甲", "乙", "丙")
-    ] + [{"type": "scene", "name": "办事", "quotes": ["甲让乙办事。甲让丙办事。"]},
+        {"type": "person", "name": name} for name in ("甲", "乙", "丙")
+    ] + [{"type": "scene", "name": "办事"},
          {"type": "event", "location": "未知", "name": "派乙", "scene": "办事", "participants": ["甲", "乙"], "quotes": ["甲让乙办事。"]},
          {"type": "event", "location": "未知", "name": "派丙", "scene": "办事", "participants": ["甲", "丙"], "quotes": ["甲让丙办事。"]}],
-        "properties": [{"node": "甲", "property": "下属"  , "category": "未分类", "value": name, "value_type": "node", "at_event": event, "op": "set",
-                        "quotes": [quote]} for name, event, quote in (("乙", "派乙", "甲让乙办事。"), ("丙", "派丙", "甲让丙办事。"))]})
+        "properties": [{"node": "甲", "property": "下属"  , "category": "未分类", "value": name, "value_type": "node", "at_event": event, "op": "set"} for name, event, quote in (("乙", "派乙", "甲让乙办事。"), ("丙", "派丙", "甲让丙办事。"))]})
     assert result["status"] == "accepted", result
     ops.sync_adaptation()
     return {node["name"]: node["id"] for node in ops.adaptation_snapshot()["nodes"]}

@@ -74,12 +74,13 @@ def test_graph_content_invalid_stage_no_nested_duplicate_and_patch(project):
 def test_extraction_adapter_is_discoverable_readable_and_patchable(project):
     sid = project.import_source('原文', TEXT)
     draft = draft_result(ended=False)
-    draft['nodes'][0]['quotes'] = ['不存在']
+    # 只有事件能带 quotes（`U-09`）：把第一个事件的引文改错，问题仍落在原始字段槽上。
+    draft['nodes'][4]['quotes'] = ['不存在']
     staged = project.submit_extraction(sid, draft)
     assert project.list_content_submissions(operation='submit_extraction')['submissions'][0]['submission_id'] == staged['submission_id']
     args = project.read_content_submission(staged['submission_id'], paths=[[]])['values'][0]['value']
-    assert args['result']['nodes'][0]['quotes'] == ['不存在']
-    patch = [{'op': 'set', 'path': ['result', 'nodes', 0, 'quotes'], 'value': ['甲约好接乙。']}]
+    assert args['result']['nodes'][4]['quotes'] == ['不存在']
+    patch = [{'op': 'set', 'path': ['result', 'nodes', 4, 'quotes'], 'value': ['甲约好接乙。']}]
     resolved = project.preview_content_patch(staged['submission_id'], 1, patch)
     assert resolved['operation'] == 'submit_extraction'
     assert project.patch_content_submission(staged['submission_id'], 1, patch, '仅修引文')['status'] == 'accepted'

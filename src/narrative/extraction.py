@@ -50,8 +50,14 @@ def _batch_participant_kind(value: str, rows: list, declared: dict[str, str]) ->
     return declared.get(value, "")
 
 
-def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], locations: dict, lookup=None) -> list[dict]:
-    """Verify property observations the same way as nodes: exact quote, known owner."""
+def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], locations: dict,
+                      lookup=None, spans: dict[int, tuple[int, int]] | None = None) -> list[dict]:
+    """Verify property observations the same way as nodes: exact quote, known owner.
+
+    ``quotes`` 是可选的：给了就按节点同样的规则逐字定位，不给就不产生证据。
+    程序自己生成的行（事件地点快捷字段）可能带 ``spans``——那是已经核对过的
+    精确坐标，不再回到原文里搜一遍。
+    """
     if not isinstance(rows, list):
         return []
     properties: list[dict] = []
@@ -87,15 +93,19 @@ def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], lo
         quote_entries = [(index, str(item)) for index, item in enumerate(row.get('quotes') or []) if str(item).strip()]
         quotes = [quote for _, quote in quote_entries]
         good = []
+        span = (spans or {}).get(draft_index)
         for quote_index, quote in quote_entries:
             index, found = _locate(text, quote, locations, lookup)
             if index < 0:
                 _diagnostic(rejected, path + ['quotes', quote_index], f'{node_name}.{property_id}', '引文不在指定原文范围中', quote=quote[:60])
                 continue
             good.append({"quote": found, "start": index})
-        if not good:
-            _diagnostic(rejected, path + ['quotes'], f'{node_name}.{property_id}', '缺少非空quotes原文引文数组' if not quotes else '没有可用的原文引文')
+        if quotes and not good:
+            _diagnostic(rejected, path + ['quotes'], f'{node_name}.{property_id}', '没有可用的原文引文')
             continue
+        if not quotes and span is not None:
+            # 程序生成的精确坐标：截取到的就是原文子串，不需要再搜。
+            good = [{"quote": text[span[0]:span[1]], "start": span[0]}]
         good.sort(key=lambda item: item["start"])
         op = row.get('op')
         if not isinstance(op, str) or op not in {'set', 'add', 'remove', 'clear', 'unknown'}:
@@ -116,7 +126,7 @@ def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], lo
             "value_type": value_type,
             **({"cardinality": row["cardinality"]} if "cardinality" in row else {}),
             **({"symmetric": row["symmetric"]} if "symmetric" in row else {}),
-            "start": good[0]["start"] if good else 0,
+            "start": good[0]["start"] if good else None,
             "quotes": [item["quote"] for item in good],
             "scope": str(row.get("scope") or "world").strip(),
             "holder": str(row.get("holder") or "").strip(),
@@ -130,7 +140,9 @@ def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], lo
                 if str(item).strip()
             ],
         })
-    properties.sort(key=lambda item: item["start"])
+    # 没有引文的属性行没有原文坐标可排（evidence 由 at_event 指向事件承担），
+    # 稳定排序保序：同批里它们按提交顺序排在所有有坐标的行之后。
+    properties.sort(key=lambda item: item["start"] if item["start"] is not None else float("inf"))
     return properties
 
 
@@ -177,12 +189,15 @@ def _participant_domain_error(participants: list, rows: list, declared: dict[str
     return None
 
 
-def parse_nodes(payload: dict, text: str) -> dict:
-    """Verify every quote and pin each node to its first appearance.
+def parse_nodes(payload: dict, text: str, *, node_spans: dict[int, tuple[int, int]] | None = None,
+                property_spans: dict[int, tuple[int, int]] | None = None) -> dict:
+    """Verify every given quote and pin each node to its first appearance.
 
-    A node survives only if at least one quote is a literal substring of the
-    source; rejected quotes are reported with the reason instead of dropped
-    silently.
+    证据是可选的：节点或属性给了引文，每条都必须是原文的逐字子串；不给就不产生
+    证据，也不因此拒收——实体与属性的出处是它参与的事件（``participants``、
+    事件处的属性变更、``at_event``）。**事件例外**：它必须给定位依据，``anchor``
+    或 ``quotes`` 二选一，``node_spans`` 就是已经核对过的 anchor 坐标。rejected
+    quotes are reported with the reason instead of dropped silently.
     """
     rows = payload.get("nodes")
     if not isinstance(rows, list):
@@ -258,25 +273,41 @@ def parse_nodes(payload: dict, text: str) -> dict:
         is_container = node_type in {'scene', 'big_event', 'storyline'}
         quote_entries = [(index, str(item)) for index, item in enumerate(row.get('quotes') or []) if str(item).strip()]
         quotes = [quote for _, quote in quote_entries]
+        if node_type != 'event' and quotes:
+            _diagnostic(rejected, path + ['quotes'], name,
+                        f'仅事件可填quotes：{node_type}以它参与的事件为出处，容器由下级证据派生，都不提供自身引文')
+            continue
         if is_container:
             quote_entries = []  # Container evidence comes only from verified children.
         good: list[dict] = []
-        for quote_index, quote in quote_entries:
-            index, found = _locate(text, quote, locations, lookup)
-            if index < 0:
-                _diagnostic(rejected, path + ['quotes', quote_index], name, '引文不在指定原文范围中', quote=quote[:60])
-                continue
-            positions = lookup.positions(found, 2) if node_type == "event" else []
-            if len(positions) > 1:
-                _diagnostic(rejected, path + ['quotes', quote_index], name,
-                            '事件引文在提交范围出现多处，不能任取首处作为精确身份依据；请缩小提交范围或提供更具体的逐字引文',
-                            quote=found, positions_sample=positions, position_basis='submission_relative')
-            good.append({"quote": found, "start": index})
-        if not name or (not good and not is_container):
-            if not name:
-                _diagnostic(rejected, path + ['name'], name, 'name必须是非空字符串')
-            if name:
-                _diagnostic(rejected, path + ['quotes'], name, '缺少非空quotes原文引文数组' if not quotes else '没有可用的原文引文')
+        span = (node_spans or {}).get(original_index - 1)
+        if is_container:
+            pass  # 容器证据只从已验证的下级派生，模型给的位置锚点/引文都不算自身证据
+        elif span is not None:
+            # 位置锚点已核对过范围：截到的就是原文子串，也不必再判「同句多处」——
+            # 坐标本身就是消歧。
+            good = [{"quote": text[span[0]:span[1]], "start": span[0]}]
+        else:
+            for quote_index, quote in quote_entries:
+                index, found = _locate(text, quote, locations, lookup)
+                if index < 0:
+                    _diagnostic(rejected, path + ['quotes', quote_index], name, '引文不在指定原文范围中', quote=quote[:60])
+                    continue
+                positions = lookup.positions(found, 2) if node_type == "event" else []
+                if len(positions) > 1:
+                    _diagnostic(rejected, path + ['quotes', quote_index], name,
+                                '事件引文在提交范围出现多处，不能任取首处作为精确身份依据；请缩小提交范围或提供更具体的逐字引文',
+                                quote=found, positions_sample=positions, position_basis='submission_relative')
+                good.append({"quote": found, "start": index})
+        if not name:
+            _diagnostic(rejected, path + ['name'], name, 'name必须是非空字符串')
+            continue
+        if node_type == 'event' and not good:
+            if quotes:
+                _diagnostic(rejected, path + ['quotes'], name, '没有可用的原文引文')
+            else:
+                _diagnostic(rejected, path + ['anchor'], name,
+                            '事件必须给定位依据：anchor{start,end}（推荐）或非空quotes逐字引文，二者至少一个')
             continue
         if row.get("existing_id") is not None and not isinstance(row["existing_id"], str):
             _diagnostic(rejected, path + ['existing_id'], name, 'existing_id须为节点ID字符串')
@@ -292,7 +323,8 @@ def parse_nodes(payload: dict, text: str) -> dict:
             "name": name,
             "reference": f"@{original_index}",
             "type": node_type,
-            "start": good[0]["start"] if good else 0,
+            # 没有定位依据的节点不冒称一个原文坐标：start 为 None，交由批次起点定序。
+            "start": good[0]["start"] if good else None,
             "quotes": [item["quote"] for item in good],
             "evidence_spans": [{"start": item["start"], "end": item["start"] + len(item["quote"]),
                                 "quote": item["quote"]} for item in good],
@@ -312,8 +344,9 @@ def parse_nodes(payload: dict, text: str) -> dict:
             "big_event": str(row.get("big_event") or "").strip(),
         })
 
-    # Reading order inside each type, then grouped for display.
-    nodes.sort(key=lambda item: (item["start"], item["name"]))
+    # Reading order inside each type, then grouped for display. 无坐标的节点按名称
+    # 排在最前（start 为 None），同一个批次内顺序确定，不随提交顺序漂移。
+    nodes.sort(key=lambda item: (item["start"] is not None, item["start"] or 0, item["name"]))
 
     grouped: dict[str, list[dict]] = {node_type: [] for node_type in NODE_TYPES}
     for node in nodes:
@@ -384,6 +417,15 @@ def _node_spans(item: dict, source_id: str) -> list[dict]:
     return [{"source_id": source_id, **span} for span in item.get("evidence_spans") or []]
 
 
+def _mention_key(item: dict) -> tuple:
+    """A node mention's identity key: type + name + its first verified quote.
+
+    只有事件一定带引文；实体与容器不填（容器另有派生证据），所以这里必须容忍
+    空的引文列表——没有引文时键退化为「类型 + 名称」，由 batch 内的引用解析负责。
+    """
+    return (item["type"], item["name"], item["quotes"][0] if item["quotes"] else "")
+
+
 def _span_key(span: dict) -> tuple:
     return (span.get("source_id"), span.get("start"), span.get("end"), span.get("quote"))
 
@@ -436,8 +478,9 @@ def _event_reuse_candidates(item: dict, snapshot: dict, source_id: str,
         if isinstance(start, int) and isinstance(primary.get("quote"), str):
             recorded.append({"source_id": primary.get("source_id"), "start": start,
                              "end": start + len(primary["quote"]), "quote": primary["quote"]})
+        first_quote = item["quotes"][0] if item["quotes"] else ""
         exact_primary = bool(
-            primary.get("quote") == item["quotes"][0]
+            first_quote and primary.get("quote") == first_quote
             and primary.get("source_id") == source_id and start == item["start"]
         )
         # Strict primary-quote identity stays valid when a correction omits the
@@ -467,6 +510,103 @@ def observation_key(row: dict) -> str:
         "quote": evidence.get("quote"), "evidence_source": evidence.get("source_id"),
     }
     return json.dumps(fields, sort_keys=True, ensure_ascii=False, allow_nan=False)
+
+
+def _entity_event_anchors(objects, nodes_by_id, changes, definitions, action_parents,
+                          orders, fallback_ordinal) -> None:
+    """实体的阅读位置 = 它最早挂靠的那个事件的位置。
+
+    事件是唯一自带原文位置的对象：实体（人／群体／地点／物品／动作）不填引文，
+    它的出处就是它参与的事件。这里只补「自己没有任何证据、也不是事件或容器」的
+    节点——取最早挂靠的事件（先看是哪种挂靠，再看事件链正式顺序与 Unicode 起点），
+    把那个事件的 ``evidence``／``disclosure`` 抄过来，形状与模型亲自给引文时一致，
+    所以阅读位置查询、浏览排序与「定位原文」都不需要另一套语义。找不到落点的
+    实体保持没有位置，由静态检查的 ``entity_unanchored`` 报出来。
+    """
+    from .event_location import LOCATION_PROPERTIES, LOCATION_SEMANTICS
+
+    def point(event_id):
+        disclosure = (nodes_by_id.get(event_id) or {}).get("disclosure") or {}
+        start = disclosure.get("start")
+        if not isinstance(start, int):
+            return None
+        return (orders.get(disclosure.get("source_id"), fallback_ordinal), start)
+
+    def anchored_at(identifier):
+        """动作不填引文：它和它的事件同点，所以挂靠位置要落到那个事件上。"""
+        return action_parents.get(identifier, identifier)
+
+    location_properties = set(LOCATION_PROPERTIES) | {
+        key for key, row in definitions.items() if row.get("semantic") in LOCATION_SEMANTICS}
+    holder_properties = {key for key, row in definitions.items() if row.get("semantic") == "item_holder"} or {"持有者"}
+
+    participants: dict[str, list[str]] = {}
+    for identifier, node in nodes_by_id.items():
+        if node.get("node_type") not in {"event", "action"} or node.get("retracted"):
+            continue
+        for member in node.get("participants") or []:
+            if isinstance(member, str):
+                participants.setdefault(member, []).append(anchored_at(identifier))
+
+    location_at: dict[str, list[str]] = {}
+    possession_at: dict[str, list[str]] = {}
+    referenced_at: dict[str, list[str]] = {}
+    for row in changes:
+        event_id = row.get("event_id")
+        if not isinstance(event_id, str) or row.get("scope", "world") != "world" or row.get("holder_id"):
+            continue
+        if row.get("op") not in {"set", "add"}:
+            continue
+        event_id = anchored_at(event_id)
+        value = row.get("value")
+        targets = [item for item in (value if isinstance(value, list) else [value]) if isinstance(item, str)]
+        targets += [item for item in row.get("related_nodes") or [] if isinstance(item, str)]
+        for target in targets:
+            referenced_at.setdefault(target, []).append(event_id)
+            if row.get("node_id") == event_id and row.get("property_id") in location_properties:
+                location_at.setdefault(target, []).append(event_id)
+            if row.get("property_id") in holder_properties:
+                possession_at.setdefault(target, []).append(event_id)
+        if isinstance(row.get("node_id"), str):
+            # 属性主体自己也是「在事件处被引用」：物品的持有状态、人物的身份都在事件处写。
+            referenced_at.setdefault(row["node_id"], []).append(event_id)
+
+    def earliest(event_ids):
+        ranked = [entry for entry in ((point(event_id), event_id) for event_id in event_ids)
+                  if entry[0] is not None]
+        return min(ranked)[1] if ranked else None
+
+    for obj in objects:
+        if obj.get("kind") != "node" or obj.get("node_type") in {"event", "scene", "big_event", "storyline"}:
+            continue
+        if obj.get("evidence"):
+            continue
+        identifier, kind = obj["id"], obj["node_type"]
+        if kind in {"person", "group"}:
+            candidates = participants.get(identifier, [])
+        elif kind == "location":
+            candidates = location_at.get(identifier) or referenced_at.get(identifier, [])
+        elif kind == "item":
+            candidates = possession_at.get(identifier) or referenced_at.get(identifier, [])
+        elif kind == "action":
+            candidates = [action_parents[identifier]] if identifier in action_parents else []
+        else:
+            continue
+        context = obj.get("context_id", "canon")
+        candidates = [event_id for event_id in candidates
+                      if (nodes_by_id.get(event_id) or {}).get("context_id", "canon") == context]
+        event_id = earliest(candidates)
+        if event_id is None:
+            continue
+        source = nodes_by_id.get(event_id) or {}
+        evidence, disclosure = source.get("evidence") or {}, source.get("disclosure") or {}
+        quote, start = evidence.get("quote"), disclosure.get("start")
+        if not isinstance(quote, str) or not quote or not isinstance(start, int):
+            continue
+        obj["evidence"] = {"source_id": evidence.get("source_id"), "quote": quote}
+        obj["disclosure"] = {"source_id": disclosure.get("source_id"), "start": start}
+        obj["evidence_spans"] = [{"source_id": evidence.get("source_id"), "start": start,
+                                  "end": start + len(quote), "quote": quote}]
 
 
 def build_extraction(ops, data: dict) -> dict:
@@ -521,8 +661,7 @@ def build_extraction(ops, data: dict) -> dict:
     # not two different deeds that happen to be called the same thing.
     unique: dict[tuple[str, str, str], dict] = {}
     for item in data["nodes"]:
-        quote = item["quotes"][0] if item["quotes"] else ""
-        key = (item["type"], item["name"], quote)
+        key = _mention_key(item)
         if key in unique:
             merged = unique[key]
             identity_fields = ("existing_id", "new_occurrence", "context_id", "scene", "event")
@@ -561,8 +700,9 @@ def build_extraction(ops, data: dict) -> dict:
     objects: list[dict] = []
 
     event_items = [item for item in nodes if item["type"] == "event"]
-    event_items.sort(key=lambda item: item["start"])
-    action_items = sorted((item for item in nodes if item["type"] == "action"), key=lambda item: item["start"])
+    event_items.sort(key=lambda item: (item["start"] is not None, item["start"] or 0))
+    action_items = sorted((item for item in nodes if item["type"] == "action"),
+                          key=lambda item: (item["start"] is not None, item["start"] or 0))
 
     # Resolve every id first: an event may reference a node that comes later.
     # Entities keep their identity across chapters; events do not, because two
@@ -582,7 +722,7 @@ def build_extraction(ops, data: dict) -> dict:
     for item in allocation_order:
         key = (item["type"], item["name"])
         quote = item["quotes"][0] if item["quotes"] else ""
-        mention = (item["type"], item["name"], quote)
+        mention = _mention_key(item)
         record_key = (item["type"], item.get("display_name", item["name"]), quote, item.get("evidence_source_id", data["source_id"]), item["start"], item.get("context_id", "canon"))
         if item.get("existing_id"):
             mention_ids[mention] = item["existing_id"]
@@ -624,7 +764,8 @@ def build_extraction(ops, data: dict) -> dict:
             mention_ids[mention] = reused
             ids.setdefault(key, reused)
             continue
-        position = (orders.get(item.get("evidence_source_id", data["source_id"]), current_ordinal), item["start"])
+        position = (orders.get(item.get("evidence_source_id", data["source_id"]), current_ordinal),
+                    item["start"] if isinstance(item["start"], int) else 0)
         node_type = str(item["type"])
         node_id = allocate(
             positions.setdefault(node_type, []),
@@ -649,8 +790,7 @@ def build_extraction(ops, data: dict) -> dict:
             )
         parent = event.get("resolved_scene_id")
         if parent:
-            quote = event["quotes"][0]
-            scene_children.setdefault(parent, []).append(mention_ids[("event", event["name"], quote)])
+            scene_children.setdefault(parent, []).append(mention_ids[_mention_key(event)])
     action_children: dict[str, list[str]] = {}
     for action in action_items:
         parent = action.get("resolved_event_id")
@@ -658,8 +798,7 @@ def build_extraction(ops, data: dict) -> dict:
             parent = resolve_parent(action.get("event") or "", "event", action.get("context_id", "canon"),
                                     snapshot, nodes, mention_ids, skipped, action["name"])
         if parent:
-            action_id = mention_ids[("action", action["name"], action["quotes"][0])]
-            action_children.setdefault(parent, []).append(action_id)
+            action_children.setdefault(parent, []).append(mention_ids[_mention_key(action)])
     big_event_children: dict[str, list[str]] = {}
     storyline_children: dict[str, list[str]] = {}
     for child_type, parent_type, children in (("scene", "big_event", big_event_children),
@@ -670,7 +809,7 @@ def build_extraction(ops, data: dict) -> dict:
             parent = resolve_parent(child.get(parent_type) or "", parent_type, child.get("context_id", "canon"),
                                     snapshot, nodes, mention_ids, skipped, child["name"])
             if parent:
-                children.setdefault(parent, []).append(mention_ids[(child_type, child["name"], child["quotes"][0])])
+                children.setdefault(parent, []).append(mention_ids[_mention_key(child)])
     children_by_type = {"scene": scene_children, "big_event": big_event_children,
                         "storyline": storyline_children, "event": action_children}
     direct_kind = {"storyline":"big_event", "big_event":"scene", "scene":"event", "event":"action"}
@@ -688,7 +827,7 @@ def build_extraction(ops, data: dict) -> dict:
             child_id = resolve_parent(reference, child_kind, item.get("context_id", "canon"),
                                       snapshot, nodes, mention_ids, skipped, item["name"])
             if child_id:
-                parent_id = mention_ids[(parent_kind,item["name"],item["quotes"][0])]
+                parent_id = mention_ids[_mention_key(item)]
                 children_by_type[parent_kind].setdefault(parent_id, []).append(child_id)
     for children_map in children_by_type.values():
         for parent_id, children in children_map.items():
@@ -705,8 +844,7 @@ def build_extraction(ops, data: dict) -> dict:
     existing_ids = {item["id"] for item in snapshot["nodes"]}
     for item in nodes:
         key = (item["type"], item["name"])
-        quote = item["quotes"][0] if item["quotes"] else ""
-        node_id = mention_ids[(item["type"], item["name"], quote)]
+        node_id = mention_ids[_mention_key(item)]
         if node_id in existing_ids:
             old = snapshot_nodes[node_id]
             staged_index = next((index for index, obj in enumerate(objects) if obj["id"] == node_id), None)
@@ -743,10 +881,13 @@ def build_extraction(ops, data: dict) -> dict:
             "aliases": item.get("aliases") or [],
             "context_id": item.get("context_id", "canon"),
             "identity_note": "原文提取",
-            "disclosure": {"source_id": item.get("evidence_source_id", data["source_id"]), "start": item["start"]},
-            "evidence": {"source_id": item.get("evidence_source_id", data["source_id"]), "quote": item["quotes"][0]},
-            "evidence_spans": _node_spans(item, data["source_id"]),
         }
+        # 只有事件自带原文位置；实体与容器的 evidence/disclosure 由程序派生
+        # （容器从下级证据，实体从最早挂靠的事件），不在这里凭空造一个。
+        if item["quotes"]:
+            payload["disclosure"] = {"source_id": item.get("evidence_source_id", data["source_id"]), "start": item["start"]}
+            payload["evidence"] = {"source_id": item.get("evidence_source_id", data["source_id"]), "quote": item["quotes"][0]}
+            payload["evidence_spans"] = _node_spans(item, data["source_id"])
         if item.get("derived_completion"):
             payload["completion"] = dict(item["derived_completion"])
         if item["type"] in children_by_type:
@@ -779,12 +920,22 @@ def build_extraction(ops, data: dict) -> dict:
     # same field must never mean both.
     event_by_name: dict[str, str] = {}
     checkpoint_order: list[tuple[int, int, str]] = []
+    event_starts: dict[str, int] = {}
     for event in event_items + action_items:
         quote = event["quotes"][0] if event["quotes"] else ""
-        event_id = mention_ids[(event["type"], event["name"], quote)]
+        event_id = mention_ids[_mention_key(event)]
         event_by_name.setdefault(event["name"], event_id)
-        quote_len = len(quote)
-        checkpoint_order.append((event["start"], event["start"] + quote_len, event_id))
+        start = event["start"]
+        if not isinstance(start, int):
+            # 事件一定自带位置；不填引文的动作取直属事件的位置——动作在时间轴上
+            # 没有自己的点，它就是那个事件的一次实施。
+            parent = str(event.get("resolved_event_id") or "")
+            start = event_starts.get(parent)
+            if start is None:
+                point = (snapshot_nodes.get(parent) or {}).get("disclosure") or {}
+                start = point.get("start") if isinstance(point.get("start"), int) else 0
+        event_starts[event_id] = start
+        checkpoint_order.append((start, start + len(quote), event_id))
 
     # Properties are one sequence of (value, checkpoint). A value is visible from
     # the checkpoint the reader reaches it at; before that it is simply unknown.
@@ -855,6 +1006,17 @@ def build_extraction(ops, data: dict) -> dict:
             return orders.get(point.get("source_id"), current_ordinal), point.get("start", -1)
         return max(leaves,key=position) if leaves else None
 
+    # 属性的顺序序号：带引文的行仍用它定位到的原文起点；不带引文的行按
+    # 「at_event 的事件起点 + 同事件内的提交顺序」追加（并避开已被占用的序号）。
+    # 同一条事实在同一事件点重复出现是同一件事：它们共用同一个序号，因此仍然按
+    # observation_key 折叠成一条记录，而不是因为序号不同每条都存一遍。
+    quoted_sequences: dict[str, set[int]] = {}
+    used_sequences: dict[str, set[int]] = {}
+    assigned_sequences: dict[str, dict[str, int]] = {}
+    for prop in data.get("properties", []):
+        if isinstance(prop.get("start"), int) and prop.get("quotes"):
+            quoted_sequences.setdefault(event_by_name.get(prop.get("at_event") or "") or "", set()).add(prop["start"])
+
     for prop in data.get("properties", []):
         node_id = ids.get((prop["node_type"], prop["node"])) if "node_type" in prop else None
         if node_id is None:
@@ -912,7 +1074,6 @@ def build_extraction(ops, data: dict) -> dict:
                 skipped.append({"name": property_id, "reason": "节点引用未能解析"})
                 continue
             value = resolved_values if isinstance(value, list) else resolved_values[0]
-        quote = prop["quotes"][0]
         anchor = event_by_name.get(prop.get("at_event") or "")
         if prop.get('at_event') and anchor is None:
             skipped.append({'name': property_id, 'reference': prop['at_event'], 'reason': '显式披露锚点未能解析，不使用临近事件代替'})
@@ -926,14 +1087,40 @@ def build_extraction(ops, data: dict) -> dict:
                 "reason": "没有可锚定的披露事件：本章事件未覆盖该位置",
             })
             continue
+        quote = prop["quotes"][0] if prop["quotes"] else ""
+        # 属性不填引文：它的出处就是 at_event 那个事件。顺序规则因此只能是确定的，
+        # 不能变成"谁先提交谁在前"——取事件的原文起点，同一事件内按提交顺序
+        # 依次增量，并避开本事件里已被引文坐标占用的序号。
+        sequence = prop["start"]
+        if not isinstance(sequence, int):
+            identity = json.dumps([anchor, node_id, property_id, prop.get("value"), prop["op"],
+                                   prop.get("scope") or "world", prop.get("holder") or ""],
+                                  ensure_ascii=False, sort_keys=True)
+            assigned = assigned_sequences.setdefault(anchor, {})
+            sequence = assigned.get(identity)
+            if sequence is None:
+                sequence = event_starts.get(anchor, 0)
+                while (sequence in quoted_sequences.get(anchor, set())
+                       or sequence in used_sequences.setdefault(anchor, set())):
+                    sequence += 1
+                assigned[identity] = sequence
+        used_sequences.setdefault(anchor, set()).add(sequence)
         record = {
             "kind": "property_change",
             "node_id": node_id, "property_id": property_id,
-            "op": prop['op'], "event_id": anchor, "sequence": prop['start'],
+            "op": prop['op'], "event_id": anchor, "sequence": sequence,
             **({'value': value} if 'value' in prop else {}),
-            "disclosure": {"source_id": data["source_id"], "start": prop["start"]},
-            "evidence": {"source_id": data["source_id"], "quote": quote},
         }
+        if quote:
+            record["disclosure"] = {"source_id": data["source_id"], "start": prop["start"]}
+            record["evidence"] = {"source_id": data["source_id"], "quote": quote}
+        else:
+            # 属性不填引文：它的披露位置与证据就是 at_event 那个事件的（形状与逐字引文一致）。
+            event = current_nodes.get(anchor) or {}
+            point, words = event.get("disclosure") or {}, event.get("evidence") or {}
+            if isinstance(point.get("start"), int) and isinstance(words.get("quote"), str) and words["quote"]:
+                record["disclosure"] = {"source_id": point.get("source_id"), "start": point["start"]}
+                record["evidence"] = {"source_id": words.get("source_id"), "quote": words["quote"]}
         # Who chose the anchor, not what it proves: "model" means the model named
         # the event; it still only locates the disclosure, not the story change.
         if prop.get("source"):
@@ -1021,6 +1208,13 @@ def build_extraction(ops, data: dict) -> dict:
             "duplicate_of": duplicate.get("id"), "event_id": duplicate.get("event_id"),
         })
     records = kept
+
+    _entity_event_anchors(
+        objects, current_nodes,
+        [row for row in accepted_records if row.get("kind") == "property_change"] + comparable,
+        definition_records,
+        {action_id: event_id for event_id, members in action_children.items() for action_id in members},
+        orders, current_ordinal)
 
     revision = ops.graph_project_info()["revision"]
     node_ids = {item['reference']: ids[(item['type'], item['name'])] for item in data['nodes']

@@ -27,10 +27,10 @@ def test_location_requirement_and_local_repair_share_operations(transport, tmp_p
         return json.loads(response['result']['content'][0]['text'])
 
     result = call('submit_extraction', {'source_id': source, 'result': {'nodes': [
-        {'type': 'scene', 'name': '调整安排', 'quotes': [text]},
+        {'type': 'scene', 'name': '调整安排'},
         {'type': 'event', 'name': '决定调整工作安排', 'scene': '@1', 'quotes': [text],
          'participants': ['@3']},
-        {'type': 'person', 'name': '甲', 'quotes': [text]},
+        {'type': 'person', 'name': '甲'},
     ], 'properties': []}})
     assert result['status'] == 'staged'
     assert any(p['code'] == 'EVENT_LOCATION_REQUIRED' and p['targets'] for p in result['problems'])
@@ -39,7 +39,7 @@ def test_location_requirement_and_local_repair_share_operations(transport, tmp_p
         'expected_revision': result['submission_revision'], 'reason': '明确地点未知',
         'patches': [{'op': 'append', 'section': 'properties', 'value': {
             'node': '@2', 'property': '地点', "category": "未分类"   , 'value_type': 'either', 'op': 'unknown',
-            'scope': 'world', 'at_event': '@2', 'quotes': [text]}}]})
+            'scope': 'world', 'at_event': '@2'}}]})
     assert repaired['status'] == 'accepted' and repaired['submission_status'] == 'committed'
     assert len(ops.graph_snapshot()['nodes']) == 3
     assert ops.check_project()['counts']['error'] == 0

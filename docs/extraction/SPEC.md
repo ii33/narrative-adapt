@@ -19,18 +19,32 @@
 | --- | --- | --- |
 | `U-01` | 一次「交涉／选择／转折」算不算独立事件 | 以 §4 `M-01` 的三问为准；「有自身展开就可独立成事件」只是提示别漏判，**不是充分条件**（`granularity_fine` 自己写着"这是判断说明"）。 |
 | `U-02` | 复核时勘误怎么改 | **直接改那条记录**（`correct_property` / `delete_property_records`，或节点层面的既有更正工具）。**禁止**追加一条「修正记录」或「解释性变更」——数据就是数据库条目，堆修正记录是屎山。也不把录入错误写成故事失效（`E-28`）。 |
-| `U-03` | 复核做哪几件事 | 查漏、补缺、勘误（`review` v12）。已成立事实后来变化或终止，按后文证据补上变更记录，这属于「补缺」，不是第四件事。 |
+| `U-03` | 复核做哪几件事 | 查漏、补缺、勘误（`review` v13）。已成立事实后来变化或终止，按后文证据补上变更记录，这属于「补缺」，不是第四件事。 |
 | `U-04` | 关系方向与反向记录 | 按关系语义判断：**互逆关系**（父子、师生）正反两条都要记——A 是 B 的父亲，B 就是 A 的孩子；**单向关系**（喜欢、信任）只记有原文依据的方向；`symmetric` 只表示同一个值对称成立，不负责反向（`E-27`）。 |
 | `U-05` | 精细级要不要给配角建档 | 要。精细级面向改编：**出场人物都要建档**：建人物节点并写清能支撑造型的属性，**提取阶段不建资料卡**；视觉资产据此建立。次要、无名同样建档，不按主线重要性筛除（`E-17`）。 |
 | `U-06` | 「明确指定」「实质进展」「清晰概括名」这类没有判定口径的措辞 | 有意留白，不写机械判据，靠模型判断与人工复核（`E-01`–`E-03`、`E-30` 一类只写方向不写阈值）。 |
 | `U-07` | 属性名能不能就是分类名 | **可以，而且鼓励**：属性名恰好是分类词表里的一项时，它自然就属于这一类（`category_source=identity`），不必为分类另造名字，也不报错、不拦。一个类下允许并列多条属性（外貌 → 身高、发型、瞳色）。 |
 | `U-08` | 同一属性被多次提及时，前面几条算不算数、什么时候才并列 | **同一属性：后一次提及让前一次失效**——这是状态型，`cardinality` 语义不变，后写覆盖前值；所以「矮小黝黑」在改造事件被新描述取代后就是历史，读取当前值只有新的那条。**并列只发生在两处**：① 同一事件点里**同时成立**的多个值 → 一条记录装多值数组（`many`）；② 同一类别下的**不同方面**是不同属性名（身高、发型、瞳色各一条），它们本来就不会互相覆盖。**不要**为了"保留旧描述"把先后关系写成并列；要看旧值去历史／节点编辑器。规范只写这两条，**不枚举属性名单**（`E-22`）。 |
 
-到 2026-11 为止，`U-01`–`U-05`、`U-07` 与 `U-08` 已落进提示词（`extraction` v31、`granularity_fine` v8、`review` v12），`U-06` 永远留在「仅提示词」一侧。
+| `U-09` | 哪些对象必须自带原文位置、哪些靠事件定位 | **只有事件需要定位依据**：`anchor{start,end}`（原文 Unicode 偏移，推荐）或一条逐字 `quotes`，二者至少一个。**其它节点与属性不填引文（不是可选，是拒收）**。理由是这一句：**每个节点、每个属性都以事件为基础；事件是时间点，事件链是时间轴**。所以实体的出处就是它挂靠的那个事件——人物／群体出现在事件的 `participants`，地点是事件发生处的 `world` 地点取值，物品在事件处易手，属性以 `at_event` 指向事件，场景／大事件／主要故事由下级包含，动作直属一个事件。实体的阅读位置＝**它最早挂靠的那个事件的位置**（程序按此派生 `evidence`／`disclosure`，形状与逐字引文完全一致）；整条链上都找不到落点的实体没有位置，由静态检查的 `entity_unanchored`（warning，不阻塞）报出来人工核。不要把"没有引文的节点"当成缺证据。 |
+
+锚定关系（谁靠什么挂在事件上；这张表就是 `U-09` 的可核对照）：
+
+| 对象 | 在事件链上的落点 |
+| --- | --- |
+| 事件 | 唯一自带原文位置的对象：`anchor` 或逐字引文（`M-13`） |
+| 人物／群体 | 作为某事件的 `participants` 出现 |
+| 地点 | 某事件的 `world` 地点取值（其次：某条属性变更在事件处指向它） |
+| 物品 | 某事件处的持有者变更（其次：某条属性变更在事件处指向它） |
+| 属性（`property_change`） | `at_event` 指向的那个事件：披露位置与证据都取该事件的（`I-18`） |
+| 动作 | 直属事件的披露位置（`M-05`） |
+| 场景／大事件／主要故事 | 下级容器／事件包含，证据由 `src/narrative/container_evidence.py::validated_spans` 逐层派生（`I-10`） |
+
+到 2026-11 为止，`U-01`–`U-05`、`U-07`、`U-08` 与 `U-09` 已落进提示词（`extraction` v32、`granularity_fine` v8、`review` v13），`U-06` 永远留在「仅提示词」一侧。
 
 ## 1 范围、引用与批次
 
-- 范围：原文是唯一事实来源，引文须逐字命中原文（`I-13`）；章节标题、原文切片和提交批次只作阅读索引与处理范围，不决定场景或事件边界（`M-06`）。来源：本页 §4（原 `docs/MODEL.md` 第 2 节）与提取提示词「提取通用要求」v31。
+- 范围：原文是唯一事实来源；事件必须给定位依据（`anchor` 或逐字引文），给了引文就须逐字命中原文（`I-13`、`M-13`）；章节标题、原文切片和提交批次只作阅读索引与处理范围，不决定场景或事件边界（`M-06`）。来源：本页 §4（原 `docs/MODEL.md` 第 2 节）与提取提示词「提取通用要求」v32。
 - 引用：本页与其它文档一律按「编号 + 结论」引用（§0），编号集合与出处见 `docs/README.md`；五层概念见 `docs/MODEL.md` 第 1 节。
 - 批次：一小批一次提交；本批引用 `@n` 从 1 起，数组索引从 0 起（见 §5「暂存、入库与编号」）；局部修补用 `patch_extraction_submission`（`I-28`）。
 
@@ -76,27 +90,27 @@
   - 程序：仅提示词，无校验；互查 `M-01`
   - 反例：按「一段一个事件」把一场铺陈切成 6 个事件。
 - `E-06` 场景边界按「现场是否还连续」判断；同一地点隔了很久、或同一时刻换到远处，都另起一场。
-  - 出处：`extraction` v31 ·「同一地点隔了很久，或同一时刻换到远处，都另起一场」
+  - 出处：`extraction` v32 ·「同一地点隔了很久，或同一时刻换到远处，都另起一场」
   - 程序：仅提示词，无校验；互查 `M-02`
   - 反例：把「三天后，同一间屋子」并进前一场。
 - `E-07` 大事件边界按「阶段是否换了」判断，同一语境下连续的一大段进展按披露顺序首尾相接。
-  - 出处：`extraction` v31 ·「判断：这一段进展是否换了阶段？」
+  - 出处：`extraction` v32 ·「判断：这一段进展是否换了阶段？」
   - 程序：仅提示词，无校验；互查 `M-03`
   - 反例：阶段没换，只因为换了地点就给这一段新建大事件。
 - `E-08` 章节标题、原文切片与提交批次只作阅读索引与处理范围，不用来切场景或事件的边界。
-  - 出处：`extraction` v31 ·「不是场景或事件的边界」
+  - 出处：`extraction` v32 ·「不是场景或事件的边界」
   - 程序：仅提示词，无校验；互查 `M-06`
   - 反例：章末的停顿就收尾一个事件，换章处再开一个新事件。
-- `E-09` 事件默认只写一条足以支持其身份与核心发生的代表性引文，不为起因、过程、结果各写一条。
-  - 出处：`extraction` v31 ·「事件默认只提交一条有代表性的准确原文引文」
-  - 程序：`I-13`（只管逐字与唯一，不限条数）；互查 `M-13`
-  - 反例：一个事件挂「起因」「经过」「结果」三条引文。
+- `E-09` 事件必须给定位依据：原文位置锚点 `anchor{start,end}`（推荐，程序按偏移截取逐字原文）或一条代表性逐字引文，二者至少一个；其它节点与属性不填引文，也不为凑证据回抄原文（`U-09`）。
+  - 出处：`extraction` v32 ·「事件必须给定位依据：原文位置锚点」
+  - 程序：`I-13`（给了引文才校验逐字与唯一，不限条数）、`DRAFT_SCHEMA`（事件两者都没有则拒收）；互查 `M-13`
+  - 反例：给人物和地点补一段引文，事件反而只写个名字；或一个事件挂「起因」「经过」「结果」三条引文。
 - `E-10` 场景、大事件、主要故事不填 `quotes`／`closing_quote`，上层证据由程序从下级派生。
-  - 出处：`extraction` v31 ·「不由模型填写quotes或closing_quote」
+  - 出处：`extraction` v32 ·「不由模型填写quotes或closing_quote」
   - 程序：`I-10`（容器不落自身 `quotes`）
   - 反例：给场景手写一条 `quotes` 想证明它存在。
 - `E-11` 主要故事的完成边界取下级证据派生的 `completion`，不以章节结束或批次交完代替语义闭合。
-  - 出处：`extraction` v31 ·「不要求模型提供closing_quote」
+  - 出处：`extraction` v32 ·「不要求模型提供closing_quote」
   - 程序：`I-33`；互查 `M-04`
   - 反例：读完第 3 卷就把 T 的完成点定在第 3 卷末章。
 - `E-12` 动作默认不提取：只在用户明确要求时创建，且不把动作改标成事件。
@@ -106,12 +120,12 @@
 
 ### 3.3 范围与复用（`source_extraction`、`extraction`）
 
-- `E-13` 每条引文逐字落在本次提交范围内（Unicode 字符，左闭右开）；范围外可读，但引文不出范围。
+- `E-13` 给了引文就必须逐字落在本次提交范围内（Unicode 字符，左闭右开）；范围外可读，但引文不出范围。事件用 `anchor` 时锚点同样必须落在本批范围内。
   - 出处：`source_extraction` v9 ·「每条引文必须逐字落在范围内」
-  - 程序：`I-16`；互查 `M-12`
+  - 程序：`I-16`、`DRAFT_SCHEMA`（`anchor` 越界或不在本批范围）；互查 `M-12`
   - 反例：为补前情，把范围外上一段的句子当作本批证据提交。
 - `E-14` 拿不准的事实放进 `uncertainties`，不补默认值、不猜原文没交代的属性。
-  - 出处：`extraction` v31 ·「拿不准放进 uncertainties，不补默认值」
+  - 出处：`extraction` v32 ·「拿不准放进 uncertainties，不补默认值」
   - 程序：仅提示词，无校验；互查 `M-08`（未提及就留白）
   - 反例：原文没写年龄，按常识填「二十岁」。
 - `E-15` 按语境与引用依赖分批提交，一批语义完整就交，不攒成一份大草稿。
@@ -119,7 +133,7 @@
   - 程序：`I-28`
   - 反例：把整章读完再一次提交 300 个节点。
 - `E-16` 跨批复用已有对象时一律指向同一个已有 ID，不重复建同义节点。
-  - 出处：`extraction` v31 ·「原文里同一个人物、地点、物品、事件就是同一个」
+  - 出处：`extraction` v32 ·「原文里同一个人物、地点、物品、事件就是同一个」
   - 程序：仅提示词，无校验（`ID` 只管记录 ID 唯一）；互查 `M-15`
   - 反例：上一批已给 `P1`，这一批又给同一人物新建 `P7`。
 
@@ -134,57 +148,57 @@
   - 程序：仅提示词，无校验；互查 `M-15`（同名与位置相近不作依据）
   - 反例：两个「老人」被拆成两个人物节点，各写一段身世。
 - `E-19` 每个活动物品都在事件处记 `world` 持有者状态（节点引用、「无」或「未知」）；清除、遗漏与认知记录都不能代替未知。
-  - 出处：`extraction` v31 ·「每个活动物品都要有明确的持有者状态」
+  - 出处：`extraction` v32 ·「每个活动物品都要有明确的持有者状态」
   - 程序：`I-05`
   - 反例：物品最后一次出现后留空，事后再解释成「不知道在谁手里」。
 - `E-20` 每个事件都在自身事件处记 `world` 地点（`either` 节点引用或显式「无」「未知」）；场景不记地点，上层地点与认知都不能代替。
-  - 出处：`extraction` v31 ·「场景不记地点，只有事件自身的 world 地点有效」
+  - 出处：`extraction` v32 ·「场景不记地点，只有事件自身的 world 地点有效」
   - 程序：`I-01`、`I-03`
   - 反例：地点写在所属场景上，事件自己留空。
 
 ### 3.5 属性与状态（`extraction`）
 
 - `E-21` 属性变更只写在事件处：`set`／`add`／`remove` 带 `value`，`clear`／`unknown` 不带，`at_event` 指向该事件自身。
-  - 出处：`extraction` v31 ·「属性变更：set/add/remove 带 value，clear/unknown 不带」
+  - 出处：`extraction` v32 ·「属性变更：set/add/remove 带 value，clear/unknown 不带」
   - 程序：`I-19`、`I-18`
   - 反例：用 `clear` 外加一个空的 `value` 数组表示清空。
 - `E-22` `cardinality` 只约束录入：`one` 在同一事件点只允许一个当前值（多个对方就是多条记录），`many` 才把多项装在同一条记录里；读取一律返回全部当前有效值。同一方面后写覆盖前值：同一属性的后一次提及让前一次失效，前面几条只作历史；并列只在「同一事件点同时成立（`many` 一条记录多值）」与「同一类别下的不同方面（不同属性名）」两处（`U-08`）。
-  - 出处：`extraction` v31 ·「同一属性以最后一次提及为准：后来的值是取代前值，前面的只作历史保留」
+  - 出处：`extraction` v32 ·「同一属性以最后一次提及为准：后来的值是取代前值，前面的只作历史保留」
   - 程序：`I-20`；互查 `M-09`
   - 反例：把「师父」改成 `many` 来容纳柯镇恶与洪七公；或把一个属性的先后变化写成多条并列，让「矮小黝黑」与后来的外貌同时生效。
 - `E-23` 认知与主张只在事件里明确追加时才写，值优先用对象引用；世界事实变化不自动改写认知。
-  - 出处：`extraction` v31 ·「世界事实变化不自动改写角色认知」
+  - 出处：`extraction` v32 ·「世界事实变化不自动改写角色认知」
   - 程序：`I-12`；互查 `M-08`
   - 反例：主角得知真相后，回头把全篇所有人物的旧认知批量改成新认知。
 - `E-24` 每条属性变更给出该节点类型分类表里的一个大类，或显式写「未分类」；一个类下允许并列多条属性，属性名直接取分类名也完全可以（自然归入该类，`U-07`）；拿不准分类就写「未分类」，不硬凑。
-  - 出处：`extraction` v31 ·「拿不准就写「未分类」，不硬凑」
+  - 出处：`extraction` v32 ·「拿不准就写「未分类」，不硬凑」
   - 程序：无专属 `I-xx`（`category` 是草稿必填项，见 §5「属性分类」）；互查 `M-07`
   - 反例：把「身高」硬塞进「外貌」只为填满这一格。
 - `E-25` 进展属性写在直属下一级容器上：`storyline_progress` 记在大事件、`big_event_progress` 记在场景；写更上层会被跳过，不迁移旧层级。
-  - 出处：`extraction` v31 ·「部／卷的进展记在 B（storyline_progress）、B 的进展记在 S（big_event_progress）」
+  - 出处：`extraction` v32 ·「部／卷的进展记在 B（storyline_progress）、B 的进展记在 S（big_event_progress）」
   - 程序：`I-11`
   - 反例：把 `storyline_progress` 直接写在主要故事上。
 - `E-26` 容器属性与某个下属事件同组时以事件记录为准：容器写入被丢弃并回 `info`，不换近义属性名重试。
-  - 出处：`extraction` v31 ·「写入按判重规则丢弃并给 info」
+  - 出处：`extraction` v32 ·「写入按判重规则丢弃并给 info」
   - 程序：`I-09`；互查 `M-16`
   - 反例：换个近义属性名，把同一条状态再写进容器。
 - `E-27` 属性名描述取值相对节点的身份、关系或作用。方向按语义核对：互逆关系（父子、师生）正反两条都要记——A 是 B 的父亲，B 就是 A 的孩子；单向关系（喜欢、信任）只记有原文依据的方向；`symmetric` 只表示同一个值对称成立，不负责反向（`U-04`）。先查已有定义再新增，定义冲突时定向读取或显式更正，不换近义名绕过。
-  - 出处：`extraction` v31 ·「互逆关系（父子、师生）正反两条都要记」
+  - 出处：`extraction` v32 ·「互逆关系（父子、师生）正反两条都要记」
   - 程序：`I-20`（`symmetric` 为严格布尔）
   - 反例：A 是 B 的父亲，只记这一条、不给 B 记「孩子」；或反过来，凭「喜欢」猜对方也喜欢。
 
 ### 3.6 复核、合并与动作（`review`、`event_merge_review`、`action_extraction`、`conversation_actions`）
 
 - `E-28` 复核做三件事：查漏、补缺、勘误。只修有据错漏，拿不准就保留并记存疑；勘误**直接改那条记录**（不追加「修正记录」），也不把录入错误写成故事失效；原已成立而后终止的，保留建立事实，在有证据的终止事件追加 `remove`／`clear`（`U-02`、`U-03`）。
-  - 出处：`review` v12 ·「直接改这条记录；不追加「修正记录」」
+  - 出处：`review` v13 ·「直接改这条记录；不追加「修正记录」」
   - 程序：仅提示词，无校验；互查 `M-14`
   - 反例：为了「改正」一条错录的取值，追加一条说明「上一条写错了」的变更记录。
 - `E-29` 沿人物与事件角色查漏（身份、社会隶属、交往、临时作用分别核对），不只检查已经存在的关系；一次行为不升级为长期关系。
-  - 出处：`review` v12 ·「沿人物和事件角色查漏，而不是只检查已经存在的关系」
+  - 出处：`review` v13 ·「沿人物和事件角色查漏，而不是只检查已经存在的关系」
   - 程序：仅提示词，无校验；互查 `I-25`（一次行为只作事件参与者事实）
   - 反例：把「他替她挡了一刀」写成两人之间永久的「保护者」状态。
 - `E-30` 单方所信或声称写成 `cognition`／`claim` 并带 `holder`，不写成双方的 `world` 事实。
-  - 出处：`review` v12 ·「单方认知不等于双方世界事实」
+  - 出处：`review` v13 ·「单方认知不等于双方世界事实」
   - 程序：`I-12`；互查 `M-08`
   - 反例：甲相信乙是叛徒，就写一条 `world` 的「乙是叛徒」。
 - `E-31` 合并先 `preview_event_merge` 看预检、再 `merge_events` 写入，两者同参 `source_event_id`／`target_event_id`／`expected_revision`／`evidence`／`reason`。
@@ -200,12 +214,12 @@
   - 程序：仅提示词，无校验；互查 `M-15`
   - 反例：发现重复后把其中一个改名成「（旧）」并留在活动列表里。
 - `E-34` 只为用户指定的那个事件补动作，不扩到相邻事件或其他层级；每条动作指认一个可观察行为，解释、心理推断与作者概述不算动作。
-  - 出处：`action_extraction` v7 ·「只做指定的事件，不扩到相邻事件或其他层级」
+  - 出处：`action_extraction` v8 ·「只做指定的事件，不扩到相邻事件或其他层级」
   - 程序：`I-23`；互查 `M-05`
   - 反例：为把事件写清楚，顺手给相邻事件补了三条动作。
-- `E-35` 动作节点用 `event` 引用直属事件（正式 ID、本批 `@n` 从 1 起或唯一名称），被引用事件须同语境；每条动作给出逐字 `quotes`。
-  - 出处：`action_extraction` v7 ·「用 event 引用直属事件」
-  - 程序：`I-23`、`I-13`
+- `E-35` 动作节点用 `event` 引用直属事件（正式 ID、本批 `@n` 从 1 起或唯一名称），被引用事件须同语境；动作不填引文，它的位置就是那个直属事件的位置（`U-09`）。
+  - 出处：`action_extraction` v8 ·「动作不给引文，它的出处就是那个直属事件的位置」
+  - 程序：`I-23`、`I-13`（带 `quotes` 会被 `DRAFT_SCHEMA` 拒收）；互查 `M-13`
   - 反例：动作挂在场景上，靠场景归属代替事件引用。
 - `E-36` 同一会话的「已完成业务动作摘要」不是原文，也不是新的操作授权：只用于核对状态，不据此重做写入，也不当作引文。
   - 出处：`conversation_actions` v3 ·「它不是原文，也不是新的操作授权」
@@ -215,11 +229,11 @@
 ### 3.7 记录形状（`extraction`）
 
 - `E-37` 不手算 `sequence`、不填 `identity_note` 等存储字段：编号、坐标、去重与预检都由程序完成。
-  - 出处：`extraction` v31 ·「不手算 sequence、不填 identity_note 等存储字段」
+  - 出处：`extraction` v32 ·「不手算 sequence、不填 identity_note 等存储字段」
   - 程序：`I-18`（自带 `sequence` 按 `DRAFT_SCHEMA` 拒收）；互查 `M-12`
   - 反例：为了让变更排序稳定，自己给三条变更写 `sequence: 1/2/3`。
 - `E-38` 同一事件的多条变更共用同一个 `at_event`，不为挂属性另造事件。
-  - 出处：`extraction` v31 ·「同一事件的多条变更共用 at_event，不为挂属性另造事件」
+  - 出处：`extraction` v32 ·「同一事件的多条变更共用 at_event，不为挂属性另造事件」
   - 程序：`I-18`
   - 反例：为把一条属性挂进时间线，复制出一个「补充事件」。
 
@@ -234,7 +248,7 @@
 - `M-03` 大事件的边界看阶段是否换了：同一语境下连续的一大段进展，按披露顺序首尾相接。
 - `M-04` 主要故事的边界就是部／卷本身：一部一条或拆成多条都可以，未完结也能创建，完成度由程序从下级证据派生。
 - `M-05` 动作只在明确要求时提取；它直属恰好一个同语境事件，是最小包含层级。
-- `M-06` 章节标题、原文切片和提交批次只作阅读索引与处理范围，边界仍按 `M-01`–`M-03` 判断。
+- `M-06` 章节标题、原文切片和提交批次只作阅读索引与处理范围，边界仍按 `M-01`–`M-03` 判断。**先后比较：同一类型内按编号即可**（发号即读者遇到它的顺序，`E1 < E1.1 < E2 < E10`，插入加段不重排）；**跨类型编号没有共同刻度**，跨层先后只看原文来源顺序与 Unicode 披露位置。
 
 **状态与属性**
 
@@ -246,8 +260,8 @@
 
 **证据与纠错**
 
-- `M-12` 每条事实的引文必须逐字命中原文；定位与唯一性由程序校验，模型不手算坐标。
-- `M-13` 事件默认给一条能支持身份与核心发生的代表性引文；引文数量不决定事件边界，属性与关系各自取证。
+- `M-12` 给了引文就必须逐字命中原文，定位与唯一性由程序校验，模型不手算坐标；场景、大事件、主要故事与实体不填引文，它们的出处是各自挂靠的事件（`U-09`）。
+- `M-13` 事件必须给定位依据：`anchor{start,end}` 或一条能支持身份与核心发生的逐字引文，二者至少一个；引文条数不决定事件边界，也不为起因、过程、结果分别取证。属性与关系不再各自取证：属性以 `at_event` 指向事件，实体以参与的事件为出处。
 - `M-14` 复核只修有据错漏：没再提及不等于失效，冲突或一次攻击也不等于终止；确认终止时保留建立事实，在终止事件追加 `remove`／`clear`。
 - `M-15` 两个疑似重复的事件是否同一次发生，看原文证据是否一致，同名或位置相近不作依据；先 `preview_event_merge`，再 `merge_events`。
 - `M-16` 容器属性若与某个下属事件的属性同组（主体除外其余全同），以事件记录为准，容器写入被丢弃并回一条 `info`。
@@ -271,15 +285,15 @@
 | I-07 | 同一事件位置的持有状态冲突不得择序 | 同上 | `ITEM_HOLDER_CONFLICT` | `tests/test_item_possession.py` |
 | I-08 | 事件草稿必须带 `participants` 键；空数组表示「确无参与者」，缺键即拒 | `src/narrative/extraction.py::parse_nodes`（问题行 `path=["nodes",i,"participants"]`），`src/narrative/extraction_draft.py::submission_input_schema`（`allOf` 对 `type=event` 强制 required） | `EXTRACTION_CONTENT`，`DRAFT_SCHEMA` | `tests/test_extraction_diagnostic_paths.py`（参与者引用路径；缺键本身无专测） |
 | I-09 | 容器（场景／大事件／主要故事）写入的属性若已由其下属事件按同组写过，该写入被丢弃并给 `info` 提示，事件记录胜出（`M-16`） | `src/narrative/property_core.py::container_property_duplicate`，`src/narrative/extraction.py::build_extraction` | `CONTAINER_PROPERTY_DEDUP` | `tests/test_container_property_dedup.py` |
-| I-10 | 容器不落自身 `quotes`：容器证据只由已验证下级派生，提交里的容器引文被忽略 | `src/narrative/extraction.py::parse_nodes`（`is_container` 分支），`src/narrative/container_evidence.py::refresh_container_evidence` | 无错误码（静默丢弃） | `tests/test_extraction_container_evidence.py`，`tests/test_container_evidence_refresh.py` |
+| I-10 | 容器不落自身 `quotes`：容器证据只由已验证下级派生；草稿里的容器 `quotes` 直接拒收（`U-09`） | `src/narrative/extraction_draft.py::_draft_input_diagnostics`，`src/narrative/extraction.py::parse_nodes`（`is_container` 分支），`src/narrative/container_evidence.py::refresh_container_evidence` | `DRAFT_SCHEMA`，`EXTRACTION_CONTENT` | `tests/test_extraction_container_evidence.py`，`tests/test_container_evidence_refresh.py` |
 | I-11 | 进展属性只能落在直属子级：`storyline_progress` 记在 `big_event`，`big_event_progress` 记在 `scene` | `src/narrative/extraction.py::build_extraction`（`progress_owners`），`src/narrative/property_audit.py::audit_properties` | `progress_owner`（info） | `tests/test_storyline_contract.py` |
 | I-12 | `world` 作用域不得带 `holder_id`；`claim`／`cognition` 必须带人物节点 `holder_id`（`M-08`） | `src/narrative/property_core.py::validate_records` | `SCOPE` | 无直接用例（同函数其余分支见 `tests/test_current_state_contract.py`） |
-| I-13 | 引文必须**逐字**且**唯一**匹配原文；同一句多处出现时用合法 `disclosure.start` 消歧（`M-12`） | `src/narrative/property_core.py::_evidence_error`，`src/narrative/property_operations.py::record_change` | `EVIDENCE` | `tests/test_source_location_contract.py` |
+| I-13 | 引文必须**逐字**且**唯一**匹配原文；同一句多处出现时用合法 `disclosure.start` 消歧（`M-12`）。只校验**给了的**引文：引文只出现在事件上（`U-09`），非事件与属性带 `quotes` 会在草稿层被拒 | `src/narrative/property_core.py::_evidence_error`，`src/narrative/property_operations.py::record_change`，`src/narrative/extraction_draft.py::_draft_input_diagnostics` | `EVIDENCE`，`DRAFT_SCHEMA` | `tests/test_source_location_contract.py`，`tests/test_extraction_evidence_anchor.py` |
 | I-14 | `evidence` 只允许 `source_id` 与逐字 `quote` 两个键 | `src/narrative/property_core.py::_evidence_error` | `EVIDENCE` | `tests/test_current_state_contract.py` |
 | I-15 | `disclosure` 须为合法原文 Unicode 坐标，且与引文起点逐字对齐 | `src/narrative/property_core.py::validate_records` | `DISCLOSURE` | `tests/test_project_check_locations.py` |
-| I-16 | 节点证据引文须是原文子串，跨度须与原文位置相符（`M-12`） | `src/narrative/graph_service.py::precheck` | `EVIDENCE`，`EVIDENCE_SPAN` | `tests/test_project_check.py` |
+| I-16 | 节点证据引文须是原文子串，跨度须与原文位置相符（`M-12`）；事件用 `anchor` 时锚点必须满足 `0 <= start < end <= len(source)` 且落在本批范围内，越界即拒（`path=["nodes",i,"anchor"]`） | `src/narrative/graph_service.py::precheck`，`src/narrative/extraction_draft.py::_validate_anchors` | `EVIDENCE`，`EVIDENCE_SPAN`，`DRAFT_SCHEMA` | `tests/test_project_check.py`，`tests/test_extraction_evidence_anchor.py` |
 | I-17 | 属性记录 ID 非空且唯一、`kind` 只能是 `property_definition`／`property_change`、字段走白名单 | `src/narrative/property_core.py::validate_records` | `ID`，`KIND`，`FORMAT` | `tests/test_current_state_contract.py` |
-| I-18 | 变更必须锚定有效事件或动作，`sequence` 为非负整数，语境必须存在 | 同上 | `EVENT_REF`，`SEQUENCE`，`CONTEXT` | `tests/test_event_property_state.py` |
+| I-18 | 变更必须锚定有效事件或动作，`sequence` 为非负整数，语境必须存在。提取时的 `sequence` 由程序定：带引文的行取引文起点，不带引文的行取 `at_event` 事件起点并在同一事件内按提交顺序递增（并避开同事件已被占用的序号），同一批重复提交得到同一组序号 | 同上 | `EVENT_REF`，`SEQUENCE`，`CONTEXT` | `tests/test_event_property_state.py`，`tests/test_extraction_evidence_anchor.py` |
 | I-19 | `clear`／`unknown` 不得携带 `value`；many 集合元素唯一、节点引用有效（`M-07`）。这是**写入**约束，不描述查询形状 | 同上 | `VALUE` | `tests/test_current_state_contract.py` |
 | I-20 | 值类型与定义一致；`target_node_types` 只用于 `node` 定义；`symmetric` 为严格布尔；`one`／`many` 是**录入规则**（`one` 同一事件点只允许一个当前值，`many` 允许并存）与「标量关系按对方分别维护」（`M-09`），**不决定查询形状**——`state()`／`property_state()` 的 `known` 一律返回 `values` 列表，单值也是长度 1 的列表。同一属性后写覆盖前值，前一条只作历史；并列只在同一事件点同时成立（`many`）或不同属性名（不同方面）时发生（`U-08`） | 同上 | `DEFINITION`，`VALUE` | `tests/test_property_symmetry.py`，`tests/test_state_values_contract.py`，`tests/test_property_replacement.py` |
 | I-21 | 五层直属关系：`scene→big_event→storyline`、`event→scene`、`action→event`，不跳层 | `src/narrative/extraction_draft.py::_draft_input_diagnostics`（`expected_parent` 映射），`src/narrative/storyline_ranges.py::analyze`，`src/narrative/graph_service.py::precheck` | `STORYLINE_CHILD_TYPE`，`COMPOSITE` | `tests/test_adaptation_hierarchy_contract.py` |
@@ -516,7 +530,7 @@ flowchart LR
 
 | 码 | 触发（可判定的一句话） | 处理方 | 相关编号 | 锚点（`文件.py::符号`） | 覆盖测试 |
 | --- | --- | --- | --- | --- | --- |
-| `DRAFT_SCHEMA` | 草稿形状不合 `RESULT_SCHEMA`：未知字段、缺必填（含 `participants`、`category`）、模型自带 `sequence` | 模型改草案 | `I-08`、`E-37` | `src/narrative/extraction_draft.py::_draft_input_diagnostics`、`src/narrative/extraction_draft.py::_prepare` | tests/test_property_category_contract.py::test_property_row_without_category_is_rejected |
+| `DRAFT_SCHEMA` | 草稿形状不合 `RESULT_SCHEMA`：未知字段、缺必填（含事件的定位依据 `anchor`／`quotes`、`participants`、`category`）、非事件或属性带了 `quotes`、模型自带 `sequence` | 模型改草案 | `I-08`、`E-37`、`E-09`、`U-09` | `src/narrative/extraction_draft.py::_draft_input_diagnostics`、`src/narrative/extraction_draft.py::_prepare` | tests/test_property_category_contract.py::test_property_row_without_category_is_rejected |
 | `EXTRACTION_CONTENT` | 草稿内容过不了节点／属性校验：引用、引文、类型不符，或程序丢弃某行时给出的原因 | 模型改草案 | `I-08`、`E-13` | `src/narrative/extraction_draft.py::_prepare` | tests/test_extraction_diagnostic_paths.py::test_non_subject_entities_are_rejected_as_participants_with_a_reason |
 | `EXTRACTION_INFO` | 程序丢弃了某些输入行并回 `info`，而该条没有专属码时的兜底码 | 程序跳过 | — | `src/narrative/extraction_draft.py::_prepare` | — |
 | `CHECK_PENDING` | 暂存稿刚写入、静态检查尚未完成的过渡态（紧随其后的求值会覆盖它） | 程序跳过 | `I-28` | `src/narrative/extraction_staging.py::submit`、`src/narrative/business_staging.py::_new` | tests/test_extraction_staging.py::test_pending_is_discoverable_after_interrupted_check_and_pages_are_bounded |
@@ -548,6 +562,7 @@ flowchart LR
 | `relation_not_a_person` | 关系值指向的不是人物节点 | 用户决定 | `E-27` | `src/narrative/property_audit.py::audit_properties` | — |
 | `relation_untyped_reference` | 分类是「关系」但定义是普通值，画不进人物关系图 | 用户决定 | `E-27` | `src/narrative/property_audit.py::audit_properties` | tests/test_relation_structure.py::test_relation_id_literal_warns_only_for_explicit_relation_category |
 | `self_reference` | 关系值就是节点自己 | 用户决定 | `E-27` | `src/narrative/property_audit.py::audit_properties` | — |
+| `entity_unanchored` | 人物／群体／地点／物品在整条事件链上找不到落点：不参与任何事件、不是事件发生处的地点、没有事件处的持有变更、也没有被任何属性在事件处引用（`warning`，不阻塞；`U-09`） | 用户决定 | `M-13` | `src/narrative/property_audit.py::audit_properties` | tests/test_entity_anchor.py::test_entity_without_any_event_link_is_reported |
 | `scene_without_big_event` | 场景没有归入任何大事件（`info`，说明这一章还没读出大事件边界） | 用户决定 | `M-03` | `src/narrative/property_audit.py::audit_properties` | tests/test_project_check_locations.py::test_node_level_issue_carries_node_and_source_coordinates |
 | `label_missing` | 属性名没有中文对照，界面上直接显示英文（`info`） | 用户决定 | — | `src/narrative/property_audit.py::audit_properties` | — |
 | `definition_unused` | 属性定义没有任何取值记录（`info`；无取值不等于漏提） | 用户决定 | — | `src/narrative/property_audit.py::audit_properties` | tests/test_project_check_locations.py::test_unused_definition_points_at_the_definition_not_the_project |
@@ -652,14 +667,14 @@ flowchart LR
 | id | 当前 version | 模板归属 | 覆盖的 E 条目 | 规范化状态 |
 | --- | --- | --- | --- | --- |
 | `system` | v11 | extract / screenplay / storyboard | `E-01` `E-02` `E-03` `E-04` | 已规范化（§3.1） |
-| `extraction` | v31 | extract | `E-06` `E-07` `E-08` `E-09` `E-10` `E-11` `E-14` `E-16` `E-19` `E-20` `E-21` `E-22` `E-23` `E-24` `E-25` `E-26` `E-27` `E-37` `E-38` | 已规范化（§3.2–§3.5、§3.7） |
+| `extraction` | v32 | extract | `E-06` `E-07` `E-08` `E-09` `E-10` `E-11` `E-14` `E-16` `E-19` `E-20` `E-21` `E-22` `E-23` `E-24` `E-25` `E-26` `E-27` `E-37` `E-38` | 已规范化（§3.2–§3.5、§3.7） |
 | `granularity_fine` | v8 | extract | `E-12` `E-17` `E-18` | 已规范化（§3.2、§3.4） |
 | `conversation_actions` | v3 | extract | `E-36` | 已规范化（§3.6） |
 | `granularity_standard` | v6 | — | `E-05` | 已规范化（§3.2） |
 | `source_extraction` | v9 | — | `E-13` `E-15` | 已规范化（§3.3） |
-| `review` | v12 | — | `E-28` `E-29` `E-30` | 已规范化（§3.6） |
+| `review` | v13 | — | `E-28` `E-29` `E-30` | 已规范化（§3.6） |
 | `event_merge_review` | v3 | — | `E-31` `E-32` `E-33` | 已规范化（§3.6） |
-| `action_extraction` | v7 | — | `E-34` `E-35` | 已规范化（§3.6） |
+| `action_extraction` | v8 | — | `E-34` `E-35` | 已规范化（§3.6） |
 | `scene_table` | v6 | screenplay | — | 本轮未规范化（P2 范围外） |
 | `writing` | v8 | screenplay | — | 本轮未规范化（P2 范围外） |
 | `writing_shortcut` | v1 | — | — | 本轮未规范化（P2 范围外） |

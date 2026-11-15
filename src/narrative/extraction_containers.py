@@ -123,6 +123,8 @@ def derive(data, snapshot, reader, source_id):
     for row in data['nodes']:
         if row['type'] in CONTAINERS:
             collect(row['name'], row, path(row) + ['children'])
+    # 没有定位依据的节点（实体与未挂锚点的行）`start` 为 None：排序时排在同类有坐标的
+    # 后面、按名称稳定排列，不能拿 None 与 int 相比。
     data['nodes'].sort(key=lambda row: (orders.get(row.get('evidence_source_id', source_id), float('inf')),
-                                        row['start'], row['name']))
+                                        row['start'] is not None, row['start'] or 0, row['name']))
     return data

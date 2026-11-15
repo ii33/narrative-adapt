@@ -345,6 +345,37 @@ def audit_properties(
                 suggestion=f"改成 A —{kind}→ B 和 B —{_inverse_hint(kind)}→ A 两条",
             ))
 
+    # 事件是时间点、事件链是时间轴：实体（人／群体／地点／物品）的出处就是它挂靠
+    # 的那个事件。整条链上都找不到落点的实体，在时间轴上查不到它的位置，只能靠
+    # 人工核——报 warning，不阻塞，也不替它猜一个事件。
+    anchored: set[str] = set()
+    for node in nodes:
+        if node.get("node_type") in {"event", "action"}:
+            anchored.update(item for item in node.get("participants") or [] if isinstance(item, str))
+    for record in indexed_values:
+        if not isinstance(record.get("event_id"), str):
+            continue
+        if isinstance(record.get("node_id"), str):
+            anchored.add(record["node_id"])
+        value = record.get("value")
+        for item in (value if isinstance(value, list) else [value]):
+            if isinstance(item, str):
+                anchored.add(item)
+        anchored.update(item for item in record.get("related_nodes") or [] if isinstance(item, str))
+    entity_labels = {"person": "人物", "group": "群体", "location": "地点", "item": "物品"}
+    for node in nodes:
+        kind = node.get("node_type")
+        if kind not in entity_labels or node.get("retracted") or node["id"] in anchored:
+            continue
+        issues.append(_issue(
+            "entity_unanchored", WARNING,
+            f"{entity_labels[kind]}「{node.get('name')}」在整条事件链上找不到落点："
+            "不参与任何事件，也不是事件发生处的地点、物品持有变更或属性引用的对象",
+            node=node,
+            suggestion="把它挂到出现它的事件上（人物用 participants、地点用事件的 world 地点、"
+                       "物品用事件处的持有者、其它用 at_event 的属性变更）；确认没用再删除",
+        ))
+
     # 场景必须归到一个大事件下面。没有归属的场景在界面里只能进「未归入大事件」
     # 那个桶——它不是错，但它说明这一章还没读出大事件的边界。
     parents: dict[str, list[dict]] = {}

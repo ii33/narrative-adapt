@@ -17,19 +17,19 @@ def context(tmp_path, monkeypatch):
     ops = Operations.create_graph_project(tmp_path / "input-boundary.nproj")
     sid = ops.import_source("投影边界合成", TEXT)
     draft = {"nodes": [
-        {"type": "person", "name": "甲", "quotes": [FIRST]},
-        {"type": "person", "name": "乙", "quotes": [HIDDEN]},
-        {"type": "location", "name": "城门", "quotes": ["城门"]},
-        {"type": "location", "name": "密室", "quotes": ["密室"]},
-        {"type": "big_event", "name": "等候", "quotes": [TEXT]},
-        {"type": "scene", "name": "相隔两地的等候", "big_event": "等候", "quotes": [TEXT]},
+        {"type": "person", "name": "甲"},
+        {"type": "person", "name": "乙"},
+        {"type": "location", "name": "城门"},
+        {"type": "location", "name": "密室"},
+        {"type": "big_event", "name": "等候"},
+        {"type": "scene", "name": "相隔两地的等候", "big_event": "等候"},
         {"type": "event", "name": "入城", "scene": "相隔两地的等候", "participants": ["甲"], "quotes": [FIRST]},
         {"type": "event", "name": "焚图", "scene": "相隔两地的等候", "participants": ["乙"], "quotes": [HIDDEN]},
         {"type": "event", "name": "继续等候", "location": "未知", "scene": "相隔两地的等候", "participants": ["甲"], "quotes": [LAST]}],
         "properties": [
-            {"node": "入城", "property": "地点"  , "category": "未分类", "value": "城门", "value_type": "node", "scope": "world", "at_event": "入城", "op": "set", "quotes": [FIRST]},
-            {"node": "焚图", "property": "地点", "category": "未分类", "value": "密室", "value_type": "node", "scope": "world", "at_event": "焚图", "op": "set", "quotes": [HIDDEN]},
-            {"node": "甲", "property": "身份", "category": "未分类", "value": "来客", "value_type": "string", "scope": "world", "at_event": "入城", "op": "set", "quotes": [FIRST]}]}
+            {"node": "入城", "property": "地点"  , "category": "未分类", "value": "城门", "value_type": "node", "scope": "world", "at_event": "入城", "op": "set"},
+            {"node": "焚图", "property": "地点", "category": "未分类", "value": "密室", "value_type": "node", "scope": "world", "at_event": "焚图", "op": "set"},
+            {"node": "甲", "property": "身份", "category": "未分类", "value": "来客", "value_type": "string", "scope": "world", "at_event": "入城", "op": "set"}]}
     result = ops.submit_extraction(sid, draft)
     assert result["status"] == "accepted", result
     source = ops.sync_adaptation()

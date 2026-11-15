@@ -142,7 +142,7 @@ def relation_project(tmp_path, monkeypatch):
 
 
 
-        *[{'type': 'person', 'name': name, 'quotes': [text]} for name in ['林岚', '许禾', '周宁']],
+        *[{'type': 'person', 'name': name} for name in ['林岚', '许禾', '周宁']],
 
 
 
@@ -158,7 +158,7 @@ def relation_project(tmp_path, monkeypatch):
 
 
 
-        {'type': 'scene', 'name': '见面', 'quotes': [text]},
+        {'type': 'scene', 'name': '见面'},
 
 
 
@@ -190,7 +190,7 @@ def relation_project(tmp_path, monkeypatch):
 
 
 
-        'properties': [{'node': '林岚', 'property': '朋友'  , "category": "未分类", 'value': other, 'value_type': 'node', 'cardinality': 'many', 'at_event': '三人见面', 'op': 'set', 'quotes': [text]} for other in ['许禾', '周宁']]}
+        'properties': [{'node': '林岚', 'property': '朋友'  , "category": "未分类", 'value': other, 'value_type': 'node', 'cardinality': 'many', 'at_event': '三人见面', 'op': 'set'} for other in ['许禾', '周宁']]}
 
 
 
@@ -430,7 +430,7 @@ def test_extraction_explicit_many_keeps_two_friends_and_omission_keeps_definitio
 
 
 
-        'at_event': names['三人见面'], 'op': 'set', 'quotes': draft['properties'][0]['quotes']}]}
+        'at_event': names['三人见面'], 'op': 'set'}]}
 
 
 

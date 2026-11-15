@@ -14,7 +14,7 @@ def prepare(ui):
     sid = ops.import_source("详情同步原文", TEXT)
     payload = draft_result()
     payload["nodes"] += [
-        {"type": "action", "name": "完成接人", "event": "@6", "quotes": ["甲接到乙后离开。"]},
+        {"type": "action", "name": "完成接人", "event": "@6"},
         {"type": "storyline", "name": "接人篇章", "children": ["@3"]},
     ]
     assert ops.submit_extraction(sid, payload)["status"] == "accepted"
@@ -112,7 +112,7 @@ def test_public_display_map_covers_every_schema_node_type(tmp_path):
     sid = ops.import_source("类型显示原文", TEXT)
     payload = draft_result()
     payload["nodes"] += [
-        {"type": "action", "name": "完成接人", "event": "@6", "quotes": ["甲接到乙后离开。"]},
+        {"type": "action", "name": "完成接人", "event": "@6"},
         {"type": "storyline", "name": "接人篇章", "children": ["@3"]},
     ]
     assert ops.submit_extraction(sid, payload)["status"] == "accepted"

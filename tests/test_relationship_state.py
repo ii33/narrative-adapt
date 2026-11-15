@@ -11,10 +11,10 @@ TEXT = "甲认识朋友乙。甲认识朋友丙。甲与乙绝交。甲仍与丙
 
 def draft():
     events = ["甲认识朋友乙", "甲认识朋友丙", "甲与乙绝交", "甲仍与丙来往"]
-    nodes = [{"type": "person", "name": name, "quotes": [TEXT]} for name in "甲乙丙"]
+    nodes = [{"type": "person", "name": name} for name in "甲乙丙"]
     nodes += [
-        {"type": "big_event", "name": "结交与绝交", "quotes": [TEXT]},
-        {"type": "scene", "name": "朋友往来", "big_event": "结交与绝交", "quotes": [TEXT]},
+        {"type": "big_event", "name": "结交与绝交"},
+        {"type": "scene", "name": "朋友往来", "big_event": "结交与绝交"},
     ]
     nodes += [
         {
@@ -33,7 +33,6 @@ def draft():
             "value": name,
             "value_type": "node",
             "category": "关系",
-            "quotes": [events[i] + "。"],
             "at_event": events[i], "op": "set",
         }
         for i, name in enumerate("乙丙")

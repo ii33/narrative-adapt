@@ -108,18 +108,17 @@ TEXT = "那少年矮小黑瘦。三年后他改造过，如今身高一百八十
 
 def _two_mention_payload(sid, *, value_type="string", value_of=("矮小黑瘦", "一百八十公分")):
     return {"nodes": [
-        {"type": "person", "name": "少年", "quotes": ["那少年矮小黑瘦。"]},
-        {"type": "scene", "name": "初见与再见", "quotes": [TEXT]},
+        {"type": "person", "name": "少年"},
+        {"type": "scene", "name": "初见与再见"},
         {"type": "event", "name": "初见", "scene": "初见与再见", "location": "未知",
          "participants": ["少年"], "quotes": ["那少年矮小黑瘦。"]},
         {"type": "event", "name": "再见", "scene": "初见与再见", "location": "未知",
          "participants": ["少年"], "quotes": ["三年后他改造过，如今身高一百八十公分。"]},
     ], "properties": [
         {"node": "少年", "property": "外貌", "value": value_of[0], "value_type": value_type,
-         "category": "外貌", "op": "set", "at_event": "初见", "quotes": ["那少年矮小黑瘦。"]},
+         "category": "外貌", "op": "set", "at_event": "初见"},
         {"node": "少年", "property": "外貌", "value": value_of[1], "value_type": value_type,
-         "category": "外貌", "op": "set", "at_event": "再见",
-         "quotes": ["三年后他改造过，如今身高一百八十公分。"]},
+         "category": "外貌", "op": "set", "at_event": "再见"},
     ]}
 
 
@@ -141,14 +140,13 @@ def test_one_event_with_a_many_record_lists_both_values_as_current(project):
     """并列的合法来源：同一事件点同时成立，装成一条 `many` 记录的多值数组。"""
     sid = project.import_source("外貌", TEXT)
     payload = {"nodes": [
-        {"type": "person", "name": "少年", "quotes": ["那少年矮小黑瘦。"]},
-        {"type": "scene", "name": "初见与再见", "quotes": [TEXT]},
+        {"type": "person", "name": "少年"},
+        {"type": "scene", "name": "初见与再见"},
         {"type": "event", "name": "初见", "scene": "初见与再见", "location": "未知",
          "participants": ["少年"], "quotes": ["那少年矮小黑瘦。"]},
     ], "properties": [
         {"node": "少年", "property": "外貌", "value": ["矮小", "黝黑"], "value_type": "string",
-         "cardinality": "many", "category": "外貌", "op": "set", "at_event": "初见",
-         "quotes": ["那少年矮小黑瘦。"]},
+         "cardinality": "many", "category": "外貌", "op": "set", "at_event": "初见"},
     ]}
     accepted = project.submit_extraction(sid, payload)
     assert accepted["status"] == "accepted", accepted

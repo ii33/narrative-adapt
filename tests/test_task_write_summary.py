@@ -162,12 +162,12 @@ def test_stable_call_identity_dedupes_copies_but_repeated_actions_remain_history
 def test_real_extraction_delta_distinguishes_create_update_and_event_change(ops):
     text = '甲在门口等乙。乙到门口见甲。'
     source = ops.import_source('交接', text)
-    draft = {'nodes': [{'type': 'person', 'name': '甲', 'quotes': ['甲在门口等乙。']}, {'type': 'person', 'name': '乙', 'quotes': ['乙到门口见甲。']},
-                       {'type': 'location', 'name': '门口', 'quotes': ['甲在门口等乙。']}, {'type': 'scene', 'name': '会面'},
+    draft = {'nodes': [{'type': 'person', 'name': '甲'}, {'type': 'person', 'name': '乙'},
+                       {'type': 'location', 'name': '门口'}, {'type': 'scene', 'name': '会面'},
                        {'type': 'event', 'name': '等待', 'scene': '@4', 'participants': ['@1', '@2'], 'quotes': ['甲在门口等乙。']},
                        {'type': 'event', 'location': '未知', 'name': '会合', 'scene': '@4', 'participants': ['@1', '@2'], 'quotes': ['乙到门口见甲。']}],
-             'properties': [{'node': '@5', 'op': 'set', 'property': '地点'  , "category": "未分类", 'value': '@3', 'value_type': 'node', 'at_event': '@5', 'quotes': ['甲在门口等乙。']},
-                            {'node': '@5', 'op': 'set', 'property': '状态' , "category": "未分类", 'value': '等待', 'value_type': 'string', 'at_event': '@5', 'quotes': ['甲在门口等乙。']}]}
+             'properties': [{'node': '@5', 'op': 'set', 'property': '地点'  , "category": "未分类", 'value': '@3', 'value_type': 'node', 'at_event': '@5'},
+                            {'node': '@5', 'op': 'set', 'property': '状态' , "category": "未分类", 'value': '等待', 'value_type': 'string', 'at_event': '@5'}]}
     created = ops.submit_extraction(source, draft)
     assert created['status'] == 'accepted' and created['committed_changes']
     node = next(n for n in ops.graph_snapshot()['nodes'] if n['name'] == '等待')

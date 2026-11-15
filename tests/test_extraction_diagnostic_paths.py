@@ -16,60 +16,59 @@ def project(tmp_path, monkeypatch):
 
 def draft(text):
     return {'nodes': [
-        {'type': 'person', 'name': '林岚', 'quotes': ['林岚']},
-        {'type': 'location', 'name': '会议室', 'quotes': ['会议室']},
-        {'type': 'scene', 'name': '会议', 'quotes': [text]},
+        {'type': 'person', 'name': '林岚'},
+        {'type': 'location', 'name': '会议室'},
+        {'type': 'scene', 'name': '会议'},
         {'type': 'event', 'name': '会议结束', 'scene': '@3', 'participants': ['@1'],
          'location': '@2', 'quotes': [text]}], 'properties': []}
 
 
-def test_missing_array_and_all_missing_node_quotes_are_reported_together(project):
+def test_missing_array_and_event_without_locator_are_reported_together(project):
+    """缺数组与缺事件定位依据要在同一次提交里一起报出来（`U-09`）。"""
     ops, source, text = project
     raw = draft(text)
     del raw['properties']
-    del raw['nodes'][0]['quotes']
-    del raw['nodes'][1]['quotes']
+    del raw['nodes'][3]['quotes']  # 事件既没有 anchor 也没有 quotes
     original = deepcopy(raw)
     result = ops.submit_extraction(source, raw)
     assert result['status'] == 'staged'
     paths = {tuple(row['path']) for row in result['diagnostics']}
-    assert {('properties',), ('nodes', 0, 'quotes'), ('nodes', 1, 'quotes')} <= paths
+    assert {('properties',), ('nodes', 3, 'anchor')} <= paths
     assert all(row['message'] for row in result['diagnostics'])
     assert raw == original
     assert not ops.graph_snapshot()['nodes']
 
 
-def test_missing_node_evidence_and_property_value_collected_together(project):
+def test_missing_event_locator_and_property_value_collected_together(project):
     ops, source, text = project
     raw = draft(text)
-    del raw['nodes'][0]['quotes']
+    del raw['nodes'][3]['quotes']
     raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排' , "category": "未分类",
-                          'op': 'set', 'value_type': 'string', 'quotes': [text]}]
+                          'op': 'set', 'value_type': 'string'}]
     result = ops.submit_extraction(source, raw)
     assert {tuple(row['path']) for row in result['diagnostics']} >= {
-        ('nodes', 0, 'quotes'), ('properties', 0, 'value')}
+        ('nodes', 3, 'anchor'), ('properties', 0, 'value')}
 
 
-def test_invalid_location_evidence_explains_reference_root_cause(project):
+def test_location_shortcut_points_at_its_own_field_when_the_reference_is_wrong(project):
+    """location 快捷字段引用了一个不是地点的节点：问题报在 location 上，不静默丢弃。"""
     ops, source, text = project
     raw = draft(text)
-    raw['nodes'][1]['quotes'] = ['原文没有的地点']
+    raw['nodes'][1]['type'] = 'person'  # 会议室不再是地点
     result = ops.submit_extraction(source, raw)
     assert result['status'] == 'staged'
-    root = [row for row in result['diagnostics'] if row.get('path') == ['nodes', 1, 'quotes', 0]]
     linked = [row for row in result['diagnostics'] if row.get('path') == ['nodes', 3, 'location']]
-    assert root and linked
-    assert any(['nodes', 1, 'quotes', 0] in row.get('related_paths', []) for row in linked)
-    assert any('引用目标未通过校验' in row['message'] and '引文' in row['message'] for row in linked)
+    assert linked
+    assert any('location' in row['message'] and 'location节点' in row['message'] for row in linked)
     assert not ops.graph_snapshot()['nodes']
 
 
 def test_quote_position_preserves_blank_raw_array_slot(project):
     ops, source, text = project
     raw = draft(text)
-    raw['nodes'][1]['quotes'] = ['会议室', '原文没有的地点']
+    raw['nodes'][3]['quotes'] = ['会议结束', '原文没有的地点']
     result = ops.preview_extraction(source, raw)
-    assert any(row.get('path') == ['nodes', 1, 'quotes', 1] for row in result['diagnostics'])
+    assert any(row.get('path') == ['nodes', 3, 'quotes', 1] for row in result['diagnostics'])
 
 
 def test_references_report_exact_participant_array_position(project):
@@ -86,7 +85,7 @@ def test_non_subject_entities_are_rejected_as_participants_with_a_reason(project
     """参与者的语义是"参与事件的主体"：地点与物品各有自己的属性族，不能顶替。"""
     ops, source, text = project
     raw = draft(text)
-    raw['nodes'].append({'type': kind, 'name': name, 'quotes': [text]})
+    raw['nodes'].append({'type': kind, 'name': name})
     raw['nodes'][3]['participants'] = ['@1', '@5']
     result = ops.submit_extraction(source, raw)
     assert result['status'] == 'staged'
@@ -101,7 +100,7 @@ def test_non_subject_entities_are_rejected_as_participants_with_a_reason(project
 def test_group_is_a_valid_event_participant(project):
     ops, source, text = project
     raw = draft(text)
-    raw['nodes'].append({'type': 'group', 'name': '与会者', 'quotes': ['宣布']})
+    raw['nodes'].append({'type': 'group', 'name': '与会者'})
     raw['nodes'][3]['participants'] = ['@1', '@5']
     result = ops.submit_extraction(source, raw)
     assert result['status'] == 'accepted', result
@@ -111,12 +110,14 @@ def test_group_is_a_valid_event_participant(project):
 
 
 def test_preview_preserves_related_paths_metadata(project):
+    """快捷字段与显式地点属性双写：location 的问题要能指回那条属性行。"""
     ops, source, text = project
     raw = draft(text)
-    raw['nodes'][1]['quotes'] = ['不存在的逐字引文']
+    raw['properties'] = [{'node': '@4', 'property': '地点', "category": "基本信息", 'value': '@2',
+                          'value_type': 'either', 'scope': 'world', 'at_event': '@4', 'op': 'set'}]
     result = ops.preview_extraction(source, raw)
     assert not result['valid']
-    assert any(row.get('path') == ['nodes', 3, 'location'] and row.get('related_paths')
+    assert any(row.get('path') == ['nodes', 3, 'location'] and row.get('related_paths') == [['properties', 0]]
                for row in result['diagnostics'])
 
 @pytest.mark.parametrize('section,index,field,value,expected', [
@@ -130,7 +131,7 @@ def test_schema_errors_report_the_original_field(project, section, index, field,
     ops, source, text = project
     raw = draft(text)
     raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排' , "category": "未分类", 'value': '结束',
-                          'op': 'set', 'value_type': 'string', 'quotes': [text]}]
+                          'op': 'set', 'value_type': 'string'}]
     raw[section][index][field] = value
     result = ops.submit_extraction(source, raw)
     assert any(row.get('path') == expected for row in result['diagnostics'])
@@ -149,6 +150,6 @@ def test_invalid_op_object_has_structured_error_instead_of_type_error(project):
     ops, source, text = project
     raw = draft(text)
     raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排' , "category": "未分类",
-                          'op': {'value': 'set'}, 'value_type': 'string', 'quotes': [text]}]
+                          'op': {'value': 'set'}, 'value_type': 'string'}]
     result = ops.submit_extraction(source, raw)
     assert any(row.get('path') == ['properties', 0, 'op'] for row in result['diagnostics'])

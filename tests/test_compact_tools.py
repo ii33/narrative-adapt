@@ -62,7 +62,7 @@ def test_batched_location_reports_duplicate_missing_and_truncated_unicode_matche
     quotes = ["甲进屋。", "😀甲", "不存在", "甲", "甲进屋。"]
     revision = project.graph_project_info()["revision"]
     result = call(
-        project, "locate_source", {"source_id": source, "quotes": quotes, "limit_per_quote": 1}
+        project, "locate_source", {"source_id": source, "limit_per_quote": 1}
     )
     assert len(reads) == 1
     assert [r["index"] for r in result["results"]] == list(range(len(quotes)))

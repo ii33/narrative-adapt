@@ -80,7 +80,7 @@ def test_ambiguous_overlapping_event_evidence_is_still_atomic_rejection(project)
     sid = project.import_source("重叠匹配", "😀aaa")
     before = copy.deepcopy(project.graph_snapshot())
     result = project.submit_extraction(sid, {"nodes": [
-        {"type": "scene", "name": "场", "quotes": ["aaa"]},
+        {"type": "scene", "name": "场"},
         # 原文只有定位用的字符，没有人物：参与者键必填，内容确实为空。
         {"type": "event", "name": "事件", "scene": "场", "quotes": ["aa"], "participants": []}],
         "properties": []})

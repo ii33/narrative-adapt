@@ -20,13 +20,13 @@ def sample(tmp_path, monkeypatch):
     fixture = qa.seed(ops)
     first, second, third = (part + "。" for part in qa.TEXT.split("。") if part)
     draft = {"nodes": [
-        {"type": "person", "name": "周宁", "quotes": [first]}, {"type": "person", "name": "林岚", "quotes": [second]},
-        {"type": "location", "name": "资料室", "quotes": [first]}, {"type": "item", "name": "铜钥匙", "quotes": [first]},
-        {"type": "scene", "name": "交接钥匙", "quotes": [qa.TEXT]},
+        {"type": "person", "name": "周宁"}, {"type": "person", "name": "林岚"},
+        {"type": "location", "name": "资料室"}, {"type": "item", "name": "铜钥匙"},
+        {"type": "scene", "name": "交接钥匙"},
         *[{"type": "event", "name": name, "scene": "交接钥匙", "participants": participants, "quotes": [quote]} for name, participants, quote in (("保管钥匙", ["周宁"], first), ("交出钥匙", ["周宁", "林岚"], second), ("带钥匙离开", ["林岚"], third))]],
         "properties": [
-            {"node": "铜钥匙", "property": "持有者"  , "category": "未分类", "value": owner, "value_type": "either", "at_event": event, "op": "set", "quotes": [quote]} for owner, event, quote in (("周宁", "保管钥匙", first), ("林岚", "交出钥匙", second))] + [
-            {"node": event, "property": "地点", "category": "未分类", "value": "资料室", "value_type": "node", "at_event": event, "op": "set", "quotes": [quote]} for event, quote in (("保管钥匙", first), ("交出钥匙", second), ("带钥匙离开", third))]}
+            {"node": "铜钥匙", "property": "持有者"  , "category": "未分类", "value": owner, "value_type": "either", "at_event": event, "op": "set"} for owner, event, quote in (("周宁", "保管钥匙", first), ("林岚", "交出钥匙", second))] + [
+            {"node": event, "property": "地点", "category": "未分类", "value": "资料室", "value_type": "node", "at_event": event, "op": "set"} for event, quote in (("保管钥匙", first), ("交出钥匙", second), ("带钥匙离开", third))]}
     return ops, fixture, draft, qa
 
 

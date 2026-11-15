@@ -11,15 +11,15 @@ TEXT = '甲与乙互相信任。甲敬佩乙。'
 
 def draft():
     return {'nodes': [
-        {'type': 'person', 'name': '甲', 'quotes': [TEXT]},
-        {'type': 'person', 'name': '乙', 'quotes': [TEXT]},
-        {'type': 'scene', 'name': '交往', 'quotes': [TEXT]},
+        {'type': 'person', 'name': '甲'},
+        {'type': 'person', 'name': '乙'},
+        {'type': 'scene', 'name': '交往'},
         {'type': 'event', "location": "未知", 'name': '相互信任并敬佩', 'scene': '交往', 'quotes': [TEXT], 'participants': ['甲', '乙']},
     ], 'properties': [
         {'node': '甲', 'property': '任意相互关系', 'value': '乙', 'value_type': 'node',
-         'symmetric': True, 'op': 'set', 'at_event': '相互信任并敬佩', 'category': '关系', 'quotes': ['甲与乙互相信任。']},
+         'symmetric': True, 'op': 'set', 'at_event': '相互信任并敬佩', 'category': '关系'},
         {'node': '甲', 'property': '敬佩', 'value': '乙', 'value_type': 'node',
-         'op': 'set', 'at_event': '相互信任并敬佩', 'category': '关系', 'quotes': ['甲敬佩乙。']},
+         'op': 'set', 'at_event': '相互信任并敬佩', 'category': '关系'},
     ]}
 
 

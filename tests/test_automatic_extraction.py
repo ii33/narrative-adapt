@@ -49,10 +49,10 @@ def test_invalid_submission_never_mutates_graph_or_leaves_pending(project, probl
     if problem == 'quote':
         data['nodes'][0]['quotes'] = ['原文没有这句话']
     elif problem == 'expiration':
-        data['properties'].append({'node': '甲', 'property': '计划' , "category": "未分类", 'op': 'clear', 'at_event': 'missing', 'quotes': ['甲接到乙后离开。']})
+        data['properties'].append({'node': '甲', 'property': '计划' , "category": "未分类", 'op': 'clear', 'at_event': 'missing'})
     elif problem == 'heading':
         # A container quote cannot replace evidence derived from real direct children.
-        data['nodes'] = [{'type': 'big_event', 'name': '远行', 'quotes': [heading]}]
+        data['nodes'] = [{'type': 'big_event', 'name': '远行'}]
         data['properties'] = []
         data['uncertainties'] = []
         data['exclusions'] = []

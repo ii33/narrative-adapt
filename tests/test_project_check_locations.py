@@ -13,8 +13,8 @@ def project(tmp_path, monkeypatch):
     ops = Operations.create_graph_project(tmp_path / "check-locations.nproj")
     source = ops.import_source("定位", TEXT)
     accepted = ops.submit_extraction(source, {"nodes": [
-        {"type": "person", "name": "甲", "quotes": [TEXT]},
-        {"type": "scene", "name": "屋外", "quotes": [TEXT]},
+        {"type": "person", "name": "甲"},
+        {"type": "scene", "name": "屋外"},
         {"type": "event", "name": "等候", "scene": "@2", "quotes": [TEXT],
          "participants": ["@1"], "location": "未知"},
     ], "properties": []})

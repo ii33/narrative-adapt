@@ -100,8 +100,8 @@ def test_operations_child_evidence_update_commits_derived_ancestors_atomically(p
     text = '甲在站台办妥登记。随后确认登记已完成。尾注。'
     source = project.import_source('派生更新', text)
     accepted = project.submit_extraction(source, {'nodes': [
-        {'type': 'person', 'name': '甲', 'quotes': ['甲在站台办妥登记。']},
-        {'type': 'location', 'name': '站台', 'quotes': ['站台']},
+        {'type': 'person', 'name': '甲'},
+        {'type': 'location', 'name': '站台'},
         {'type': 'event', 'name': '办妥登记', 'quotes': ['甲在站台办妥登记。'],
          'scene': '@4', 'participants': ['@1'], 'location': '@2'},
         {'type': 'scene', 'name': '站台登记', 'big_event': '@5'},
