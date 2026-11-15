@@ -84,6 +84,9 @@ def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], lo
         if "symmetric" in row and type(row["symmetric"]) is not bool:
             _diagnostic(rejected, path + ['symmetric'], f'{node_name}.{property_id}', 'symmetric必须是布尔值')
             continue
+        if "accumulate" in row and type(row["accumulate"]) is not bool:
+            _diagnostic(rejected, path + ['accumulate'], f'{node_name}.{property_id}', 'accumulate必须是布尔值')
+            continue
         quote_entries = [(index, str(item)) for index, item in enumerate(row.get('quotes') or []) if str(item).strip()]
         quotes = [quote for _, quote in quote_entries]
         good = []
@@ -116,6 +119,7 @@ def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], lo
             "value_type": value_type,
             **({"cardinality": row["cardinality"]} if "cardinality" in row else {}),
             **({"symmetric": row["symmetric"]} if "symmetric" in row else {}),
+            **({"accumulate": row["accumulate"]} if "accumulate" in row else {}),
             "start": good[0]["start"] if good else 0,
             "quotes": [item["quote"] for item in good],
             "scope": str(row.get("scope") or "world").strip(),
@@ -812,6 +816,14 @@ def build_extraction(ops, data: dict) -> dict:
         if name in symmetric_flags and symmetric_flags[name] != prop["symmetric"]:
             skipped.append({"name": name, "reason": "同一属性定义的symmetric声明冲突"})
         symmetric_flags[name] = prop["symmetric"]
+    accumulate_flags = {}
+    for prop in data.get("properties", []):
+        if "accumulate" not in prop:
+            continue
+        name = prop["property"]
+        if name in accumulate_flags and accumulate_flags[name] != prop["accumulate"]:
+            skipped.append({"name": name, "reason": "同一属性定义的accumulate声明冲突"})
+        accumulate_flags[name] = prop["accumulate"]
     cardinalities = {}
     for prop in data.get("properties", []):
         if "cardinality" not in prop:
@@ -822,7 +834,6 @@ def build_extraction(ops, data: dict) -> dict:
         cardinalities[name] = proposed
         if name in definition_records and definition_records[name].get("cardinality", "one") != proposed:
             skipped.append({"name": name, "reason": "cardinality与已有定义冲突；请显式修改属性定义"})
-    definition_updates = set()
     definitions: dict[str, str] = {
         str(item["id"]): str(item.get("value_type") or "string")
         for item in accepted_records
@@ -883,14 +894,24 @@ def build_extraction(ops, data: dict) -> dict:
                 "kind": "property_definition", "id": property_id,
                 "value_type": known_type, "cardinality": cardinalities.get(property_id, "one"),
                 "symmetric": symmetric_flags.get(property_id, False),
+                "accumulate": accumulate_flags.get(property_id, False),
             })
         elif known_type != proposed_type and {known_type, proposed_type} != {"node", "either"}:
             continue
-        if (property_id in definition_records and property_id in symmetric_flags
-                and property_id not in definition_updates
-                and definition_records[property_id].get("symmetric", False) != symmetric_flags[property_id]):
-            records.append(definition_records[property_id] | {"symmetric": symmetric_flags[property_id]})
-            definition_updates.add(property_id)
+        # 已有定义的显式声明变更：symmetric 与 accumulate 同批改时合并成一条更新记录，
+        # 不重复追加同一个定义 ID（那会被当作重复定义拒绝）。
+        declared = {}
+        for field, flags in (("symmetric", symmetric_flags), ("accumulate", accumulate_flags)):
+            if property_id in definition_records and property_id in flags \
+                    and definition_records[property_id].get(field, False) != flags[property_id]:
+                declared[field] = flags[property_id]
+        if declared:
+            pending = next((row for row in records if row.get("kind") == "property_definition"
+                            and row.get("id") == property_id), None)
+            if pending is None:
+                records.append(definition_records[property_id] | declared)
+            else:
+                pending.update(declared)
         value_type = known_type
         value = prop.get("value")
         if "value" in prop and value_type in {"node", "either"}:
