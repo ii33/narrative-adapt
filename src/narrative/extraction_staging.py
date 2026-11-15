@@ -70,6 +70,62 @@ def list_pending(ops, source_id=None, *, limit=20, after=0):
             'next_after': int(selected[-1]['submission_id'].rsplit('-', 1)[1]) if len(rows) > limit else None}
 
 
+# 一次提交里同一类问题（同一码、同一句话、同一字段）可能重复几十遍：26 条属性各缺 op/value
+# 就是 52 行一样的报错。这类输出既淹掉模型能读到的上下文，也让人找不到要改哪一条。
+# 折叠规则：同类问题合成一行，附 count 与涉及的索引（最多列 12 个），最多展开 12 类；
+# 折叠只影响"怎么说"，不减少诊断本身——`count` 就是实际处数。
+COMPACT_GROUP_LIMIT = 12
+COMPACT_INDEX_LIMIT = 12
+
+
+def _compact(problems):
+    groups: dict[tuple, dict] = {}
+    order: list[tuple] = []
+    for row in problems:
+        targets = row.get('targets') or [{}]
+        target = targets[0] if isinstance(targets[0], dict) else {}
+        key = (row.get('severity'), row.get('code'), row.get('message'),
+               target.get('section'), target.get('field'))
+        entry = groups.get(key)
+        if entry is None:
+            entry = {'row': deepcopy(row), 'count': 0, 'indexes': [], 'references': [],
+                     'targets': [deepcopy(target) for target in targets]}
+            groups[key] = entry
+            order.append(key)
+        entry['count'] += 1
+        for item in targets:
+            if isinstance(item, dict) and item not in entry['targets']:
+                entry['targets'].append(deepcopy(item))
+        index = target.get('index')
+        if type(index) is int and index not in entry['indexes']:
+            entry['indexes'].append(index)
+        reference = target.get('reference')
+        if isinstance(reference, str) and reference not in entry['references']:
+            entry['references'].append(reference)
+    compacted = []
+    for key in order:
+        entry = groups[key]
+        row = entry['row']
+        row['count'] = entry['count']
+        if entry['indexes']:
+            row['indexes'] = entry['indexes'][:COMPACT_INDEX_LIMIT]
+            if entry['count'] > 1:
+                row['message'] = f"{row['message']}（同一字段共 {entry['count']} 处）"
+        if entry['targets']:
+            row['targets'] = entry['targets'][:COMPACT_INDEX_LIMIT]
+        if entry['references']:
+            row['references'] = entry['references'][:COMPACT_INDEX_LIMIT]
+        compacted.append(row)
+    if len(compacted) > COMPACT_GROUP_LIMIT:
+        omitted = compacted[COMPACT_GROUP_LIMIT:]
+        compacted = compacted[:COMPACT_GROUP_LIMIT]
+        compacted.append({'severity': 'error', 'code': 'MORE_PROBLEMS', 'path': [], 'targets': [],
+                          'message': f"另有 {len(omitted)} 类问题未展开（本次共 {len(problems)} 处）；"
+                                     "先修已列出的，再重新提交",
+                          'location': '$', 'location_scope': 'operation'})
+    return compacted
+
+
 def _problems(raw, diagnostics, built=None):
     """Locate diagnostics using original slots, never sorted or parsed row indices."""
     node_ids = (built or {}).get('node_ids') or {}
@@ -145,7 +201,7 @@ def _problems(raw, diagnostics, built=None):
             problem.update(targets[0])
         problems.append(problem)
     from .diagnostic_locations import normalize_problems
-    return normalize_problems(problems, operation='submit_extraction')
+    return _compact(normalize_problems(problems, operation='submit_extraction'))
 
 
 def _cas(db, identifier, expected):

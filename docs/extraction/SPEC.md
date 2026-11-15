@@ -524,6 +524,7 @@ flowchart LR
 | `REVISION` | `expected_revision` 与当前正式版本不一致 | 模型改草案 | `I-27` | `src/narrative/graph_service.py::precheck`、`src/narrative/property_operations.py::record_change` | — |
 | `CONTENT_VALIDATION` | 业务／属性编辑的入参不合法，可以暂存为局部修补 | 模型改草案 | — | `src/narrative/property_operations.py::_invalid`、`src/narrative/business_staging.py::_problem` | tests/test_add_property_types.py::test_new_definition_requires_strict_explicit_type_and_symmetry_without_write |
 | `SUBMISSION_REJECTED` | 暂存操作重放时被拒，不能延后自动执行，需要人重新提交或放弃 | 用户决定 | — | `src/narrative/business_staging.py::_attempt`、`src/narrative/business_staging.py::invoke` | — |
+| `MORE_PROBLEMS` | 同类问题超过 12 类未全部展开时的汇总行（只影响怎么说，不减少诊断；各类的实际处数在各行的 `count` 里） | 模型改草案 | `I-28` | `src/narrative/extraction_staging.py::_compact` | tests/test_diagnostic_compaction.py::test_repeated_schema_problems_collapse_into_one_row_per_field |
 
 ### 6.7 静态检查与项目审计（`project_check`）
 
