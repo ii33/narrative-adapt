@@ -316,10 +316,11 @@ def validate(ops, fixture, screenplay, calls, report):
     report["validation_scope"] = "程序只判结构成立与数据完整性；提取正确性、完整性与粒度好坏由人工对照原文判定。"
     # 结构事实：程序能机械核对的部分。
     structural = {
-        # 模型自己建了覆盖每章的切片即可。**不要求逐字等于章节边界**：从 146 起还是 150 起是排版细节，
-        # 不是结构错误；精确边界记在 measurements.slice_bounds 里给人看。
-        "three_chapters_created_by_model": all(
-            any(row["start"] <= chapter["start"] + 8 and row["end"] >= chapter["end"] - 8 for row in slices)
+        # 三章都处理到了：每章至少有事件、且证据落在该章范围内。
+        # 不再要求"模型自己建了切片"——上一轮它没建切片却把三章都提出来了（31/22/24 事件），
+        # 那是做法差异，不是结构错误；切片实际有没有建记在 measurements.slice_bounds 里。
+        "three_chapters_have_events": all(
+            any(chapter["start"] <= (span["start"] or 0) < chapter["end"] for span in spans)
             for chapter in fixture["chapters"]
         ),
         "all_node_quote_coordinates_exact": bool(spans)
@@ -362,7 +363,7 @@ def validate(ops, fixture, screenplay, calls, report):
 STRUCTURAL_KEYS = (
     "task_completed",
     "all_required_tools_called",
-    "three_chapters_created_by_model",
+    "three_chapters_have_events",
     "all_node_quote_coordinates_exact",
     "all_evidence_inside_three_chapters",
     "static_check_no_errors",

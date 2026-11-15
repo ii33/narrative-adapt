@@ -560,10 +560,12 @@ def _compact(outcome: dict) -> dict:
     """
     result = {key: value for key, value in outcome.items() if key != "diagnostics"}
     diagnostics = outcome.get("diagnostics") or []
-    from .diagnostic_locations import normalize_problems
+    from .diagnostic_locations import compact_problems, normalize_problems
     actionable = [row for row in diagnostics if row.get("severity") in {"error", "warning"}]
     if actionable:
-        result['diagnostics'] = normalize_problems(actionable, operation='submit_extraction')
+        # 预检也要折叠：26 条属性各缺 op/value 就是 52 行同一句话。
+        result['diagnostics'] = compact_problems(
+            normalize_problems(actionable, operation='submit_extraction'))
     notices = [row for row in diagnostics if row.get("severity") == "info"]
     if notices:
         result["info_count"] = len(notices)

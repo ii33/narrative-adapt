@@ -79,54 +79,9 @@ COMPACT_INDEX_LIMIT = 12
 
 
 def _compact(problems):
-    groups: dict[tuple, dict] = {}
-    order: list[tuple] = []
-    for row in problems:
-        targets = row.get('targets') or [{}]
-        target = targets[0] if isinstance(targets[0], dict) else {}
-        key = (row.get('severity'), row.get('code'), row.get('message'),
-               target.get('section'), target.get('field'))
-        entry = groups.get(key)
-        if entry is None:
-            entry = {'row': deepcopy(row), 'count': 0, 'indexes': [], 'references': [],
-                     'targets': [deepcopy(target) for target in targets]}
-            groups[key] = entry
-            order.append(key)
-        entry['count'] += 1
-        for item in targets:
-            if isinstance(item, dict) and item not in entry['targets']:
-                entry['targets'].append(deepcopy(item))
-        index = target.get('index')
-        if type(index) is int and index not in entry['indexes']:
-            entry['indexes'].append(index)
-        reference = target.get('reference')
-        if isinstance(reference, str) and reference not in entry['references']:
-            entry['references'].append(reference)
-    compacted = []
-    for key in order:
-        entry = groups[key]
-        row = entry['row']
-        # 生产者（草稿层的丢弃记账）可能已经把同一 (section, field) 折成一条并带上真实
-        # 处数：这时"这一组有 1 行"不是处数，保留它带来的 count，不要往回折。
-        produced = row.get('count')
-        row['count'] = max(entry['count'], produced) if type(produced) is int else entry['count']
-        if entry['indexes']:
-            row['indexes'] = entry['indexes'][:COMPACT_INDEX_LIMIT]
-            if entry['count'] > 1:
-                row['message'] = f"{row['message']}（同一字段共 {entry['count']} 处）"
-        if entry['targets']:
-            row['targets'] = entry['targets'][:COMPACT_INDEX_LIMIT]
-        if entry['references']:
-            row['references'] = entry['references'][:COMPACT_INDEX_LIMIT]
-        compacted.append(row)
-    if len(compacted) > COMPACT_GROUP_LIMIT:
-        omitted = compacted[COMPACT_GROUP_LIMIT:]
-        compacted = compacted[:COMPACT_GROUP_LIMIT]
-        compacted.append({'severity': 'error', 'code': 'MORE_PROBLEMS', 'path': [], 'targets': [],
-                          'message': f"另有 {len(omitted)} 类问题未展开（本次共 {len(problems)} 处）；"
-                                     "先修已列出的，再重新提交",
-                          'location': '$', 'location_scope': 'operation'})
-    return compacted
+    """暂存入库侧沿用的折叠口径（与草稿预检共用一套）。"""
+    from .diagnostic_locations import compact_problems
+    return compact_problems(problems)
 
 
 def _problems(raw, diagnostics, built=None):
