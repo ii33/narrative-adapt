@@ -27,6 +27,10 @@ CHAPTER_STARTS = [146, 5783, 11193, 16517]
 # --chapters 3 是完整验收（约 20 分钟），留给"改完规则要一次总验"。
 SELECTED_CHAPTERS = 1
 START_CHAPTER = 1
+# 复用已有工程：在「前几章已经提取入库」的工程上补跑下一章。空工程里单独跑后一章不真实——
+# 实测模型没有可检索的既有节点，只能自己编号，撞出「正式节点ID不存在：I7」这类 staged。
+REUSE_PROJECT: Path | None = None
+_REUSED: dict = {}
 TASK_START = CHAPTER_STARTS[0]
 TASK_END = CHAPTER_STARTS[SELECTED_CHAPTERS]
 CHAPTER_CHARS = TASK_END - TASK_START
@@ -91,6 +95,44 @@ def load_input():
 
 def seed(ops):
     text, headings = load_input()
+    if REUSE_PROJECT is not None:
+        # 复用：不导入原文、不建容器，只把既有工程的实际状态写成 fixture，后续断言都用它。
+        from narrative.operations import Operations
+
+        reused = Operations.open(REUSE_PROJECT)
+        _REUSED["ops"] = reused
+        snapshot = reused.graph_snapshot()
+        source_id = snapshot["sources"][0]["id"]
+        source_text = reused.source(source_id)["text"]
+        current = reused.harness_settings()
+        reused.save_harness_settings(current | {"max_tokens": BENCH_MAX_TOKENS,
+                                                "output_reserve": BENCH_MAX_TOKENS,
+                                                "timeout_seconds": BENCH_TIMEOUT_SECONDS})
+        # 复用工程里没有剧本容器时补一个：验收要拿它做证据容器，缺了会报「screenplay对象不存在」。
+        scripts = [row for row in reused.adaptation_snapshot().get("nodes", [])
+                   if row.get("node_type") == "screenplay"]
+        screenplay_id = scripts[0]["id"] if scripts else reused.create_screenplay(
+            "内容基准采集空容器", reason="复用工程缺少剧本容器，验收补建")["screenplay"]["id"]
+        return {
+            "source_id": source_id,
+            "screenplay_id": screenplay_id,
+            "source_chars": len(source_text),
+            "source_file_sha256": qa.digest(SOURCE_PATH.read_bytes()),
+            "source_text_sha256": qa.digest(source_text.encode()),
+            "target_start": TASK_START,
+            "target_end": TASK_END,
+            "target_chars": CHAPTER_CHARS,
+            "target_text_sha256": qa.digest(text[TASK_START:TASK_END].encode()),
+            "chapters": [
+                {"index": START_CHAPTER + index,
+                 "title": headings[START_CHAPTER - 1 + index].group().strip(),
+                 "start": CHAPTER_STARTS[START_CHAPTER - 1 + index],
+                 "end": CHAPTER_STARTS[START_CHAPTER + index]}
+                for index in range(SELECTED_CHAPTERS)
+            ],
+            "reused_project": str(REUSE_PROJECT),
+            "pre_existing": {"nodes": len(snapshot["nodes"]), "revision": snapshot["revision"]},
+        }
     ops.save_project_settings(ops.load_project_settings() | {"extraction_granularity": "fine"})
     # 基准的模型参数（见 BENCH_MAX_TOKENS 注释）：输出上限保持 65,536，别为了防流断把它压小——
     # 压小会让一次能交完的草稿被拆成多批，请求数与 token 都跟着涨。
@@ -414,6 +456,7 @@ def main():
             allow_extraction_change=True,
             on_started=OBSERVER.started,
             on_progress=OBSERVER.progress,
+            ops_resolver=lambda ops, fixture: _REUSED.get("ops", ops),
         )
     # 共享框架会按含质量含义的 check 给出 passed；这里改写成结构结论 + 待人工判定。
     for report_file in sorted(REPORT_ROOT.glob("*/report.json"), key=lambda item: item.stat().st_mtime):
@@ -437,6 +480,16 @@ def _argv():
     def given(name):
         return any(item == name or item.startswith(name + "=") for item in argv)
 
+    global REUSE_PROJECT
+    for index, item in enumerate(list(argv)):
+        if item == "--reuse-project" and index + 1 < len(argv):
+            REUSE_PROJECT = Path(argv[index + 1])
+            del argv[index:index + 2]
+            break
+        if item.startswith("--reuse-project="):
+            REUSE_PROJECT = Path(item.split("=", 1)[1])
+            del argv[index]
+            break
     chapters, start = 1, 1
     for flag in ("--chapters", "--start-chapter"):
         for index, item in enumerate(list(argv)):
