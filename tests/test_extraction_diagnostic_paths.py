@@ -121,11 +121,9 @@ def test_preview_preserves_related_paths_metadata(project):
                for row in result['diagnostics'])
 
 @pytest.mark.parametrize('section,index,field,value,expected', [
-    ('nodes', 0, 'extra', 'x', ['nodes', 0, 'extra']),
     ('nodes', 0, 'scene', '@3', ['nodes', 0, 'scene']),
-    ('nodes', 0, 'closing_quote', '林岚', ['nodes', 0, 'closing_quote']),
     ('nodes', 0, 'location', '未知', ['nodes', 0, 'location']),
-    ('properties', 0, 'sequence', 1, ['properties', 0, 'sequence']),
+    ('properties', 0, 'op', {'value': 'set'}, ['properties', 0, 'op']),
 ])
 def test_schema_errors_report_the_original_field(project, section, index, field, value, expected):
     ops, source, text = project
@@ -138,12 +136,35 @@ def test_schema_errors_report_the_original_field(project, section, index, field,
     assert not ops.graph_snapshot()['nodes']
 
 
+@pytest.mark.parametrize('section,index,field,value', [
+    ('nodes', 0, 'extra', 'x'),
+    ('nodes', 0, 'closing_quote', '林岚'),
+    ('properties', 0, 'sequence', 1),
+])
+def test_dropped_fields_point_at_their_section_and_row(project, section, index, field, value):
+    """多余字段不再是 schema 错误（`U-10`）：折叠到 section 上，`field`/`indexes` 指出是哪一条。"""
+    ops, source, text = project
+    raw = draft(text)
+    raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排' , "category": "未分类", 'value': '结束',
+                          'op': 'set', 'value_type': 'string'}]
+    raw[section][index][field] = value
+    result = ops.submit_extraction(source, raw)
+    assert result['status'] == 'accepted', result
+    folded = [row for row in result['info']
+              if row.get('code') == 'EXTRACTION_INFO' and row.get('path') == [section]
+              and row.get('field') == field]
+    assert len(folded) == 1, result
+    assert folded[0]['indexes'] == [index]
+
+
 def test_root_and_remarks_errors_are_independently_collected(project):
     ops, source, text = project
     raw = draft(text) | {'extra_root': 1, 'uncertainties': [False], 'exclusions': 'not-an-array'}
     result = ops.submit_extraction(source, raw)
     assert {tuple(row['path']) for row in result['diagnostics']} >= {
-        ('extra_root',), ('uncertainties', 0), ('exclusions',)}
+        ('uncertainties', 0), ('exclusions',)}
+    # 顶层未知字段不再是错误：丢弃并回一条 info，同一个提交里的真错误照旧收集（`U-10`）。
+    assert any(row.get('path') == ['extra_root'] for row in result['info'])
 
 
 def test_invalid_op_object_has_structured_error_instead_of_type_error(project):

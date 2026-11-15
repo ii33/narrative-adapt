@@ -14,21 +14,21 @@
 
 | 域 | 编号 | 需求（一句话，可判定） | 状态 | 证据锚点 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| EXT | E1 | 原文按主要故事 T／大事件 B／场景 S／事件 E／动作 A 五层组织，层级为 T→B→S→E→A 且不跳级 | implemented | `docs/extraction/SPEC.md` 的 `M-01`–`M-04`；`src/narrative/prompt_defaults.py`（`extraction` v32）；`src/narrative/storyline_ranges.py::analyze` | T=卷/部、B=部内篇章、S=空间连续的连续事件、E=可独立概括、A=实施细节 |
-| EXT | E2 | 主要故事 T 可在进行中创建并持续修订，条数不写死（一部一条或拆上下卷） | implemented | `docs/extraction/SPEC.md` 的 `M-04`；`src/narrative/prompt_defaults.py`（`extraction` v32） | 完成边界由程序从下级证据派生，不以章末代替语义闭合 |
+| EXT | E1 | 原文按主要故事 T／大事件 B／场景 S／事件 E／动作 A 五层组织，层级为 T→B→S→E→A 且不跳级 | implemented | `docs/extraction/SPEC.md` 的 `M-01`–`M-04`；`src/narrative/prompt_defaults.py`（`extraction` v33）；`src/narrative/storyline_ranges.py::analyze` | T=卷/部、B=部内篇章、S=空间连续的连续事件、E=可独立概括、A=实施细节 |
+| EXT | E2 | 主要故事 T 可在进行中创建并持续修订，条数不写死（一部一条或拆上下卷） | implemented | `docs/extraction/SPEC.md` 的 `M-04`；`src/narrative/prompt_defaults.py`（`extraction` v33） | 完成边界由程序从下级证据派生，不以章末代替语义闭合 |
 | EXT | E3 | 场景 S 不承担地点身份，地点只记在事件上，上层人物与地点由成员派生 | implemented | `docs/extraction/SPEC.md` 的 `M-02`；`src/narrative/container_evidence.py::refresh_container_evidence` | 场景记地点会被静态检查当作层级重复 |
 | EXT | E4 | 每个活动事件必须在自身事件处记一条 `world` 地点（节点引用／「无」／「未知」） | implemented | `src/narrative/event_location.py::event_location_issues`；`docs/extraction/SPEC.md` 的 `I-01` | 缺失、清除、他事件锚定都报错 |
 | EXT | E5 | 事件必须带 `participants`，取值限 `person`／`group`，空数组表示确无参与者或原文未交代 | implemented | `src/narrative/extraction.py::parse_nodes`；`src/narrative/graph_service.py::precheck`；`docs/extraction/SPEC.md` 的 `I-25` | 地点用事件地点属性、物品用持有者属性，都不进参与者 |
-| EXT | E6 | 每条属性变更必须给出分类（大类或显式「未分类」），程序不按属性名或取值猜 | implemented | `src/narrative/extraction_draft.py::_draft_input_diagnostics`；`src/narrative/prompt_defaults.py`（`extraction` v32） | 缺 `category` 直接拒收，不静默归位 |
+| EXT | E6 | 每条属性变更必须给出分类（大类或显式「未分类」），程序不按属性名或取值猜 | implemented | `src/narrative/extraction_draft.py::_draft_input_diagnostics`；`src/narrative/prompt_defaults.py`（`extraction` v33） | 缺 `category` 直接拒收，不静默归位 |
 | EXT | E7 | 认知/言说主张记在认知者或说话人（`holder`）身上，值优先用引用，未提及即留白，不与 `world` 混算 | implemented | `src/narrative/property_core.py::validate_records`；`docs/extraction/SPEC.md` 的 `I-12`、`I-30`；`docs/GLOSSARY.md` 的 `G-36`–`G-39` | 同一属性换作用域或换持有人就是另一条记录 |
 | EXT | E8 | 提取出的每条事实都能指回原文位置：逐字引文 + Unicode 区间 | implemented | `src/narrative/property_core.py::_evidence_error`；`docs/extraction/SPEC.md` 的 `I-13`；`docs/extraction/SPEC.md` 的 `M-12` | 引文须逐字且唯一，多处出现要消歧 |
 | EXT | E9 | 同一原文多次提取的事件边界稳定（三次运行的事件边界 Jaccard 均值 ≥ 0.8） | partial | `artifacts/extraction-consistency/v25/compare.json` | 证据取自 v25 的三次运行（`compare.json`：均值 0.844、run1↔run2 0.533、事件数 13/16/30）；v26 只改 `cardinality` 措辞、**未重跑验收**，边界稳定性结论沿用 v25 |
 | PROP | P1 | 属性查询统一返回 `{kind, values[]}`，读取一律列出当前有效值 | implemented | `src/narrative/property_core.py::reduce_changes`；`src/narrative/property_store.py::state` | `kind` 取五态之一，`values` 为当前有效值数组 |
 | PROP | P2 | 读取能区分五种状态：`known`／`unknown`／`absent`／`unrecorded`／`conflict` | implemented | `src/narrative/property_store.py::PROPERTY_STATE_CELL_KINDS`；`docs/GLOSSARY.md` 的 `G-40`–`G-44` | 「没记录」「明确不知道」「明确没有」含义不同，不能互相替代 |
-| PROP | P3 | `cardinality` 只约束录入，不决定读取形状 | implemented | `src/narrative/prompt_defaults.py`（`extraction` v32）；`src/narrative/property_core.py::reduce_changes` | `one` 覆盖写、`many` 多项并存；读取一律列全部有效值 |
+| PROP | P3 | `cardinality` 只约束录入，不决定读取形状 | implemented | `src/narrative/prompt_defaults.py`（`extraction` v33）；`src/narrative/property_core.py::reduce_changes` | `one` 覆盖写、`many` 多项并存；读取一律列全部有效值 |
 | PROP | P4 | 多位对方的关系仍是多条 `one` 记录，不因对方多而改 `many` | implemented | `docs/extraction/SPEC.md` 的 `M-09`；`docs/extraction/SPEC.md` 的 `I-20`；`docs/GLOSSARY.md` 的 `G-34`、`G-35` | 郭靖多位师父＝多条记录，每条一个师父 |
 | PROP | P5 | 属性不存有效期，状态按事件顺序与 `sequence` 折叠，读点用 `cut` 指定 | implemented | `src/narrative/property_core.py::reduce_changes`；`docs/extraction/SPEC.md` 的 `I-30`、`I-31`；`docs/extraction/SPEC.md` 的 `M-10`、`M-11` | 同事件同序号不相容变更报冲突，不挑一个 |
-| PROP | P6 | 描述性内容可多项并存：`many` 记同一事件点同时成立的多项（外貌要点、忌讳清单、随身物品） | implemented | `src/narrative/prompt_defaults.py`（`extraction` v32）；`src/narrative/property_categories.py` | 与 P4 相反的一侧：多项在同一记录内 |
+| PROP | P6 | 描述性内容可多项并存：`many` 记同一事件点同时成立的多项（外貌要点、忌讳清单、随身物品） | implemented | `src/narrative/prompt_defaults.py`（`extraction` v33）；`src/narrative/property_categories.py` | 与 P4 相反的一侧：多项在同一记录内 |
 | PROP | P7 | 容器写入的属性若与下属事件同组则让位：丢弃并回一条 `info` | implemented | `src/narrative/property_core.py::container_property_duplicate`；`docs/extraction/SPEC.md` 的 `I-09`；`docs/extraction/SPEC.md` 的 `M-16` | `info` 附 `duplicate_of` 指向胜出的事件记录 |
 | PROP | P8 | 分类词表末项固定为「未分类」，缺分类不静默归位 | implemented | `src/narrative/property_categories.py::UNCLASSIFIED` | 末项固定；缺省来源记为 `default_unclassified` |
 | SCR | S1 | 剧本层一律写「场次」，提取层一律写「场景」，两者不混用 | implemented | `docs/GLOSSARY.md` 的 `G-19`、`G-04`；`narrative-docops`（独立仓库） | 「场次」＝`script_unit`，「场景」＝`scene` 节点 |

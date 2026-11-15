@@ -53,19 +53,31 @@ def test_extraction_sequences_quotes_identity_and_current_relationship(project):
 
 
 @pytest.mark.parametrize('mutation', [
-    lambda d: d['properties'][0].update(sequence=1),
-    lambda d: d['properties'][0].update(valid_to={'start': 1}),
-    lambda d: d.update(expirations=[]),
     lambda d: d['properties'][0].pop('at_event'),
     lambda d: d['properties'][0].update(op='clear'),
 ])
-def test_old_or_invalid_draft_rejected_without_partial_write(project, mutation):
+def test_invalid_draft_rejected_without_partial_write(project, mutation):
     ops, sid, _, draft = project
     mutation(draft)
     before = ops.graph_snapshot(), ops.property_records()
     staged = ops.submit_extraction(sid, draft)
     assert staged['status'] == 'staged' and staged['problems']
     assert (ops.graph_snapshot(), ops.property_records()) == before
+
+
+@pytest.mark.parametrize('mutation', [
+    lambda d: d['properties'][0].update(sequence=1),
+    lambda d: d['properties'][0].update(valid_to={'start': 1}),
+    lambda d: d.update(expirations=[]),
+])
+def test_old_draft_fields_are_dropped_instead_of_rejecting_the_batch(project, mutation):
+    """旧草稿字段（`sequence`／`valid_to`／`expirations`）是多余参数：丢弃并回 info（`U-10`）。"""
+    ops, sid, _, draft = project
+    mutation(draft)
+    result = ops.submit_extraction(sid, draft)
+    assert result['status'] == 'accepted', result
+    assert [row for row in result.get('info') or [] if row.get('code') == 'EXTRACTION_INFO']
+    assert not [row for row in result.get('diagnostics') or [] if row.get('severity') == 'error']
 
 
 def test_manual_false_clear_correct_and_stale_atomicity(project):

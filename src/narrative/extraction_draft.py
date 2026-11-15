@@ -21,7 +21,7 @@ RESULT_SCHEMA = {
                 "type": {"type": "string", "enum": ["person", "group", "item", "location", "storyline", "big_event", "scene", "event", "action"],
                     "description": "event是介于场景与动作之间、有自身推进与落点的完整情节单元；同场同总目标可有多个事件，不按章节或实施步骤机械拆分。action仅在明确请求动作提取时使用。"},
                 "quotes": {"type": "array", "items": {"type": "string"},
-                    "description": "仅event可填：准确的原文证据，给了就逐字校验。场景／大事件／主要故事由下级派生，其它节点与属性以参与的事件为出处，都不填quotes（填了会被拒）"},
+                    "description": "仅event可填：准确的原文证据，给了就逐字校验。场景／大事件／主要故事由下级派生，其它节点与属性以参与的事件为出处，都不填quotes（多写的不入库，只回一条info说明已丢弃）"},
                 "anchor": {"type": "object", "required": ["start", "end"], "additionalProperties": False,
                     "description": "仅event：原文Unicode位置锚点{start,end}（左闭右开），程序按它截取逐字原文作为本事件证据，推荐用它代替回抄引文；与quotes同时给出时以anchor为准",
                     "properties": {"start": {"type": "integer", "description": "原文Unicode起点，含"},
@@ -101,7 +101,130 @@ class ExtractionDraftValidationError(ValueError):
         super().__init__('；'.join(item['message'] for item in diagnostics))
 
 
+# 草稿里的**无效参数**只丢弃并提醒（`U-10`）：多余字段、摆在没意义的字段上的东西、
+# 未知字段都不改变模型想表达的意思，丢掉以后这一行仍然可读。所以校验分两步——先剥
+# （`_prune_draft`）并记账，再按剥完的对象严格校验（`_draft_input_diagnostics`，
+# `additionalProperties: false` 留在这第二步兜底）。只有「看不懂」的输入才整批拒收：
+# 缺必填、类型不对、引用解析不到、事件没有定位依据。
+#
+# 记账口径同 `extraction_staging._compact`：同一 (section, field) 折叠成一条 info，
+# `count` 是实际处数，`indexes` 是涉及条目（最多列 12 个），不铺几十行一样的提示。
+DROPPED_INDEX_LIMIT = 12
+_NODE_DRAFT_FIELDS = set(RESULT_SCHEMA['properties']['nodes']['items']['properties'])
+_PROPERTY_DRAFT_FIELDS = set(_PROPERTY_DRAFT_SCHEMA['properties'])
+_DROPPED_REASONS = {
+    ('nodes', 'quotes'): '只有事件需要定位依据，其它节点与场景／大事件／主要故事以参与的事件或下级证据为出处',
+    ('properties', 'quotes'): '属性的出处就是 at_event 指向的那个事件，逐字证据记在事件上',
+    ('nodes', 'anchor'): '位置锚点只给事件用，其它节点的位置来自它挂靠的事件',
+}
+_DROPPED_LABELS = {'nodes': '节点行', 'properties': '属性行'}
+_DROPPED_UNKNOWN = '草稿只收合同里写明的字段，不认的字段一律丢弃'
+
+
+class _DroppedParameters:
+    """丢弃记账：同类 ``(section, field)`` 只留一行，``count`` 记处数、``indexes`` 记条目。"""
+
+    def __init__(self):
+        self._groups: dict[tuple[str, str], dict] = {}
+        self._order: list[tuple[str, str]] = []
+
+    def add(self, section: str, field: str, index: int | None = None):
+        key = (section, field)
+        group = self._groups.get(key)
+        if group is None:
+            group = self._groups[key] = {'count': 0, 'indexes': []}
+            self._order.append(key)
+        group['count'] += 1
+        if index is not None and index not in group['indexes']:
+            group['indexes'].append(index)
+
+    def diagnostics(self) -> list[dict]:
+        rows = []
+        for section, field in self._order:
+            group = self._groups[(section, field)]
+            reason = _DROPPED_REASONS.get((section, field), _DROPPED_UNKNOWN)
+            label = _DROPPED_LABELS.get(section, '草稿顶层')
+            # 顶层的未知字段没有 section 可指，path 直接写那个字段；行内的写到它的数组上，
+            # 具体是哪几行看 indexes。
+            path = [field] if section == 'result' else [section]
+            rows.append({'severity': 'info', 'code': 'EXTRACTION_INFO', 'path': path,
+                'field': field, 'count': group['count'],
+                'indexes': group['indexes'][:DROPPED_INDEX_LIMIT],
+                'message': f'{label}的{field}已丢弃：{reason}；共 {group["count"]} 处，其余内容照常入库'})
+        return rows
+
+
+def _is_property_shaped(row: dict) -> bool:
+    """属性行写进 nodes 的兜底形状：没有 type，但有 node 与 property。
+
+    判据与 `parse_nodes` 认这种行时一致——按形状认，不按数组位置认，所以剥字段时
+    也不能把它当节点行，否则 ``node``／``property`` 会被当成未知字段丢掉。
+    """
+    return (not str(row.get('type') or '').strip()
+            and str(row.get('node') or '').strip() and str(row.get('property') or '').strip())
+
+
+def _prune_node_row(row: dict, dropped: _DroppedParameters, index: int) -> dict:
+    kept = {}
+    is_event = str(row.get('type') or '').strip() == 'event'
+    for key, value in row.items():
+        if key not in _NODE_DRAFT_FIELDS:
+            dropped.add('nodes', str(key), index)
+        elif key in ('quotes', 'anchor') and not is_event:
+            # 事件以外的节点没有自身位置：引文与锚点都归它挂靠的事件（`U-09`）。
+            dropped.add('nodes', key, index)
+        else:
+            kept[key] = value
+    return kept
+
+
+def _prune_property_row(row: dict, dropped: _DroppedParameters, index: int) -> dict:
+    kept = {}
+    for key, value in row.items():
+        if key in _PROPERTY_DRAFT_FIELDS:
+            kept[key] = value
+        else:
+            dropped.add('properties', str(key), index)
+    return kept
+
+
+def _prune_draft(result, dropped: _DroppedParameters):
+    """第一步：剥掉草稿里的无效参数并记账，返回剥完的副本（不改调用方的对象）。
+
+    只剥**字段**，不删行：一行被剥空以后仍留在原位，由第二步按「缺必填」拒收——
+    例如只给了 quotes 的人物，模型本来想写的是什么看不出来，不能静默丢成空节点。
+    """
+    if not isinstance(result, dict):
+        return result
+    pruned = {}
+    for key, value in result.items():
+        if key in RESULT_SCHEMA['properties']:
+            pruned[key] = value
+        else:
+            dropped.add('result', str(key))
+    for section in ('nodes', 'properties'):
+        rows = pruned.get(section)
+        if not isinstance(rows, list):
+            continue
+        cleaned = []
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                cleaned.append(row)  # 不是对象：第二步按类型错拒收，这里不动它
+            elif section == 'properties' or _is_property_shaped(row):
+                cleaned.append(_prune_property_row(row, dropped, index))
+            else:
+                cleaned.append(_prune_node_row(row, dropped, index))
+        pruned[section] = cleaned
+    return pruned
+
+
 def _draft_input_diagnostics(result):
+    """第二步：按**已经剥完**的草稿做严格校验，只留「看不懂」的问题。
+
+    行内的未知字段、非事件与属性带的 ``quotes``／``anchor`` 已经由 `_prune_draft`
+    剥掉并记成 info（`U-10`），这里的同名检查是兜底：`additionalProperties: false`
+    的语义仍然成立，真有漏网的未知字段照样报错。
+    """
     issues = []
     def issue(path, message):
         issues.append({'severity': 'error', 'code': 'DRAFT_SCHEMA', 'path': path, 'message': message})
@@ -224,9 +347,13 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
     snapshot = ops.capture_changes()
     reader = snapshot.reader
     source, selected, start, end = _source_range(reader, source_id, start, end)
+    # 第一步剥无效参数、第二步按剥完的对象严格校验（`U-10`）。剥掉的项即使这一批
+    # 因为别的原因被拒也要报出来：模型得知道哪部分已经被程序忽略、不用再改。
+    dropped = _DroppedParameters()
+    result = _prune_draft(result, dropped)
     input_issues = _draft_input_diagnostics(result)
     if input_issues:
-        raise ExtractionDraftValidationError(input_issues)
+        raise ExtractionDraftValidationError(dropped.diagnostics() + input_issues)
     allowed_node_fields = set(RESULT_SCHEMA["properties"]["nodes"]["items"]["properties"])
     for index, row in enumerate(result["nodes"]):
         if not isinstance(row, dict):
@@ -290,6 +417,9 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
         generated = {'node': f'@{index+1}', 'property': property_id, 'at_event': f'@{index+1}',
             'scope': 'world', 'op': 'unknown' if location == '未知' else 'set',
             'quotes': list(row.get('quotes') or []),
+            # 程序自己生成的行：它的引文来自已经核对过的事件定位依据，不是模型多写的，
+            # 所以不能被「属性不带 quotes」的丢弃规则吃掉。
+            '_draft_generated': True,
             # 程序生成的行也要满足「分类必填」：地点的语义分类就是「基本信息」，
             # 与模型自己写地点属性时一致；不能用「未分类」敷衍。
             'category': LOCATION_CATEGORY,
@@ -314,10 +444,13 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
             row['value_type'] = definitions[row['property']]['value_type']
         if isinstance(row, dict) and 'cardinality' not in row and row.get('property') in definitions:
             row['cardinality'] = definitions[row['property']].get('cardinality', 'one')
-    data = parse_nodes(original, selected, node_spans=anchor_spans,
+    data = parse_nodes(original, selected, node_spans=anchor_spans, dropped=dropped,
                        property_spans={position: row['_anchor_span']
                                        for position, row in enumerate(original['properties'])
                                        if isinstance(row, dict) and '_anchor_span' in row})
+    # 丢弃记账在解析之后再取：`parse_nodes`／`_parse_properties` 直接遇到的多余引文
+    # 也记进同一个记账器，最后仍然按 (section, field) 折叠成一条 info（`U-10`）。
+    notices = dropped.diagnostics() + anchor_notices
     for key in ("uncertainties", "exclusions"):
         rows = result.get(key) or []
         if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
@@ -374,7 +507,7 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
     from .extraction_containers import derive
     data = derive(data, current_graph, reader, source_id)
     if data.get("rejected"):
-        diagnostics = list(anchor_notices) + [
+        diagnostics = list(notices) + [
             {"severity": "error", "code": "EXTRACTION_CONTENT", **item,
              "object_id": item.get("name"), "message": item.get("message") or item.get("reason")}
             for item in data["rejected"]]
@@ -396,7 +529,7 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
                 break
     issues += list(built.get("skipped") or [])
     prepared = None
-    diagnostics = list(anchor_notices) + [{"severity": "error", "code": "EXTRACTION_CONTENT",
+    diagnostics = list(notices) + [{"severity": "error", "code": "EXTRACTION_CONTENT",
                     "object_id": item.get("name"), "message": item.get("reason") or str(item),
                     **{key: item[key] for key in ('path', 'related_paths', 'quote', 'positions_sample', 'position_basis') if key in item}} for item in issues]
     # Notices the build raised about rows it deliberately did not store. They

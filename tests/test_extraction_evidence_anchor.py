@@ -6,7 +6,8 @@
 
 * 事件用 `anchor{start,end}` 时，程序按偏移截取逐字原文（`evidence.quote == source[start:end]`），
   锚点越界、反向或不在本批范围都直接拒收，路径指到 `anchor`；
-* 非事件节点与属性携带 `quotes` 会被拒收（不是"可选"），事件两者都没有也被拒收；
+* 非事件节点与属性携带的 `quotes` 是多余参数：只丢弃并回一条折叠后的 `info`（`U-10`），
+  不整批拒收；事件两者都没有仍然拒收；
 * 没有引文的节点照常入库：实体的 `evidence`／`disclosure` 由它最早挂靠的事件派生，
   形状与逐字引文完全一致；
 * 没有引文的属性照常入库：`sequence` 取 `at_event` 事件的位置，同事件内按提交顺序递增。
@@ -133,24 +134,39 @@ def test_anchor_wins_over_quotes_and_says_so(project):
 
 
 @pytest.mark.parametrize("kind", ["person", "location", "item", "scene"])
-def test_quotes_on_non_event_nodes_are_rejected(project, kind):
+def test_quotes_on_non_event_nodes_are_dropped_with_one_info(project, kind):
+    """多余引文只丢弃并提醒（`U-10`）：这一行本身看得懂，不该为它整批废掉。"""
     ops, source = project
     raw = draft()
     index = next(position for position, row in enumerate(raw["nodes"]) if row["type"] == kind)
     raw["nodes"][index]["quotes"] = [TEXT[:9]]
     result = ops.submit_extraction(source, raw)
-    assert result["status"] == "staged"
-    assert ("nodes", index, "quotes") in paths(result)
-    assert not ops.graph_snapshot()["nodes"]
+    assert result["status"] == "accepted", result
+    notices = [row for row in result.get("info") or []
+               if row.get("path") == ["nodes"] and row.get("field") == "quotes"]
+    # 同一 (section, field) 折叠成一条：count 记处数，indexes 指出是哪一行。
+    assert len(notices) == 1, result
+    assert (notices[0]["code"], notices[0]["count"], notices[0]["indexes"]) == ("EXTRACTION_INFO", 1, [index])
+    # 引文没有进证据：这条实体的证据仍来自它最早挂靠的那个事件。
+    event = nodes_by(ops)["event" + FIRST]
+    stored = next(node for node in ops.graph_snapshot()["nodes"]
+                  if node["name"] == raw["nodes"][index]["name"])
+    assert stored["evidence_spans"] == event["evidence_spans"]
 
 
-def test_property_quotes_are_rejected(project):
+def test_property_quotes_are_dropped_with_one_info(project):
     ops, source = project
     raw = draft()
     raw["properties"][0]["quotes"] = [TEXT[:9]]
     result = ops.submit_extraction(source, raw)
-    assert result["status"] == "staged"
-    assert ("properties", 0, "quotes") in paths(result)
+    assert result["status"] == "accepted", result
+    notices = [row for row in result.get("info") or []
+               if row.get("path") == ["properties"] and row.get("field") == "quotes"]
+    assert len(notices) == 1, result
+    assert (notices[0]["code"], notices[0]["count"], notices[0]["indexes"]) == ("EXTRACTION_INFO", 1, [0])
+    # 属性不接受自带引文：证据与披露位置都取 at_event 指向的那个事件。
+    change = next(record for record in ops.property_records() if record.get("kind") == "property_change")
+    assert change["evidence"] == nodes_by(ops)["event" + FIRST]["evidence"]
 
 
 def test_quoted_event_that_does_not_match_the_source_is_still_rejected(project):

@@ -10,10 +10,15 @@ from narrative.project_package import layout
 from narrative.prompt_defaults import DEFAULT_PROMPTS
 
 
-def stage_with_unknown_field(project):
+def stage_with_misplaced_field(project):
+    """造一份有局部问题、可被 patch 修好的暂存稿。
+
+    `location` 只给事件用：人物行带上它是"看不懂"的一类（`U-10`），patch 删掉这个字段
+    就能过；未知字段不在此列——它在提交时就被丢弃了，不会留下待修稿。
+    """
     sid = project.import_source('局部修补工具原文', TEXT)
     draft = draft_result(ended=False)
-    draft['nodes'][0]['unexpected'] = True
+    draft['nodes'][0]['location'] = '未知'
     entry = str(layout(project.project_info().path).entry)
     result = tool_api.call('submit_extraction', {'source_id': sid, 'result': draft}, project=entry)
     assert result['status'] == 'staged' and result['problems']
@@ -22,8 +27,8 @@ def stage_with_unknown_field(project):
 
 
 def test_tool_feedback_can_be_patched_directly_via_cli_without_resubmitting(project, capsys):
-    entry, staged = stage_with_unknown_field(project)
-    patch = [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'unexpected'}]
+    entry, staged = stage_with_misplaced_field(project)
+    patch = [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'location'}]
     assert tool_cli.main(['extraction-patch', '--submission-id', staged['submission_id'],
         '--expected-revision', str(staged['submission_revision']), '--patches', json.dumps(patch),
         '--reason', '根据问题反馈直接删除非法字段', '--project', entry, '--json']) == 0
@@ -36,14 +41,14 @@ def test_tool_feedback_can_be_patched_directly_via_cli_without_resubmitting(proj
 
 
 def test_mcp_reads_only_requested_slots_and_rejects_patch_of_committed_draft(project):
-    entry, staged = stage_with_unknown_field(project)
+    entry, staged = stage_with_misplaced_field(project)
     response = mcp_server.handle({'id': 1, 'method': 'tools/call', 'params': {'name': 'read_extraction_submission',
         'arguments': {'submission_id': staged['submission_id'], 'section': 'nodes', 'indices': [0]}}}, default_project=entry)
     assert not response['result']['isError']
     read = json.loads(response['result']['content'][0]['text'])
     assert len(read['entries']) == 1 and read['entries'][0]['reference'] == '@1'
     fixed = tool_api.call('patch_extraction_submission', {'submission_id': staged['submission_id'],
-        'expected_revision': staged['submission_revision'], 'patches': [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'unexpected'}],
+        'expected_revision': staged['submission_revision'], 'patches': [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'location'}],
         'reason': '局部修补'}, project=entry)
     assert fixed['status'] == 'accepted'
     repeated = mcp_server.handle({'id': 2, 'method': 'tools/call', 'params': {'name': 'patch_extraction_submission',
@@ -85,14 +90,14 @@ def test_guidance_uses_feedback_direct_patch_and_never_claims_staged_as_committe
 
 
 def test_pending_submissions_are_discoverable_without_draft_payload(project, capsys):
-    entry, staged = stage_with_unknown_field(project)
+    entry, staged = stage_with_misplaced_field(project)
     assert tool_cli.main(['extraction-submissions', '--project', entry, '--json']) == 0
     listed = json.loads(capsys.readouterr().out)
     assert [r['submission_id'] for r in listed['submissions']] == [staged['submission_id']]
     assert listed['submissions'][0]['validation_status'] == 'invalid'
     assert all('entries' not in r and 'result' not in r for r in listed['submissions'])
     tool_api.call('patch_extraction_submission', {'submission_id': staged['submission_id'], 'expected_revision': 1,
-        'patches': [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'unexpected'}], 'reason': '完成问题修补'}, project=entry)
+        'patches': [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'location'}], 'reason': '完成问题修补'}, project=entry)
     reopened = tool_api.call('list_extraction_submissions', {}, project=entry)
     assert reopened['submissions'] == []
 

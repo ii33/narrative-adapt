@@ -51,12 +51,14 @@ def _batch_participant_kind(value: str, rows: list, declared: dict[str, str]) ->
 
 
 def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], locations: dict,
-                      lookup=None, spans: dict[int, tuple[int, int]] | None = None) -> list[dict]:
+                      lookup=None, spans: dict[int, tuple[int, int]] | None = None, *, dropped=None) -> list[dict]:
     """Verify property observations the same way as nodes: exact quote, known owner.
 
     ``quotes`` 是可选的：给了就按节点同样的规则逐字定位，不给就不产生证据。
-    程序自己生成的行（事件地点快捷字段）可能带 ``spans``——那是已经核对过的
-    精确坐标，不再回到原文里搜一遍。
+    但属性不该自带引文（出处就是 ``at_event``），模型多写的一律丢掉并记进
+    ``dropped``，不整批拒收（`U-10`）。程序自己生成的行（事件地点快捷字段）例外：
+    它的引文来自已经核对过的事件定位依据，标记 ``_draft_generated``。这些行还可能带
+    ``spans``——那是已经核对过的精确坐标，不再回到原文里搜一遍。
     """
     if not isinstance(rows, list):
         return []
@@ -91,6 +93,12 @@ def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], lo
             _diagnostic(rejected, path + ['symmetric'], f'{node_name}.{property_id}', 'symmetric必须是布尔值')
             continue
         quote_entries = [(index, str(item)) for index, item in enumerate(row.get('quotes') or []) if str(item).strip()]
+        if quote_entries and not row.get('_draft_generated'):
+            # 属性带 quotes 是"多余的参数"：属性以 at_event 指向的事件为出处，逐字证据
+            # 记在事件上（`U-09`）。丢掉引文继续走，只记一条 info（`U-10`）。
+            quote_entries = []
+            if dropped is not None:
+                dropped.add('properties', 'quotes', draft_index)
         quotes = [quote for _, quote in quote_entries]
         good = []
         span = (spans or {}).get(draft_index)
@@ -190,14 +198,16 @@ def _participant_domain_error(participants: list, rows: list, declared: dict[str
 
 
 def parse_nodes(payload: dict, text: str, *, node_spans: dict[int, tuple[int, int]] | None = None,
-                property_spans: dict[int, tuple[int, int]] | None = None) -> dict:
+                property_spans: dict[int, tuple[int, int]] | None = None, dropped=None) -> dict:
     """Verify every given quote and pin each node to its first appearance.
 
     证据是可选的：节点或属性给了引文，每条都必须是原文的逐字子串；不给就不产生
     证据，也不因此拒收——实体与属性的出处是它参与的事件（``participants``、
     事件处的属性变更、``at_event``）。**事件例外**：它必须给定位依据，``anchor``
-    或 ``quotes`` 二选一，``node_spans`` 就是已经核对过的 anchor 坐标。rejected
-    quotes are reported with the reason instead of dropped silently.
+    或 ``quotes`` 二选一，``node_spans`` 就是已经核对过的 anchor 坐标。
+
+    非事件节点带的 ``quotes`` 是多余的参数：丢掉引文继续走，只把丢弃记进 ``dropped``
+    （`U-10`），不整批拒收——它本来就不该有引文，写多了不代表这一行看不懂。
     """
     rows = payload.get("nodes")
     if not isinstance(rows, list):
@@ -274,9 +284,12 @@ def parse_nodes(payload: dict, text: str, *, node_spans: dict[int, tuple[int, in
         quote_entries = [(index, str(item)) for index, item in enumerate(row.get('quotes') or []) if str(item).strip()]
         quotes = [quote for _, quote in quote_entries]
         if node_type != 'event' and quotes:
-            _diagnostic(rejected, path + ['quotes'], name,
-                        f'仅事件可填quotes：{node_type}以它参与的事件为出处，容器由下级证据派生，都不提供自身引文')
-            continue
+            # 同样只丢弃不拒收（`U-10`）：非事件节点以它参与的事件为出处，容器由下级
+            # 证据派生，都不提供自身引文；但多写一条引文不代表这一行看不懂。
+            quote_entries = []
+            quotes = []
+            if dropped is not None:
+                dropped.add('nodes', 'quotes', original_index - 1)
         if is_container:
             quote_entries = []  # Container evidence comes only from verified children.
         good: list[dict] = []
@@ -355,7 +368,8 @@ def parse_nodes(payload: dict, text: str, *, node_spans: dict[int, tuple[int, in
     declared = declared if isinstance(declared, list) else []
     if strays:
         declared = declared + strays
-    properties = _parse_properties(declared, text, {item["name"] for item in nodes}, rejected, locations, lookup)
+    properties = _parse_properties(declared, text, {item["name"] for item in nodes}, rejected, locations, lookup,
+                                  dropped=dropped)
     scenes = {item["name"] for item in grouped["scene"]}
     for event in grouped["event"]:
         if event["scene"] and event["scene"] not in scenes:

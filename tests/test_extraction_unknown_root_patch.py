@@ -1,11 +1,20 @@
-"""An invalid extra root key is repairable without replacing the authored draft."""
+"""A legacy staged draft's extra root key is repairable without replacing the authored draft.
+
+`U-10` 以后，新提交的草稿在准备阶段就把未知顶层字段丢弃了，所以带这种字段的暂存稿只可能是
+**升级前留下的**。这里按当时的形状直接写一份暂存稿：patch 的「删除单个未知顶层字段」必须
+还能修它，否则旧工程里的待修稿只能整份重交。
+"""
+import json
 from copy import deepcopy
 
 import pytest
 from agent_fixtures import project as project
 
 from narrative.content_errors import ContentConflictError
+from narrative.extraction_staging import _load, _save
 from narrative.tool_api import TOOLS
+
+LEGACY_ID = 'extraction-submission-1'
 
 
 def draft():
@@ -14,11 +23,22 @@ def draft():
 
 
 def staged(project, raw=None):
+    """升级前留下的暂存稿：草稿里还带着未知顶层字段。"""
     source = project.import_source('局部修补测试', '甲。乙。')
     raw = draft() if raw is None else raw
-    result = project.submit_extraction(source, raw)
-    assert result['status'] == 'staged', result
-    return source, result
+    with project.project.store.connect(write=True) as db:
+        _save(db, {'submission_id': LEGACY_ID, 'submission_revision': 1,
+                   'submission_status': 'staged', 'source_id': source, 'start': 0, 'end': 4,
+                   'formal_revision': project.graph_project_info()['revision'],
+                   'result': deepcopy(raw), 'validation_status': 'invalid',
+                   'problems': [{'severity': 'error', 'code': 'DRAFT_SCHEMA',
+                                 'path': ['result_note'],
+                                 'message': '未知草稿字段：result_note', 'targets': []}],
+                   'counts': {'nodes': len(raw.get('nodes') or []), 'properties': 0},
+                   'last_reason': '升级前留下的待修稿'})
+        stored = _load(db, LEGACY_ID)
+    assert stored['submission_status'] == 'staged' and 'result_note' in json.dumps(stored, ensure_ascii=False)
+    return source, {'submission_id': LEGACY_ID, 'submission_revision': 1, 'submission_status': 'staged'}
 
 
 def test_remove_unknown_root_rechecks_and_commits_without_changing_original_or_target(project):
@@ -91,8 +111,9 @@ def test_removing_illegal_target_copy_does_not_change_bound_source_range(project
 
 def test_stale_revision_still_rejects_root_removal(project):
     _, submission = staged(project)
+    # 删掉必填字段让这份稿子仍然是 invalid：它留在 staged、修订号往前走。
     changed = project.patch_extraction_submission(submission['submission_id'], 1,
-        [{'op': 'set', 'section': 'nodes', 'index': 0, 'field': 'name', 'value': '甲的新名称'}], '修改节点')
+        [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'name'}], '删掉必填名称')
     assert changed['status'] == 'staged' and changed['submission_revision'] == 2
     with pytest.raises(ContentConflictError):
         project.patch_extraction_submission(submission['submission_id'], 1,

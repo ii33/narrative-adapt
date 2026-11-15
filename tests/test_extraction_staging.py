@@ -103,12 +103,14 @@ def test_staging_not_loaded_into_canonical_validation_snapshot(project):
 def test_schema_problem_can_be_repaired_by_remove_field_without_row_reordering(project):
     sid = project.import_source('暂存', TEXT)
     draft = draft_result(ended=False)
-    draft['nodes'][0]['unexpected'] = True
+    # `location` 只给事件用：人物行带上它是"看不懂"，patch 删掉这个字段就能过，
+    # 行序与 @ 引用都不变。未知字段不在此列——它提交时就被丢弃了（`U-10`）。
+    draft['nodes'][0]['location'] = '未知'
     staged = project.submit_extraction(sid, draft)
     problem = staged['problems'][0]
     assert (problem['section'], problem['index'], problem['reference']) == ('nodes', 0, '@1')
     fixed = project.patch_extraction_submission(staged['submission_id'], 1,
-        [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'unexpected'}], '移除非法字段')
+        [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'location'}], '移除错位的字段')
     assert fixed['status'] == 'accepted'
     assert fixed['node_ids']['@1'] in {n['id'] for n in project.graph_snapshot()['nodes']}
 

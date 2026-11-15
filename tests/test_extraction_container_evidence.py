@@ -60,23 +60,23 @@ def test_reverse_parent_fields_supply_direct_children(project):
     assert nodes['storyline']['events'] == [nodes['big_event']['id']]
 
 
-def test_model_upper_quotes_are_rejected_outright(project):
-    """容器不填引文（`U-09`／`I-10`）：模型给容器写 quotes 直接拒收，不静默忽略。"""
+def test_model_upper_quotes_are_dropped_and_never_become_evidence(project):
+    """容器不填引文（`U-09`／`I-10`）：模型给容器写的 quotes 只丢弃并提醒（`U-10`）。
+
+    丢弃不等于采纳：容器证据仍然只能由已验证的下级派生，模型写的那几句不会变成证据。
+    """
     quote = '丙完成登记。'
     source = project.import_source('登记', quote)
     raw = hierarchy(quote, '丙')
     for row in raw['nodes'][:3]:
         row['quotes'] = ['模型不应填写的概括而非原文']
     result = project.submit_extraction(source, raw)
-    assert result['status'] == 'staged'
-    paths = {tuple(row['path']) for row in result['problems']}
-    assert {('nodes', 0, 'quotes'), ('nodes', 1, 'quotes'), ('nodes', 2, 'quotes')} <= paths
-    assert not project.graph_snapshot()['nodes']
-    fixed = {'nodes': [row for row in raw['nodes']], 'properties': []}
-    for row in fixed['nodes'][:3]:
-        row.pop('quotes', None)
-    accepted = project.submit_extraction(source, fixed)
-    assert accepted['status'] == 'accepted', accepted
+    assert result['status'] == 'accepted', result
+    notices = [row for row in result.get('info') or []
+               if row.get('path') == ['nodes'] and row.get('field') == 'quotes']
+    # 三处同类丢弃折叠成一条：count 是处数，indexes 指出是哪几行。
+    assert len(notices) == 1, result
+    assert (notices[0]['count'], notices[0]['indexes'][:3]) == (3, [0, 1, 2])
     for n in project.graph_snapshot()['nodes']:
         assert all(s['quote'] == quote for s in n['evidence_spans'])
 

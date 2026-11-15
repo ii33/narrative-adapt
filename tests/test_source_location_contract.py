@@ -69,10 +69,11 @@ def test_submit_locates_and_validates_without_optional_locate_or_preview(project
     assert first["disclosure"]["start"] == 1
     before = copy.deepcopy(project.graph_snapshot())
     draft = draft_result()
-    draft["nodes"][0]["quotes"] = ["原文不存在的引文"]
+    # 事件引文必须逐字命中原文：这才是拒收的理由（人物的多余引文只丢弃，`U-10`）。
+    draft["nodes"][4]["quotes"] = ["原文不存在的引文"]
     staged = project.submit_extraction(sid, draft)
     assert staged["status"] == "staged" and staged["problems"]
-    assert any(row.get("path") == ["nodes", 0, "quotes"] for row in staged["problems"])
+    assert any(row.get("path") == ["nodes", 4, "quotes", 0] for row in staged["problems"])
     assert project.graph_snapshot() == before
 
 

@@ -1,5 +1,5 @@
 """Published extraction drafts cannot be confused with stored graph objects."""
-import copy
+import json
 
 import pytest
 from agent_fixtures import TEXT, draft_result
@@ -33,21 +33,26 @@ def test_graph_schema_publishes_same_complete_draft_contract_as_tools(project):
 
 
 @pytest.mark.parametrize("mistake", ["storage_field", "nested_range"])
-def test_storage_only_node_field_and_nested_range_reject_without_writes(project, mistake):
+def test_storage_only_fields_are_dropped_instead_of_failing_the_batch(project, mistake):
+    """未知字段只丢弃并回一条 info（`U-10`）：一处多余不该让整批作废。"""
     sid = project.import_source("合同边界", TEXT)
-    before = copy.deepcopy((project.graph_snapshot(), project.property_records()))
     draft = current_draft()
     if mistake == "storage_field":
         draft["nodes"][0]["identity_note"] = "此字段属于存储节点"
-        expected_path = ['nodes', 0, 'identity_note']
+        expected_path, expected_field = ['nodes'], 'identity_note'
     else:
         draft["start"] = 0
-        expected_path = ['start']
-    staged = project.submit_extraction(sid, draft)
-    assert staged['status'] == 'staged'
-    assert any(problem['path'] == expected_path and '未知' in problem['message']
-               for problem in staged['problems'])
-    assert (project.graph_snapshot(), project.property_records()) == before
+        expected_path, expected_field = ['start'], 'start'
+    result = project.submit_extraction(sid, draft)
+    assert result['status'] == 'accepted', result
+    notices = [row for row in result.get('info') or []
+               if row.get('path') == expected_path and row.get('field') == expected_field]
+    assert len(notices) == 1, result
+    assert notices[0]['code'] == 'EXTRACTION_INFO' and notices[0]['count'] == 1
+    # 丢弃是真丢弃：草稿里那份存储字段的值没进图（`start` 作为批次参数也不受草稿里的同名键影响）。
+    stored = project.graph_snapshot()['nodes'] + project.property_records()
+    assert '此字段属于存储节点' not in json.dumps(stored, ensure_ascii=False)
+    assert {'甲', '乙'} <= {node['name'] for node in project.graph_snapshot()['nodes']}
 
 
 def test_semantic_batches_reuse_previous_nodes_and_close_later_interval(project):

@@ -29,15 +29,17 @@ def test_finished_story_reuses_existing_phase_without_repeating_children(project
     assert len([n for n in nodes if n["node_type"] == "big_event"]) == 1
 
 
-def test_closing_quote_is_rejected_and_storyline_requires_child_evidence(project):
+def test_closing_quote_is_dropped_and_storyline_requires_child_evidence(project):
     text = "前文。甲进屋。结束。"
     sid = project.import_source("分段闭合", text)
     payload = {"nodes": [{"type": "storyline", "name": "全篇", "closing_quote": "结束。"}], "properties": []}
     checked = project.preview_extraction(sid, payload, start=3, end=len(text))
     assert not checked["valid"]
-    unknown = next(d for d in checked["diagnostics"] if d["path"][-1] == "closing_quote")
-    assert unknown["code"] == "DRAFT_SCHEMA"
-    assert "closing_quote" in unknown["message"]
+    # closing_quote 不在合同里：多余字段只丢弃并回一条 info（`U-10`），不能当成闭合证据。
+    dropped = next(d for d in checked["info"] if d.get("field") == "closing_quote")
+    assert (dropped["code"], dropped["path"], dropped["indexes"]) == ("EXTRACTION_INFO", ["nodes"], [0])
+    assert not any(d["path"][-1:] == ["closing_quote"] for d in checked["diagnostics"])
+    assert any(d["path"] == ["nodes", 0, "children"] for d in checked["diagnostics"])
     empty = project.preview_extraction(sid, {"nodes": [{"type": "storyline", "name": "全篇"}], "properties": []})
     assert not empty["valid"]
     assert any(d["path"] == ["nodes", 0, "children"] for d in empty["diagnostics"])

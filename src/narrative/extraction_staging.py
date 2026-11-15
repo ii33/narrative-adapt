@@ -106,7 +106,10 @@ def _compact(problems):
     for key in order:
         entry = groups[key]
         row = entry['row']
-        row['count'] = entry['count']
+        # 生产者（草稿层的丢弃记账）可能已经把同一 (section, field) 折成一条并带上真实
+        # 处数：这时"这一组有 1 行"不是处数，保留它带来的 count，不要往回折。
+        produced = row.get('count')
+        row['count'] = max(entry['count'], produced) if type(produced) is int else entry['count']
         if entry['indexes']:
             row['indexes'] = entry['indexes'][:COMPACT_INDEX_LIMIT]
             if entry['count'] > 1:

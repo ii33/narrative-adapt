@@ -46,26 +46,28 @@ def test_current_node_and_tool_contracts_have_no_provisional_field(project):
     assert any("直接用清晰概括名，未完也不加暂称" in row['text'] for row in guidance['guides'])
 
 
-def test_old_draft_field_is_rejected_without_silently_stripping_or_writing(project):
+def test_old_draft_field_is_dropped_before_writing_but_the_store_still_refuses_it(project):
+    """草稿层的多余字段丢弃（`U-10`），存储层仍不接受旧字段：图里永远不会有它。"""
     sid=project.import_source("屋内过程",TEXT)
     payload=draft()
     payload["nodes"][2]["provisional_name"]="旧双轨名称"
     original=copy.deepcopy(payload)
     before=project.graph_snapshot()
-    for method in (project.preview_extraction,project.submit_extraction):
-        result = method(sid,payload)
-        assert not result['valid']
-        assert any(row.get('path') == ['nodes', 2, 'provisional_name']
-                   and 'provisional_name' in row['message'] for row in result['diagnostics'])
-        if method == project.submit_extraction:
-            assert result['status'] == 'staged'
-        assert payload == original and project.graph_snapshot() == before
+    checked = project.preview_extraction(sid,payload)
+    assert checked['valid'] is True
+    assert not any(row.get('path') == ['nodes', 2, 'provisional_name'] for row in checked.get('diagnostics') or [])
+    dropped = [row for row in checked.get('info') or [] if row.get('field') == 'provisional_name']
+    assert len(dropped) == 1 and dropped[0]['indexes'] == [2]
+    assert payload == original and project.graph_snapshot() == before
+    result = project.submit_extraction(sid,payload)
+    assert result['status'] == 'accepted' and result['valid'] is True
+    assert payload == original
+    assert not any('provisional_name' in node for node in project.graph_snapshot()['nodes'])
     direct={"kind":"node","id":"T1","node_type":"storyline","name":"清晰概括名",
             "provisional_name":"旧字段","disclosure":{"source_id":sid,"start":0},
             "evidence":{"source_id":sid,"quote":TEXT}}
-    rejected=project.apply_changes([direct],[],before["revision"],"不允许旧字段写入")
+    rejected=project.apply_changes([direct],[],project.graph_snapshot()["revision"],"不允许旧字段写入")
     assert rejected["status"] == "staged" and "provisional_name" in json.dumps(rejected)
-    assert project.graph_snapshot() == before
 
 
 @pytest.mark.parametrize("suffix",["（暂称）","(暂称)"])

@@ -47,7 +47,8 @@ def test_invalid_submission_never_mutates_graph_or_leaves_pending(project, probl
     sid = project.import_source('合成原文', heading + '\n' + TEXT)
     data = draft_result()
     if problem == 'quote':
-        data['nodes'][0]['quotes'] = ['原文没有这句话']
+        # 事件的引文必须逐字命中原文；人物的多余引文只会被丢弃（`U-10`），拒不了这一批。
+        data['nodes'][4]['quotes'] = ['原文没有这句话']
     elif problem == 'expiration':
         data['properties'].append({'node': '甲', 'property': '计划' , "category": "未分类", 'op': 'clear', 'at_event': 'missing'})
     elif problem == 'heading':
