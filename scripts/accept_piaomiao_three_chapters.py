@@ -26,36 +26,50 @@ CHAPTER_STARTS = [146, 5783, 11193, 16517]
 # 默认 1 章：一次 fine 提取几分钟跑完，适合改完提示词自检；
 # --chapters 3 是完整验收（约 20 分钟），留给"改完规则要一次总验"。
 SELECTED_CHAPTERS = 1
+START_CHAPTER = 1
 TASK_START = CHAPTER_STARTS[0]
 TASK_END = CHAPTER_STARTS[SELECTED_CHAPTERS]
 CHAPTER_CHARS = TASK_END - TASK_START
-REPORT_ROOT = Path(f"data/acceptance/piaomiao-ch{SELECTED_CHAPTERS}-chapters")
+REPORT_ROOT = Path("data/acceptance/piaomiao-ch1")
 # 实测写死：text[146:16517] 的 UTF-8 sha256（第一次运行前用文件实算，不是抄来的）。
 CHAPTER_TEXT_SHA256 = "2e68b28d06f1d86ce169cb28b9e07d9be1a1c442d24975682ed201dfe8791dd6"
 
 # main() 会把 qa.TEXT 落成 input.txt；这里只放说明，原文不进验收目录。
 TEXT_NOTE = "外部版权原文按路径读取，未复制；范围、字数与摘要见 fixture.json 的 target_* 字段。"
-TASK_TEMPLATE = """请在当前空工程中处理《飘邈之旅》前 {count} 章的完整原文（源文本字符区间 {start} 到 {end}，共 {chars} 字），按工程 fine 精细粒度逐章完整读取并提取。不缩短章节、不只做开头示例、不处理第 {next_chapter} 章。
-请自主读取标题小样，用 pattern 工具一次建立这 {count} 章的切片；逐章完整读取并提取，允许按内容分批提交，但每批使用对应的实际原文范围与逐字证据。覆盖有叙事作用的主要及次要/无名人物、具体地点、关系（含互逆关系的正反两条）、心理认知、物品与持有者、事件及所属场景，不只列名词或梗概。核对人物身份与代词、叙事时空、关系方向、物品持有者及换手区间，事件归属场景。默认不提取动作，不为章节尚未结束的较大篇章创建临时主要故事。
+TASK_TEMPLATE = """请在当前空工程中处理《飘邈之旅》第 {first} 到第 {last} 章的完整原文（源文本字符区间 {start} 到 {end}，共 {chars} 字），按工程 fine 精细粒度逐章完整读取并提取。不缩短章节、不只做开头示例、不处理第 {next_chapter} 章。
+请只用两三次读取确认标题，然后**立刻提交第一批**，不要先通读全章；逐章完整读取并提取，按内容分批提交，**每批范围不得与已接受批次重叠**（只补未覆盖的段落），每批使用对应的实际原文范围与逐字证据。覆盖有叙事作用的主要及次要/无名人物、具体地点、关系（含互逆关系的正反两条）、心理认知、物品与持有者、事件及所属场景，不只列名词或梗概。核对人物身份与代词、叙事时空、关系方向、物品持有者及换手区间，事件归属场景。默认不提取动作，不为章节尚未结束的较大篇章创建临时主要故事。
 正常提取流程自主完成；报告各章实际完成范围、入库结果与存疑。若未完成不能声称这几章全部完成。只处理指定的这几章，不修改其他业务对象，不另开任务或重试服务。"""
 OBSERVER = LiveObserver()
 
 
 def task_text() -> str:
     """按本次选定的章数生成任务描述（默认 1 章，几分钟一轮）。"""
-    return TASK_TEMPLATE.format(count=SELECTED_CHAPTERS, start=TASK_START, end=TASK_END,
-                                chars=CHAPTER_CHARS, next_chapter=SELECTED_CHAPTERS + 1)
+    last = START_CHAPTER + SELECTED_CHAPTERS - 1
+    return TASK_TEMPLATE.format(first=START_CHAPTER, last=last, count=SELECTED_CHAPTERS,
+                                start=TASK_START, end=TASK_END, chars=CHAPTER_CHARS,
+                                next_chapter=last + 1 if last < 3 else 3)
 
 
-def configure(chapters: int) -> None:
-    """选本次处理几章（1~3）：重算范围常量与报告目录。默认 1 章，几分钟一轮。"""
-    global SELECTED_CHAPTERS, TASK_START, TASK_END, CHAPTER_CHARS, REPORT_ROOT
-    if chapters not in (1, 2, 3):
-        raise SystemExit("--chapters 只接受 1、2、3（默认 1，约几分钟；3 约 20 分钟）")
-    SELECTED_CHAPTERS = chapters
-    TASK_START, TASK_END = CHAPTER_STARTS[0], CHAPTER_STARTS[chapters]
+# 基准用的模型运行参数。这里踩过一次反直觉的坑，记下来：
+# 为了少让长生成被流掐断，曾把输出上限从 65,536 压到 16,384——结果**单章反而比三章更贵**
+# （36 次请求 / 1.71M token，而三章那次是 30 次 / 1.36M）：上限一小，模型交不完的草稿被拆成
+# 更多批，每次请求都要重发整段上下文，成本随请求数线性涨。所以输出上限回到 65,536。
+# 空转超时 300 s 与成本无关，保留（120 s 对慢模型偏紧，是 `STREAM_CLOSED` 的可疑诱因之一）。
+BENCH_MAX_TOKENS = 65_536
+BENCH_TIMEOUT_SECONDS = 300
+
+
+def configure(chapters: int, start_chapter: int = 1) -> None:
+    """选本次处理哪几章（起止都 1~3）：重算范围常量与报告目录。"""
+    global SELECTED_CHAPTERS, START_CHAPTER, TASK_START, TASK_END, CHAPTER_CHARS, REPORT_ROOT
+    if chapters not in (1, 2, 3) or start_chapter not in (1, 2, 3) or start_chapter + chapters - 1 > 3:
+        raise SystemExit("--chapters / --start-chapter 只接受 1~3，且不得越过第三章")
+    SELECTED_CHAPTERS, START_CHAPTER = chapters, start_chapter
+    TASK_START = CHAPTER_STARTS[start_chapter - 1]
+    TASK_END = CHAPTER_STARTS[start_chapter - 1 + chapters]
     CHAPTER_CHARS = TASK_END - TASK_START
-    REPORT_ROOT = Path(f"data/acceptance/piaomiao-ch{chapters}-chapters")
+    span = f"ch{start_chapter}" if chapters == 1 else f"ch{start_chapter}-{start_chapter + chapters - 1}"
+    REPORT_ROOT = Path(f"data/acceptance/piaomiao-{span}")
 
 
 def load_input():
@@ -66,7 +80,8 @@ def load_input():
     assert len(text) == SOURCE_CHARS, f"原文长度变了：{len(text)}"
     assert len(headings) == HEADING_COUNT, f"章节标题数变了：{len(headings)}"
     assert [match.start() for match in headings[:4]] == CHAPTER_STARTS, [match.start() for match in headings[:4]]
-    assert headings[SELECTED_CHAPTERS].start() == TASK_END, f"第 {SELECTED_CHAPTERS + 1} 章起点变了"
+    stop = START_CHAPTER - 1 + SELECTED_CHAPTERS
+    assert headings[stop].start() == TASK_END, f"第 {stop + 1} 章起点变了：{headings[stop].start()}"
     assert TASK_END - TASK_START == CHAPTER_CHARS
     if SELECTED_CHAPTERS == 3:
         # 三章全跑是完整验收：摘要写死，素材一换就硬失败；单章/双章只比对标题边界。
@@ -77,6 +92,12 @@ def load_input():
 def seed(ops):
     text, headings = load_input()
     ops.save_project_settings(ops.load_project_settings() | {"extraction_granularity": "fine"})
+    # 基准的模型参数（见 BENCH_MAX_TOKENS 注释）：输出上限保持 65,536，别为了防流断把它压小——
+    # 压小会让一次能交完的草稿被拆成多批，请求数与 token 都跟着涨。
+    current = ops.harness_settings()
+    ops.save_harness_settings(current | {"max_tokens": BENCH_MAX_TOKENS,
+                                         "output_reserve": BENCH_MAX_TOKENS,
+                                         "timeout_seconds": BENCH_TIMEOUT_SECONDS})
     source = ops.import_source(SOURCE_PATH.stem, text)
     script = ops.create_screenplay("内容基准采集空容器", reason="共享证据采集器的确定性空容器")["screenplay"]
     return {
@@ -416,16 +437,25 @@ def _argv():
     def given(name):
         return any(item == name or item.startswith(name + "=") for item in argv)
 
-    if given("--chapters"):
-        for index, item in enumerate(argv):
-            if item == "--chapters" and index + 1 < len(argv):
-                configure(int(argv[index + 1]))
-                del argv[index:index + 2]
-                break
-            if item.startswith("--chapters="):
-                configure(int(item.split("=", 1)[1]))
-                del argv[index]
-                break
+    chapters, start = 1, 1
+    for flag in ("--chapters", "--start-chapter"):
+        for index, item in enumerate(list(argv)):
+            value = None
+            if item == flag and index + 1 < len(argv):
+                value, span = argv[index + 1], 2
+            elif item.startswith(flag + "="):
+                value, span = item.split("=", 1)[1], 1
+            if value is None:
+                continue
+            if not value.isdigit():
+                raise SystemExit(f"{flag} 需要一个数字")
+            if flag == "--chapters":
+                chapters = int(value)
+            else:
+                start = int(value)
+            del argv[index:index + span]
+            break
+    configure(chapters, start)
 
     if not given("--output"):
         argv += ["--output", str(REPORT_ROOT / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))]
