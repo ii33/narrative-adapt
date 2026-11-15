@@ -86,19 +86,12 @@ Item {
     }
 
     // 顶栏两个动作只把「待补全的指令草稿」插进协作者输入框：不弹框、不直接发消息。
-    // 示例数字取当前段范围，用户当下看到的那一段就是他能直接引用的范围。
-    function windowRangeLabel() {
-        if (!page.fullText.length) return ""
-        var stop = Math.min(page.fullText.length, page.chunkStart + page.previewText.length)
-        return "第 " + (page.chunkStart + 1) + "–" + stop + " 字"
-    }
-
+    // 草稿只留一句占位文字，插入后整段选中：用户直接打字就把它换掉，不会剩半个括号。
     function insertInstruction(kind) {
         var review = kind === "review"
-        var range = page.windowRangeLabel() || "第 120001–160000 字"
-        var example = review ? ("第 3 章，或 " + range) : (range + "，或 第 3 段到第 5 段")
-        var head = (review ? "复核范围：" : "提取范围：") + "（在此填写，例如 "
-        page.insertIntoAssistant(head + example + "）", head.length)
+        var head = review ? "复核范围：" : "提取范围："
+        var placeholder = review ? "请输入复核范围" : "请输入提取范围"
+        page.insertIntoAssistant(head + placeholder, head.length, placeholder.length)
     }
 
     // QML 没有 findChild：从窗口根节点按 objectName 递归找控件（Loader 要下钻 item）。
@@ -116,7 +109,7 @@ Item {
         return null
     }
 
-    function insertIntoAssistant(line, exampleOffset) {
+    function insertIntoAssistant(line, selectStart, selectLength) {
         app.assistantOpen = true   // 面板可能是收起的，先展开
         Qt.callLater(function() {
             var panel = page.findItem(app.contentItem, "assistantPanel")
@@ -130,8 +123,8 @@ Item {
                 var prompt = page.findItem(panel, "assistantPrompt")
                 if (!prompt) return
                 prompt.forceActiveFocus()
-                // 选中「例如 …」那一段，用户直接打字即可替换。
-                prompt.select(base + exampleOffset, base + line.length - 1)
+                // 整段选中占位文字（含末尾），用户直接打字即可替换，不会留下残字符。
+                prompt.select(base + selectStart, base + selectStart + selectLength)
             })
         })
     }

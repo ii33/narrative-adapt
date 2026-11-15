@@ -162,13 +162,13 @@ def test_extract_and_review_insert_pending_draft_without_overwriting(tmp_path, m
                 break
         assert '提取范围：' in (prompt.property('text') or '')
         draft = prompt.property('text')
-        assert draft.startswith('提取范围：（在此填写，例如 第 1–40000 字，或 第 3 段到第 5 段）')
+        # 草稿只有一句占位：不再夹带示例数字，也不留括号尾巴。
+        assert draft.startswith('提取范围：请输入提取范围')
         assert window.property('assistantOpen')  # 收起的面板被自动展开
         assert prompt.property('activeFocus')
-        # 光标落在「（在此填写…）」里：选中了示例那一段，直接打字就能替换。
+        # 占位文字整段选中：直接打字就替换干净（末尾不能有没选中的字符）。
         start, end = prompt.property('selectionStart'), prompt.property('selectionEnd')
-        assert '在此填写' in draft[:start] and '在此填写' in draft[:end]
-        assert draft[start:end] == '第 1–40000 字，或 第 3 段到第 5 段'
+        assert draft[start:end] == '请输入提取范围'
 
         # 用户自己写了内容后再点「复核」：原有文字必须还在，新草稿另起一行。
         # （走面板 draft，等价于用户在输入框里自己敲了字：TextField 的 text 绑定 draft。）
