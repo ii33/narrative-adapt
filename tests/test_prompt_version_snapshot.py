@@ -25,6 +25,9 @@ ID_VERSION = re.compile(r"`([a-z][a-z_]{2,})`\s*v(\d+)")
 TABLE_VERSION = re.compile(r"\|\s*`([a-z][a-z_]{2,})`\s*\|\s*v(\d+)\s*\|")
 # 历史记录里的旧版本号是「当时的事实」，不是当前声明，不该被当成漂移。
 HISTORICAL = re.compile(r"历史|当时|落后|取自")
+# 「已按本风格重写」「字数对照」「变更记录」这类小节整段都是历史快照，行内版本号按当时记。
+HISTORICAL_SECTION = re.compile(r"历史|沿革|变更记录|字数对照|已按本风格重写|changelog", re.IGNORECASE)
+HEADING = re.compile(r"^#{1,6}\s+(.*)$")
 TEST_REFERENCE = re.compile(r"(tests/[A-Za-z0-9_./-]+\.py)")
 
 
@@ -40,8 +43,12 @@ def _mentions():
     """
     for path in _prose_files():
         text = path.read_text(encoding="utf-8", errors="ignore")
+        in_history = False
         for number, line in enumerate(text.splitlines(), start=1):
-            if HISTORICAL.search(line):
+            heading = HEADING.match(line)
+            if heading:
+                in_history = bool(HISTORICAL_SECTION.search(heading.group(1)))
+            if in_history or HISTORICAL.search(line):
                 continue
             for identifier, version in ID_VERSION.findall(line) + TABLE_VERSION.findall(line):
                 if identifier in DEFAULT_PROMPTS:

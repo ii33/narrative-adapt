@@ -243,7 +243,7 @@ result = tool_api.call("event_state", {"event_id": "E1"}, project="C:/projects/e
 
 大事件在同语境内依原文顺序形成 `[start,next.start)` 的连续阅读区间。末个大事件已归入完成的主要故事时，以该主要故事的 `completion` 为末端；否则保持 `end=null`。这不是故事发生时间区间。`attach_children(parent_id,child_ids)` 可直接归入已有直属子项，主要故事归大事件、大事件归场景、场景归事件（或嵌套场景）、事件归动作；不保留旧场景直属主要故事的接口。
 
-关系方向统一以主体为参照：`node=A,property=父亲,value=B` 表示“B是A的父亲”，`property` 描述对方相对 `node` 的身份、关系或作用中的角色，节点型 `value` 为被指向的对方ID。普通 `string/any` 内容仍按字面保存。方向与对称的判据（不猜反向、不补造反向记录）见[提取规范](../extraction/SPEC.md) §3 `E-27`。
+关系方向统一以主体为参照：`node=A,property=父亲,value=B` 表示“B是A的父亲”，`property` 描述对方相对 `node` 的身份、关系或作用中的角色，节点型 `value` 为被指向的对方ID。普通 `string/any` 内容仍按字面保存。方向与对称的判据（互逆关系正反两条都记、单向关系只记有依据的方向、`symmetric` 只管同一个值对称成立）见[提取规范](../extraction/SPEC.md) §3 `E-27` 与 §0.1 `U-04`。
 
 `record_property_change` 对新属性定义必须显式提供顶层 `value_type`；已有定义可省略沿用。节点引用使用 `node/either`，`string/any` 中的P样字符串仍是字面内容，不画作人物关系。可显式提供严格布尔 `symmetric`（新定义默认false）；与已有类型或对称标识冲突时原子拒绝，须另行显式修改定义，不能暗中改写。
 

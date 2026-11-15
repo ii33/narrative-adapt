@@ -2976,7 +2976,7 @@ def test_temporary_roles_and_one_sided_claims_are_not_invented_persistent_mutual
 
 
 
-    assert '方向、对称与角色要核对' in prompt
+    assert '方向按语义核对' in prompt
 
 
 
@@ -2992,7 +2992,10 @@ def test_temporary_roles_and_one_sided_claims_are_not_invented_persistent_mutual
 
 
 
-    assert '不猜反向' in prompt
+    # 互逆关系正反两条都要记（U-04），单向关系只记有依据的方向。
+    assert '互逆关系（父子、师生）正反两条都要记' in prompt
+    assert '单向关系（喜欢、信任）只记有原文依据的方向' in prompt
+    assert '不猜没有依据的反向' in prompt
 
 
 

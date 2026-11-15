@@ -108,7 +108,8 @@ def test_both_modes_balance_events_between_scenes_and_actions(project):
     extraction_version = DEFAULT_PROMPTS['extraction']['version']
     assert extraction_version.isdigit() and int(extraction_version) >= 26
     assert DEFAULT_PROMPTS['granularity_standard']['version'] == '6'
-    assert DEFAULT_PROMPTS['granularity_fine']['version'] == '6'
+    fine_version = DEFAULT_PROMPTS['granularity_fine']['version']
+    assert fine_version.isdigit() and int(fine_version) >= 7
 
 
 def test_chapters_slices_and_batches_do_not_define_narrative_boundaries(project):

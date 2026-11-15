@@ -13,11 +13,11 @@
 | id | version | 本次变更 |
 | --- | --- | --- |
 | `system` | v11 | 已按五段式重写（见 [PROMPT_STYLE](../PROMPT_STYLE.md) 第 7 节） |
-| `extraction` | v26 | 五层语义对齐：T 为一卷／一部、B 为部内重要篇章、S 为空间接近且时间连续的连续事件 |
+| `extraction` | v27 | 关系方向按语义核对：互逆关系正反两条都记、单向关系只记有依据的方向、`symmetric` 只管同一个值对称成立（`U-04`） |
 | `granularity_standard` | v6 | 标准档只回答切多细，事实怎么取指向「提取通用要求」 |
-| `granularity_fine` | v6 | 补实体查全与不臆造的分工，动作默认不提取 |
+| `granularity_fine` | v7 | 出场人物都要建档（人物节点 + 支撑造型的说明或资料卡），视觉资产据此建立（`U-05`） |
 | `source_extraction` | v9 | 范围与完成口径独立成段，分层与取证指向「提取通用要求」 |
-| `review` | v11 | 复核三件事（查漏、勘误、失效）与关系取证分开写 |
+| `review` | v12 | 复核 = 查漏、补缺、勘误；勘误直接改那条记录，不追加修正记录（`U-02`、`U-03`） |
 | `event_merge_review` | v3 | 补重复的定义、判据与合并字段（旧版未定义） |
 | `action_extraction` | v7 | 补事件 E 与动作 A 的分界，动作直属事件 |
 | `scene_table` | v6 | 场表任务：场界按返回的 `scene_table_policy` 判断 |
@@ -40,6 +40,14 @@
 日期 | id | 旧 → 新版本 | 影响的 E-xx／§6 码 | 原因
 ```
 
-例：`2026-11-20 | extraction | v26 → v27 | E-09、E-13；无新码 | 代表性引文改为按事件身份判断`。
+例：`2026-11-20 | extraction | v26 → v27 | E-27；无新码 | 关系方向按语义核对（U-04）`。
+
+已记的变更：
+
+```
+2026-11-15 | extraction | v26 → v27 | E-27 | 关系方向按语义核对：互逆双向、单向不猜（U-04）
+2026-11-15 | granularity_fine | v6 → v7 | E-17 | 精细级出场人物都要建档，视觉资产据此建立（U-05）
+2026-11-15 | review | v11 → v12 | E-28 | 复核=查漏补缺勘误；勘误直接改记录，不追加修正记录（U-02/U-03）
+```
 
 本轮（建页）之前的历史没有系统记录，从这次开始按上面的格式记；既往改动只能到 [PROMPT_STYLE](../PROMPT_STYLE.md) 第 7 节与 [EXTRACTION_PROMPT_REWRITE](../EXTRACTION_PROMPT_REWRITE.md) 里核对，不回填本页表格。改提示词必须同批升版本（只升版本不改文本会被 `tests/test_prompt_version_snapshot.py` 拦）。
