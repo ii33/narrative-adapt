@@ -274,6 +274,7 @@ def test_prompt_only_table_points_at_e_items():
 # 提取域 = 提取任务的写入、校验、状态推导、静态检查这几个模块。§6 必须 100% 覆盖它们的码。
 EXTRACTION_DOMAIN_MODULES = (
     "extraction", "extraction_draft", "extraction_staging", "extraction_refs",
+    "diagnostic_locations",
     "property_core", "property_operations", "property_audit", "event_location",
     "item_possession", "containment_refs", "container_evidence", "graph_service",
     "project_check", "temporal_state", "storyline_ranges", "business_staging",
