@@ -963,13 +963,6 @@ Item {
                     var problem = (payload.diagnostics || [])[0] || ({})
                     app.toast("更正未通过预检：" + (problem.message || "未知原因"), true)
                 }
-            } else if (kind === "property_expire") {
-                var removed = (payload.record_ids || []).length
-                // 0 条不是「成功了但没说」，是「这些记录本来就已经失效过」。
-                app.toast(removed > 0
-                    ? "已失效 " + removed + " 条记录"
-                    : "这些记录已经失效过，无需重复操作", removed === 0)
-                if (page.selectedId.length > 0) page.io.loadNodeProperties(page.selectedId)
             } else if (kind === "material") {
                 page.applyMaterial(payload)
                 // 删资料/删图时磁盘文件可能正被页面占着：删不掉的要说明，且必须说"会再试"，

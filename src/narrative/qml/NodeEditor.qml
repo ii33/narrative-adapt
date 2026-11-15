@@ -362,11 +362,6 @@ Dialog {
                 editor.host.load()
                 if (editor.nodeId === editor.host.selectedId)
                     editor.io.loadNodeProperties(editor.nodeId)
-            } else if (kind === "property_expire") {
-                editor.reload()
-                editor.host.load()
-                if (editor.nodeId === editor.host.selectedId)
-                    editor.io.loadNodeProperties(editor.nodeId)
             } else if (kind === "property_rename") {
                 editor.host.app.toast("已改名为「" + (payload.to_id || "") + "」", false)
                 editor.reload()
