@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 一条属性：当前值、它披露在哪一次、完整披露序列。失效的记录不出现。
+// 一条属性：当前值 + 它披露在哪一次。历史披露不再铺在浏览区（要看改动序列去节点编辑器）。
 // 分类只影响显示位置：点分类标签可以把它移到另一个大类，取值本身不动。
 Column {
     id: item
@@ -11,7 +11,6 @@ Column {
     required property var host       // 所属页面，负责跳转与移动分类
 
     readonly property var t: host.t
-    readonly property bool expanded: host.expandedProps[row.key] === true
     // 同一属性可能分在两个大类里，这时说明清楚，避免看起来像少了几条。
     readonly property string splitHint: (row.otherCategories || []).length > 0
         ? "也在「" + (row.otherCategories || []).join("」「") + "」中" : ""
@@ -48,7 +47,8 @@ Column {
                 Layout.fillWidth: true
                 spacing: 8
                 Label {
-                    text: (item.expanded ? "− " : "+ ") + item.row.label
+                    // 只显示当前值：历史披露不再铺在浏览区（要看改动去节点编辑器）。
+                    text: item.row.label
                     color: item.t.ink
                     font.pixelSize: 12
                     Layout.preferredWidth: 92
@@ -148,181 +148,4 @@ Column {
         }
     }
 
-    // 改名在节点编辑器里（它是「改这个方面」的编辑动作，和更正/失效放一起），
-    // 浏览区只负责读，不在这里放编辑入口。
-    Repeater {
-        model: item.expanded ? item.row.records : []
-
-        delegate: Column {
-            required property var modelData
-
-            width: item.width
-            leftPadding: 18
-            topPadding: 2
-            bottomPadding: 6
-            spacing: 2
-
-            RowLayout {
-                width: parent.width - parent.leftPadding
-                spacing: 6
-
-                // 历史取值仍保留，其有效区间决定当前阅读位置的状态。
-                // 这一行合了多个属性名时，标出这条记录用的是哪个。
-                Label {
-                    visible: item.row.names.length > 0
-                    text: modelData.property_label || modelData.property_id
-                    color: item.t.muted
-                    font.pixelSize: 9
-                }
-                Label {
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    text: modelData.value_node ? modelData.value_node.name
-                        : String(modelData.value === null
-                            || modelData.value === undefined ? "（空）" : modelData.value)
-                    // 更早的披露仍然算数，但不再是当下状态：压暗，别当第二个当前值看。
-                    color: modelData.value_node
-                        ? item.t.accent
-                        : (modelData.is_latest === false ? item.t.muted : item.t.body)
-                    font.pixelSize: 11
-                    font.underline: !!modelData.value_node
-
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: !!modelData.value_node
-                        cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: item.host.jumpTo(modelData.value_node.id)
-                    }
-                }
-                // 单条记录移动：同一条 state 可以分到不同大类。
-                Rectangle {
-                    // 整组都是同一个大类时不必重复标；只有这条记录被单独挪过才显示。
-                    visible: modelData.category !== item.row.category
-                    implicitWidth: recordCategoryLabel.implicitWidth + 10
-                    implicitHeight: 15
-                    radius: 7
-                    color: recordCategoryArea.containsMouse ? item.t.accent : "transparent"
-                    border.color: item.t.line
-                    Label {
-                        id: recordCategoryLabel
-                        anchors.centerIn: parent
-                        text: modelData.category
-                        color: recordCategoryArea.containsMouse ? item.t.onAccent : item.t.muted
-                        font.pixelSize: 9
-                    }
-                    MouseArea {
-                        id: recordCategoryArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: item.host.askCategory(modelData.category, [modelData.id])
-                    }
-                }
-            }
-            RowLayout {
-                width: parent.width - parent.leftPadding
-                spacing: 4
-
-                Label {
-                    text: "事件"
-                    color: item.t.muted
-                    font.pixelSize: 10
-                }
-                Label {
-                    visible: modelData.is_latest === false || modelData.scope !== "world"
-                    text: modelData.is_latest === false ? "较早" : ""
-                    color: item.t.muted
-                    font.pixelSize: 9
-                }
-                Label {
-                    visible: modelData.scope !== "world"
-                    text: (modelData.scope === "claim" ? "声称" : "认知")
-                        + (modelData.holder_name ? "·" + modelData.holder_name : "")
-                    color: item.t.muted
-                    font.pixelSize: 9
-                }
-                Label {
-                    Layout.fillWidth: true
-                    // 只写披露在哪个事件；不再声称「到某处为止」，那是算出来的。
-                    text: modelData.event_name || modelData.event_id || "—"
-                    color: item.t.accent
-                    font.pixelSize: 10
-                    font.underline: !!modelData.event_name
-                    elide: Text.ElideRight
-                    Layout.minimumWidth: 0
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: item.host.jumpTo(modelData.event_id)
-                    }
-                }
-            }
-            RowLayout {
-                width: parent.width - parent.leftPadding
-                spacing: 4
-
-                Label {
-                    Layout.fillWidth: true
-                    // 跨章时位置数字不可比，所以带上章节名。
-                    text: (modelData.source_title || "未标注章节")
-                        + " · 位置 " + (modelData.disclosure ? modelData.disclosure.start : "—")
-                        + (modelData.source ? " · " + modelData.source : "")
-                    color: item.t.muted
-                    font.pixelSize: 10
-                    elide: Text.ElideMiddle
-                    Layout.minimumWidth: 0
-                }
-                Label {
-                    visible: !!(modelData.disclosure && modelData.disclosure.source_id)
-                    text: "回原文"
-                    color: item.t.accent
-                    font.pixelSize: 10
-                    font.underline: true
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: item.host.openSource(modelData.disclosure.source_id,
-                                                        modelData.disclosure.start)
-                    }
-                }
-            }
-
-            RowLayout {
-                width: parent.width - parent.leftPadding
-                spacing: 4
-                visible: (modelData.related || []).length > 0
-
-                Label {
-                    text: "关联"
-                    color: item.t.muted
-                    font.pixelSize: 10
-                }
-                Repeater {
-                    model: modelData.related || []
-
-                    delegate: Label {
-                        required property var modelData
-                        text: modelData.name
-                        color: item.t.accent
-                        font.pixelSize: 10
-                        font.underline: true
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: item.host.jumpTo(modelData.id)
-                        }
-                    }
-                }
-                Item { Layout.fillWidth: true }
-            }
-            Label {
-                width: parent.width - parent.leftPadding
-                wrapMode: Text.Wrap
-                visible: !!modelData.evidence
-                text: modelData.evidence ? "「" + modelData.evidence.quote + "」" : ""
-                color: item.t.muted
-                font.pixelSize: 10
-            }
-        }
-    }
 }
