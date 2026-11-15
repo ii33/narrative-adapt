@@ -248,10 +248,10 @@ def rename(ops, source_id, target_id, reason, expected_revision, *, merge=False)
             if identifier == '持有者' and identifier in definitions and not definitions[identifier].get('semantic'):
                 definitions[identifier]['semantic'] = 'item_holder'
         if merge:
-            fields = ('value_type', 'cardinality', 'symmetric', 'semantic', 'target_node_types')
+            fields = ('value_type', 'cardinality', 'symmetric', 'semantic', 'target_node_types', 'accumulate')
 
             def merge_field(definition, field):
-                value = definition.get(field, False if field == 'symmetric' else None)
+                value = definition.get(field, False if field in {'symmetric', 'accumulate'} else None)
                 if field == 'target_node_types' and value is not None:
                     return frozenset(value)
                 return value

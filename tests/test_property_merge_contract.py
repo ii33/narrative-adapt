@@ -11,6 +11,8 @@ from agent_fixtures import project as project
     ('semantic', None, 'item_holder'), ('semantic', 'item_holder', None),
     ('target_node_types', ['person'], ['group']),
     ('target_node_types', [], ['person']),
+    # 累积型与状态型是两套读取语义，只在 accumulate 上不同也必须拒绝合并。
+    ('accumulate', False, True), ('accumulate', True, False),
 ])
 def test_conflicting_definition_contract_is_atomically_rejected(project, field, left, right):
     definitions = [{'kind': 'property_definition', 'id': identifier,

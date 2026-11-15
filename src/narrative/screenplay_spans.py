@@ -276,7 +276,7 @@ def _input(adaptation, members, effective):
             "states": [{"event_id": key, "values": [_state_projection(view, row, targets, key) for row in state_rows[key]
                                                    if row.get("state_kind", "known") == "known"]} for key in effective],
             "definitions": [{key: copy.deepcopy(definitions[name][key]) for key in
-                             ("id", "value_type", "cardinality", "target_node_types", "semantic", "symmetric") if key in definitions[name]}
+                             ("id", "value_type", "cardinality", "target_node_types", "semantic", "symmetric", "accumulate") if key in definitions[name]}
                             for name in sorted(definition_ids) if name in definitions],
             "event_grounding": grounding}
 

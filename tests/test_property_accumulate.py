@@ -168,3 +168,46 @@ def test_record_property_change_can_declare_the_definition_accumulating(tmp_path
     row = next(item for item in ops.property_node_summary(person["id"])["properties"]
                if item["property_id"] == "外貌")
     assert row["state"]["values"] == ["矮小黑瘦", "一百八十公分"]
+
+
+def _adaptation(accumulate):
+    """一段最小改编视图：一个场景、一个事件、一个人物，外加一条外貌记录。"""
+    return {
+        "timeline_id": "main",
+        "revision": 1,
+        "nodes": [
+            {"id": "S1", "node_type": "scene", "name": "开场", "sort_id": 1, "context_id": "storyboard", "events": ["E1"]},
+            {"id": "E1", "node_type": "event", "name": "甲出场", "sort_id": 2, "context_id": "storyboard",
+             "events": [], "participants": ["P1"]},
+            {"id": "P1", "node_type": "person", "name": "甲", "sort_id": 3, "context_id": "storyboard", "events": []},
+        ],
+        "properties": [
+            {"kind": "property_definition", "id": "外貌", "value_type": "string", "cardinality": "many",
+             "accumulate": accumulate},
+            {"kind": "property_change", "id": "C1", "node_id": "P1", "property_id": "外貌", "event_id": "E1",
+             "sequence": 0, "op": "set", "value": ["矮小黑瘦"], "scope": "world", "context_id": "storyboard"},
+        ],
+    }
+
+
+def test_writing_context_fingerprint_feels_the_accumulate_flag():
+    """累积型会改变读到的值个数，写作上下文指纹必须对它有反应，否则旧上下文会被判成未过期。"""
+    from narrative import screenplay_spans
+
+    state = screenplay_spans.fingerprint(screenplay_spans._input(_adaptation(False), ["E1"], ["E1"]))
+    accumulating = screenplay_spans.fingerprint(screenplay_spans._input(_adaptation(True), ["E1"], ["E1"]))
+    assert state != accumulating
+
+
+def test_merging_two_definitions_that_differ_only_by_accumulate_is_rejected(project):
+    """状态型与累积型是两套读取语义，只在 accumulate 上不同也不能合并。"""
+    definitions = [
+        {"kind": "property_definition", "id": "甲外貌", "value_type": "string", "cardinality": "many",
+         "accumulate": False},
+        {"kind": "property_definition", "id": "乙外貌", "value_type": "string", "cardinality": "many",
+         "accumulate": True},
+    ]
+    revision = project.graph_project_info()["revision"]
+    assert project.apply_changes([], definitions, revision, reason="合成定义")["status"] == "accepted"
+    with pytest.raises(ValueError, match="属性定义不兼容"):
+        project.merge_properties("甲外貌", "乙外貌", "只在累积性上不同", project.graph_project_info()["revision"])
