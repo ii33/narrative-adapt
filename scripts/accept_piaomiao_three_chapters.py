@@ -179,7 +179,7 @@ def validate(ops, fixture, screenplay, calls, report):
     for start, end in declared:
         if start <= cursor:
             cursor = max(cursor, end)
-    # 空段只在「连续两段都空」或「空段多于 3/24」时才算漏读；单个空段是正常的叙事空隙。
+    # 分八段只做"有没有整段没读"的粗看，写成测量值；它不构成通过/不通过（`M-01` 不设配额）。
     empty_bins = sum(row["event_counts_by_eighth"].count(0) for row in coverage)
     longest_gap = 0
     for row in coverage:
@@ -187,10 +187,9 @@ def validate(ops, fixture, screenplay, calls, report):
         for count in row["event_counts_by_eighth"]:
             run = run + 1 if count == 0 else 0
             longest_gap = max(longest_gap, run)
-    long_gaps = longest_gap >= 2 or empty_bins > 3
     report["eighth_observation"] = {"empty_bins": empty_bins, "longest_empty_run": longest_gap,
                                     "bins_total": 8 * len(coverage),
-                                    "note": "分八段只用来发现「整段没读」，不是事件数配额（M-01）"} 
+                                    "note": "分八段只用来发现「整段没读」，不是事件数配额（M-01）"}
     check = ops.check_project()
     node_counts = {}
     for node in graph["nodes"]:
@@ -224,29 +223,80 @@ def validate(ops, fixture, screenplay, calls, report):
         "input_sha256_is_hash_of": "input.txt 的说明文字（原文不复制进验收目录），不是原文摘要",
     }
     report["semantic_review_status"] = "pending_independent_source_comparison"
-    report["validation_scope"] = "仅自动结构/覆盖检查；passed 不等于穷尽 fine 语义提取已人工确认。"
-    return {
+    # 提取正确性不由程序判定。程序只回答"这条记录在结构上成不成立"（引文坐标是否逐字对得上、
+    # 证据是否落在本次范围、静态校验有没有结构错误、原文有没有被改写），不回答"提取得好不好"。
+    # 事件密度、覆盖、动作有无、批次范围这些是**测量**，写下来给人看，不给通过/不通过。
+    report["judgement_owner"] = "human_or_model_review"
+    report["validation_scope"] = "程序只判结构成立与数据完整性；提取正确性、完整性与粒度好坏由人工对照原文判定。"
+    # 结构事实：程序能机械核对的部分。
+    structural = {
         "three_chapters_created_by_model": all(
             any(row["start"] == chapter["start"] and row["end"] == chapter["end"] for row in slices)
             for chapter in fixture["chapters"]
         ),
-        "model_submitted_accepted_batches": bool(accepted),
-        "every_chapter_has_events": all(row["event_count"] > 0 for row in coverage),
-        # 分八段只是「有没有整段没读」的粗判，不是配额：`M-01` 明确不按数量/比例切事件，
-        # 一段里没有可独立概括的情节是完全正常的。所以只拦「连续两段全空」和「空段超过 3/24」。
-        "no_long_stretch_without_events": not long_gaps,
-        "accepted_declared_ranges_cover_three_chapters": cursor >= TASK_END,
         "all_node_quote_coordinates_exact": bool(spans)
         and all(
             span.get("source_id") == fixture["source_id"] and text[span["start"]:span["end"]] == span["quote"]
             for span in spans
         ),
         "all_evidence_inside_three_chapters": all(TASK_START <= span["start"] < span["end"] <= TASK_END for span in spans),
-        "no_default_actions": not any(node["node_type"] == "action" for node in graph["nodes"]),
         "static_check_no_errors": check["counts"].get("error", 0) == 0,
         "whole_original_source_unchanged": qa.digest(ops.source(fixture["source_id"])["text"].encode())
         == fixture["source_text_sha256"],
     }
+    # 提取质量的测量值：只记数字，不判定。分八段与事件密度都不是配额（`M-01`）。
+    report["measurements"] = {
+        "accepted_batches": len(accepted),
+        "declared_ranges_cover_three_chapters": cursor >= TASK_END,
+        "declared_ranges": [{"start": start, "end": end} for start, end in declared],
+        "event_count_by_chapter": {str(row["index"]): row["event_count"] for row in coverage},
+        "evidence_count_by_chapter": {str(row["index"]): row["evidence_count"] for row in coverage},
+        "event_counts_by_eighth": {str(row["index"]): row["event_counts_by_eighth"] for row in coverage},
+        "empty_eighth_bins": empty_bins,
+        "longest_empty_run": longest_gap,
+        "action_nodes": sum(1 for node in graph["nodes"] if node["node_type"] == "action"),
+        "note": "这些是测量，不是判定：事件密度、覆盖与动作有无都不能说明提取对错（M-01）。",
+    }
+    return structural
+
+
+# 程序能机械核对的结构事实。其余一切（事件密度、场景数、覆盖、动作有无）都是测量值，
+# 不能变成"提取正确性"的判定——那是人和模型对照原文才能做的判断。
+STRUCTURAL_KEYS = (
+    "task_completed",
+    "all_required_tools_called",
+    "three_chapters_created_by_model",
+    "all_node_quote_coordinates_exact",
+    "all_evidence_inside_three_chapters",
+    "static_check_no_errors",
+    "whole_original_source_unchanged",
+)
+
+
+def normalize(report: dict) -> dict:
+    """把共享验收框架的 passed/not_passed 改写成"结构是否成立 + 待人工判定"。
+
+    `accept_screenplay` 会算一批含质量含义的 check（例如 `scene_count_2_to_3`）并据此给出
+    passed。按「提取正确性不由程序判断」，这些只能在测量值里留数字，状态由结构事实决定，
+    最终结论交人工。
+    """
+    raw = report.get("checks") or {}
+    structural = {key: raw[key] for key in STRUCTURAL_KEYS if key in raw}
+    quality = {key: value for key, value in raw.items() if key not in structural}
+    measurements = report.setdefault("measurements", {})
+    if quality:
+        measurements["program_view_not_a_verdict"] = quality
+    report["structural_checks"] = structural
+    report["failed_structural_checks"] = sorted(key for key, value in structural.items() if not value)
+    report["judgement_owner"] = "human_or_model_review"
+    report["verdict"] = "pending_human_review"
+    report["harness_status"] = report.get("status")
+    report["status"] = "structural_ok" if not report["failed_structural_checks"] else "structural_failed"
+    report["status_meaning"] = (
+        "structural_ok 只表示数据在结构上成立（引文逐字对齐、证据在范围内、静态校验无结构错误、"
+        "原文未被改写）；它不表示提取正确或完整，正确性由人对照原文判定。"
+    )
+    return report
 
 
 def recheck(directory):
@@ -275,6 +325,8 @@ def recheck(directory):
     if saved_live is not None:
         # 离线重算没有观察者线程：沿用首次运行落盘的实测观察数据。
         report["large_sample_evidence"]["live_observation"] = saved_live
+    # 首次判读里的框架 check 原样留一份，便于对照"框架当时怎么看的"。
+    report.setdefault("harness_checks", report.get("checks"))
     report["checks"] = checks
     report["recheck"] = {
         "at": datetime.now(UTC).isoformat(),
@@ -282,12 +334,13 @@ def recheck(directory):
         "reason": "首次判读只认 submit_extraction 的 status，漏掉了经 patch 提交入库的已接受批次；修正判读后离线重算。",
         "first_scoring_file": first_scoring.name,
     }
-    failed = sorted(key for key, value in checks.items() if not value)
-    report["failed_checks"] = failed
-    report["status"] = "passed" if not failed else "not_passed"
+    report.pop("failed_checks", None)
+    normalize(report)
     (directory / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"directory": str(directory), "status": report["status"], "failed_checks": failed}, ensure_ascii=False))
-    return 0 if not failed else 1
+    print(json.dumps({"directory": str(directory), "status": report["status"],
+                      "failed_structural_checks": report["failed_structural_checks"],
+                      "verdict": report["verdict"]}, ensure_ascii=False))
+    return 0 if not report["failed_structural_checks"] else 1
 
 
 def main():
@@ -296,7 +349,7 @@ def main():
     qa.PROMPT_VERSION = "real-piaomiao-three-chapters-fine/1"
     qa.FIXTURE_ORIGIN = "外部版权原文经 Operations 原样导入（只按路径读，不复制）；由真实模型自行建切片并提取前三章。"
     with observe_real_calls(OBSERVER):
-        return qa.main(
+        exit_code = qa.main(
             validate=validate,
             required_tools=["submit_extraction"],
             prompt_factory=lambda fixture: TASK + "\nsource_id=" + fixture["source_id"],
@@ -305,6 +358,13 @@ def main():
             on_started=OBSERVER.started,
             on_progress=OBSERVER.progress,
         )
+    # 共享框架会按含质量含义的 check 给出 passed；这里改写成结构结论 + 待人工判定。
+    for report_file in sorted(REPORT_ROOT.glob("*/report.json"), key=lambda item: item.stat().st_mtime):
+        report = json.loads(report_file.read_text(encoding="utf-8"))
+        if report.get("verdict") == "pending_human_review":
+            continue
+        report_file.write_text(json.dumps(normalize(report), ensure_ascii=False, indent=2), encoding="utf-8")
+    return exit_code
 
 
 def _argv():
