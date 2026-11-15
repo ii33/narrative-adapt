@@ -1,0 +1,334 @@
+"""《飘邈之旅》前三章的真实内容生产基准：一次完整 fine 提取 + 有界外部 QA。
+
+原文是**外部版权文本**，只按路径读取：验收目录里只落哈希、统计与结构化指标，
+不复制任何正文片段。缺文件、边界对不上就断言失败，不猜。
+用法（仓库根目录，需模型凭据，只跑一次、不自动重试）：
+  .venv\\Scripts\\python.exe scripts\\accept_piaomiao_three_chapters.py
+默认输出 data/acceptance/piaomiao-three-chapters/<UTC 时间戳>/（data/ 已被 gitignore）。
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+import accept_screenplay as qa
+from qa_live_observer import LiveObserver, observe_real_calls
+
+SOURCE_PATH = Path("C:/Users/youai/Downloads/飘邈之旅UTF8.txt")
+REPORT_ROOT = Path("data/acceptance/piaomiao-three-chapters")
+SOURCE_CHARS = 2027329
+HEADING_COUNT = 297
+HEADING_RE = r"(?m)^\s*第[零一二三四五六七八九十百千0-9]+集[^\n]*?第[零一二三四五六七八九十百千0-9]+章[^\n]*"
+# 前三章标题起点；第三章止于第四章起点。
+CHAPTER_STARTS = [146, 5783, 11193]
+TASK_START, TASK_END = 146, 16517
+CHAPTER_CHARS = 16371
+# 实测写死：text[146:16517] 的 UTF-8 sha256（第一次运行前用文件实算，不是抄来的）。
+CHAPTER_TEXT_SHA256 = "2e68b28d06f1d86ce169cb28b9e07d9be1a1c442d24975682ed201dfe8791dd6"
+
+# main() 会把 qa.TEXT 落成 input.txt；这里只放说明，原文不进验收目录。
+TEXT_NOTE = "外部版权原文按路径读取，未复制；范围、字数与摘要见 fixture.json 的 target_* 字段。"
+TASK = """请在当前空工程中处理《飘邈之旅》前三章的完整原文（源文本字符区间 146 到 16517，共 16371 字），按工程 fine 精细粒度逐章完整读取并提取。不缩短章节、不只做开头示例、不处理第四章。
+请自主读取标题小样，用 pattern 工具一次建立前三章切片；逐章完整读取并提取，允许按内容分批提交，但每批使用对应的实际原文范围与逐字证据。覆盖有叙事作用的主要及次要/无名人物、具体地点、关系（含互逆关系的正反两条）、心理认知、物品与持有者、事件及所属场景，不只列名词或梗概。核对人物身份与代词、叙事时空、关系方向、物品持有者及换手区间，事件归属场景。默认不提取动作，不为章节尚未结束的较大篇章创建临时主要故事。
+正常提取流程自主完成；报告各章实际完成范围、入库结果与存疑。若未完成不能声称三章全部完成。只处理指定三章，不修改其他业务对象，不另开任务或重试服务。"""
+OBSERVER = LiveObserver()
+
+
+def load_input():
+    from narrative.source_documents import read_source_file
+
+    text = read_source_file(SOURCE_PATH)
+    headings = list(re.finditer(HEADING_RE, text))
+    assert len(text) == SOURCE_CHARS, f"原文长度变了：{len(text)}"
+    assert len(headings) == HEADING_COUNT, f"章节标题数变了：{len(headings)}"
+    assert [match.start() for match in headings[:3]] == CHAPTER_STARTS, [match.start() for match in headings[:3]]
+    assert headings[3].start() == TASK_END, f"第四章起点变了：{headings[3].start()}"
+    assert TASK_END - TASK_START == CHAPTER_CHARS
+    assert qa.digest(text[TASK_START:TASK_END].encode()) == CHAPTER_TEXT_SHA256, "前三章文本摘要变了"
+    return text, headings
+
+
+def seed(ops):
+    text, headings = load_input()
+    ops.save_project_settings(ops.load_project_settings() | {"extraction_granularity": "fine"})
+    source = ops.import_source(SOURCE_PATH.stem, text)
+    script = ops.create_screenplay("内容基准采集空容器", reason="共享证据采集器的确定性空容器")["screenplay"]
+    return {
+        "source_id": source,
+        "screenplay_id": script["id"],
+        "source_chars": len(text),
+        "source_file_sha256": qa.digest(SOURCE_PATH.read_bytes()),
+        "source_text_sha256": qa.digest(text.encode()),
+        "target_start": TASK_START,
+        "target_end": TASK_END,
+        "target_chars": CHAPTER_CHARS,
+        "target_text_sha256": qa.digest(text[TASK_START:TASK_END].encode()),
+        "chapters": [
+            {
+                "index": index + 1,
+                "title": headings[index].group().strip(),
+                "start": headings[index].start(),
+                "end": headings[index + 1].start(),
+            }
+            for index in range(3)
+        ],
+    }
+
+
+def _observations(ops, graph, records):
+    """本轮两条新口径的观察值：只记录，不作为失败条件。"""
+    from narrative import property_categories
+
+    config = property_categories.load(ops.project.store)
+    node_types = {node["id"]: node.get("node_type") for node in graph["nodes"]}
+    identity, vocabulary_named, same_name, sources = [], 0, 0, {}
+    groups, add_records = {}, 0
+    for row in records:
+        if row.get("kind") != "property_change":
+            continue
+        node_type = node_types.get(row.get("node_id"))
+        category, category_source = property_categories.resolve(row, node_type, config)
+        sources[category_source] = sources.get(category_source, 0) + 1
+        name_in_vocabulary = row.get("property_id") in property_categories.vocabulary_for(node_type, config)
+        if name_in_vocabulary:
+            vocabulary_named += 1
+            same_name += category == row.get("property_id")
+        if category_source == "identity":
+            identity.append({"node_type": node_type, "property": row.get("property_id"), "category": category})
+        if row.get("op") == "add":
+            add_records += 1
+            key = (row.get("node_id"), row.get("property_id"), row.get("scope") or "world", row.get("holder_id"))
+            groups.setdefault(key, set()).add(row.get("event_id"))
+    multi = {key: events for key, events in groups.items() if len(events) > 1}
+    return {
+        "identity_category": {
+            "record_count": len(identity),
+            "category_source_counts": sources,
+            "property_name_in_vocabulary_records": vocabulary_named,
+            "explicit_category_equals_property_name": same_name,
+            "sample": identity[:10],
+            "note": "属性名恰好等于分类词表项时 category_source 应为 identity（本轮新规则）；只观察，不判失败。",
+        },
+        "accumulated_by_add": {
+            "add_record_count": add_records,
+            "multi_event_property_count": len(multi),
+            "records_in_multi_event_properties": sum(len(events) for events in multi.values()),
+            "sample": [
+                {"node_id": key[0], "property": key[1], "event_count": len(events)}
+                for key, events in list(multi.items())[:10]
+            ],
+            "note": "同一属性在多事件用 add 累积而非一次 set 覆盖的记录规模（本轮提示词新口径）；只观察，不判失败。",
+        },
+    }
+
+
+def validate(ops, fixture, screenplay, calls, report):
+    text, _ = load_input()
+    graph, records = ops.graph_snapshot(), ops.property_records()
+    audit = json.loads((Path(report["audit_directory"]) / "task.json").read_text(encoding="utf-8"))
+    steps = audit.get("steps", [])
+    submissions = [step for step in steps if step["tool"] == "submit_extraction"]
+    patches = [step for step in steps if step["tool"] == "patch_extraction_submission"]
+
+    # 真实流程里草稿常常先 staged、再经 patch 逐条纠正：批次被接受可能发生在
+    # submit_extraction 也可能是 patch_extraction_submission（返回 submission_status
+    # committed）。只认 submit 的 status 会漏掉已经入库的批次——首次真实运行踩到了。
+    def accepted_batch(result):
+        result = result or {}
+        return result.get("status") == "accepted" or result.get("submission_status") in {"accepted", "committed"}
+
+    accepted_ids = {step["result"]["submission_id"] for step in submissions if accepted_batch(step.get("result"))}
+    accepted_ids |= {step["args"].get("submission_id") for step in patches if accepted_batch(step.get("result"))}
+    accepted = [step for step in submissions if (step.get("result") or {}).get("submission_id") in accepted_ids]
+    spans = [span for node in graph["nodes"] for span in node.get("evidence_spans", [])]
+    events = [node for node in graph["nodes"] if node["node_type"] == "event"]
+    slices = ops.source_slices(fixture["source_id"])
+    if isinstance(slices, dict):
+        slices = slices.get("slices", [])
+    coverage = []
+    for chapter in fixture["chapters"]:
+        members = [node for node in events if chapter["start"] <= (node.get("disclosure") or {}).get("start", -1) < chapter["end"]]
+        evidence = [span for span in spans if chapter["start"] <= span["start"] < chapter["end"]]
+        width = chapter["end"] - chapter["start"]
+        bins = [
+            sum(
+                chapter["start"] + width * index / 8 <= node["disclosure"]["start"] < chapter["start"] + width * (index + 1) / 8
+                for node in members
+            )
+            for index in range(8)
+        ]
+        coverage.append(
+            chapter
+            | {
+                "event_count": len(members),
+                "first_event_start": min((node["disclosure"]["start"] for node in members), default=None),
+                "last_event_start": max((node["disclosure"]["start"] for node in members), default=None),
+                "evidence_count": len(evidence),
+                "last_evidence_end": max((span["end"] for span in evidence), default=None),
+                "event_counts_by_eighth": bins,
+            }
+        )
+    declared = sorted(
+        (max(TASK_START, step["args"].get("start", 0)), min(TASK_END, step["args"].get("end") or len(text)))
+        for step in accepted
+    )
+    cursor = TASK_START
+    for start, end in declared:
+        if start <= cursor:
+            cursor = max(cursor, end)
+    # 空段只在「连续两段都空」或「空段多于 3/24」时才算漏读；单个空段是正常的叙事空隙。
+    empty_bins = sum(row["event_counts_by_eighth"].count(0) for row in coverage)
+    longest_gap = 0
+    for row in coverage:
+        run = 0
+        for count in row["event_counts_by_eighth"]:
+            run = run + 1 if count == 0 else 0
+            longest_gap = max(longest_gap, run)
+    long_gaps = longest_gap >= 2 or empty_bins > 3
+    report["eighth_observation"] = {"empty_bins": empty_bins, "longest_empty_run": longest_gap,
+                                    "bins_total": 8 * len(coverage),
+                                    "note": "分八段只用来发现「整段没读」，不是事件数配额（M-01）"} 
+    check = ops.check_project()
+    node_counts = {}
+    for node in graph["nodes"]:
+        node_counts[node["node_type"]] = node_counts.get(node["node_type"], 0) + 1
+    report["large_sample_evidence"] = {
+        "chapter_coverage": coverage,
+        "created_slices": slices,
+        "accepted_batch_count": len(accepted),
+        "submission_attempt_count": len(submissions),
+        "patch_attempt_count": len(patches),
+        "accepted_submission_ids": sorted(accepted_ids),
+        "accepted_declared_ranges": declared,
+        "node_counts": node_counts,
+        "evidence_span_count": len(spans),
+        "property_record_count": len(records),
+        "locate_calls": [step for step in steps if step["tool"] == "locate_source"],
+        "preview_calls": [step for step in steps if step["tool"] == "preview_extraction"],
+        "static_check": check,
+        "observations": _observations(ops, graph, records),
+        "live_observation": OBSERVER.snapshot(),
+        "coverage_limit": "提交的范围声明与已读全文不等于穷尽提取：这里只报实际证据坐标与事件分布，语义完整性需人工与众章原文对照。不设事件条数配额。",
+    }
+    report["observations_are_not_failures"] = ["identity_category", "accumulated_by_add"]
+    report["input_assets"] = {
+        "source_path": str(SOURCE_PATH),
+        "source_chars": fixture["source_chars"],
+        "source_file_sha256": fixture["source_file_sha256"],
+        "target_chars": fixture["target_chars"],
+        "target_text_sha256": fixture["target_text_sha256"],
+        "input_file_contains_source_text": False,
+        "input_sha256_is_hash_of": "input.txt 的说明文字（原文不复制进验收目录），不是原文摘要",
+    }
+    report["semantic_review_status"] = "pending_independent_source_comparison"
+    report["validation_scope"] = "仅自动结构/覆盖检查；passed 不等于穷尽 fine 语义提取已人工确认。"
+    return {
+        "three_chapters_created_by_model": all(
+            any(row["start"] == chapter["start"] and row["end"] == chapter["end"] for row in slices)
+            for chapter in fixture["chapters"]
+        ),
+        "model_submitted_accepted_batches": bool(accepted),
+        "every_chapter_has_events": all(row["event_count"] > 0 for row in coverage),
+        # 分八段只是「有没有整段没读」的粗判，不是配额：`M-01` 明确不按数量/比例切事件，
+        # 一段里没有可独立概括的情节是完全正常的。所以只拦「连续两段全空」和「空段超过 3/24」。
+        "no_long_stretch_without_events": not long_gaps,
+        "accepted_declared_ranges_cover_three_chapters": cursor >= TASK_END,
+        "all_node_quote_coordinates_exact": bool(spans)
+        and all(
+            span.get("source_id") == fixture["source_id"] and text[span["start"]:span["end"]] == span["quote"]
+            for span in spans
+        ),
+        "all_evidence_inside_three_chapters": all(TASK_START <= span["start"] < span["end"] <= TASK_END for span in spans),
+        "no_default_actions": not any(node["node_type"] == "action" for node in graph["nodes"]),
+        "static_check_no_errors": check["counts"].get("error", 0) == 0,
+        "whole_original_source_unchanged": qa.digest(ops.source(fixture["source_id"])["text"].encode())
+        == fixture["source_text_sha256"],
+    }
+
+
+def recheck(directory):
+    """对**已有一次真实运行**的产物离线重算判读：不调用模型、不改动工程数据。
+
+    存在的理由：判读代码本身可能写错（首次运行就把 patch 入库的批次判成未接受）。
+    重算只读 report.json / fixture.json 与已落盘的工程，把新判读写回 report.json，
+    首次判读原文另存 report-first-scoring.json，保留出处。
+    """
+    from narrative.operations import Operations
+
+    directory = Path(directory).resolve()
+    report = json.loads((directory / "report.json").read_text(encoding="utf-8"))
+    fixture = json.loads((directory / "fixture.json").read_text(encoding="utf-8"))
+    projects = sorted(directory.glob("*.nproj"))
+    assert len(projects) == 1, f"报告目录里应恰好有一个工程：{projects}"
+    ops = Operations.open(projects[0])
+    saved_live = (report.get("large_sample_evidence") or {}).get("live_observation")
+    first_scoring = directory / "report-first-scoring.json"
+    if not first_scoring.is_file():
+        first_scoring.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    checks = validate(ops, fixture, None, [], report)
+    # 两个观察项也一并重算：它们是本轮改动（identity 分类、add 累积）在真实数据上的读数，
+    # 少了它们看报告的人会以为没测。
+    report["observations"] = _observations(ops, ops.graph_snapshot(), ops.property_records())
+    if saved_live is not None:
+        # 离线重算没有观察者线程：沿用首次运行落盘的实测观察数据。
+        report["large_sample_evidence"]["live_observation"] = saved_live
+    report["checks"] = checks
+    report["recheck"] = {
+        "at": datetime.now(UTC).isoformat(),
+        "mode": "offline_recompute_no_model_call",
+        "reason": "首次判读只认 submit_extraction 的 status，漏掉了经 patch 提交入库的已接受批次；修正判读后离线重算。",
+        "first_scoring_file": first_scoring.name,
+    }
+    failed = sorted(key for key, value in checks.items() if not value)
+    report["failed_checks"] = failed
+    report["status"] = "passed" if not failed else "not_passed"
+    (directory / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps({"directory": str(directory), "status": report["status"], "failed_checks": failed}, ensure_ascii=False))
+    return 0 if not failed else 1
+
+
+def main():
+    text, _ = load_input()
+    qa.seed, qa.TEXT, qa.TASK = seed, TEXT_NOTE, TASK
+    qa.PROMPT_VERSION = "real-piaomiao-three-chapters-fine/1"
+    qa.FIXTURE_ORIGIN = "外部版权原文经 Operations 原样导入（只按路径读，不复制）；由真实模型自行建切片并提取前三章。"
+    with observe_real_calls(OBSERVER):
+        return qa.main(
+            validate=validate,
+            required_tools=["submit_extraction"],
+            prompt_factory=lambda fixture: TASK + "\nsource_id=" + fixture["source_id"],
+            use_writing_target=False,
+            allow_extraction_change=True,
+            on_started=OBSERVER.started,
+            on_progress=OBSERVER.progress,
+        )
+
+
+def _argv():
+    """不传 --output 时落到带时间戳的标准报告目录；其余默认值只在本脚本里给。"""
+    argv = sys.argv[1:]
+    if "--recheck" in argv:
+        index = argv.index("--recheck")
+        target = argv[index + 1] if len(argv) > index + 1 else ""
+        if not target:
+            raise SystemExit("--recheck 需要一个已有的报告目录")
+        return recheck(target)
+
+    def given(name):
+        return any(item == name or item.startswith(name + "=") for item in argv)
+
+    if not given("--output"):
+        argv += ["--output", str(REPORT_ROOT / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))]
+    if not given("--seconds"):
+        argv += ["--seconds", "3600"]
+    if not given("--token-budget"):
+        argv += ["--token-budget", "2000000"]
+    sys.argv = [sys.argv[0], *argv]
+    return main()
+
+
+if __name__ == "__main__":
+    raise SystemExit(_argv())

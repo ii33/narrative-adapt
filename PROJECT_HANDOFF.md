@@ -167,6 +167,7 @@ UI 侧约定：所有颜色走主题令牌（`theme.py` 的 `TOKENS` / `LAYOUT`�
 3. **推送前才跑** `pytest --slow`（不是 `-m ""`，那个会连 ui/native/integration 一起跑）。
 4. **`ruff check --no-cache src tests`**：工作区的 `.ruff_cache` 会给出过期的"All checks passed"，必须带 `--no-cache`。
 5. 验收命令要在**干净检出**里跑一次，别只信工作区。
+6. **真实内容生产基准**：《飘邈之旅》前三章（16,371 字，外部版权素材不入库）跑一次真实 fine 提取，脚本 `scripts/accept_piaomiao_three_chapters.py`，报告落 `data/acceptance/piaomiao-three-chapters/<UTC 时间戳>/`；通过项与观察项的判读口径见 `docs/TESTING.md`「内容生产基准」。只跑一次、不自动重试。
 
 ---
 

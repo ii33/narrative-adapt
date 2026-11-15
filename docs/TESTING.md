@@ -57,6 +57,23 @@ Start-Process .venv\Scripts\python.exe -ArgumentList '-m','pytest','-q' `
 
 日志落 `artifacts/logs/`（`artifacts/` 已在 `.gitignore` 里，不进版本库），用 tail 读末尾结果；需要交互判断时先看日志再决定下一步，不要在前台守着跑。
 
+## 内容生产基准
+
+默认套件回答“数据是否被正确读写”，答不了“真实模型在一整段真实文本上生产得怎么样”。内容生产基准补这一层：**《飘邈之旅》前三章 16,371 字**的真实 fine 提取，一次跑完并留下结构化证据。
+
+- **素材是外部文件，不随仓库分发**。脚本只按路径读 `C:\Users\youai\Downloads\飘邈之旅UTF8.txt`（UTF-8 无 BOM，2,027,329 字，297 个章节标题）；原文与任何摘录都不进版本库，报告只存哈希、计数与结构化指标。脚本启动即断言素材事实（字数 2,027,329、标题数 297、三个标题起点 `[146, 5783, 11193]`、前三章 16,371 字、`text[146:16517]` 的 sha256）——素材一换就硬失败，不会悄悄跑偏。
+- **脚本**：`scripts/accept_piaomiao_three_chapters.py`（与 `scripts/accept_two_chapters_fine.py` 同一套 `accept_screenplay.main` + `qa_live_observer`），默认输出 `data/acceptance/piaomiao-three-chapters/<UTC 时间戳>/`（`data/` 已 gitignore）。
+
+  ```
+  .venv\Scripts\python.exe scripts\accept_piaomiao_three_chapters.py
+  ```
+
+  只跑一次，不自动重试；外部观察预算默认 3600 秒 / 2,000,000 token，到点由观察者停任务并记 `observation_expired`（这是 QA 预算，不是产品任务时限）。判读代码本身修正后，用 `--recheck <报告目录>` 对已有产物离线重算（不调用模型、不动工程数据，首次判读另存 `report-first-scoring.json`）——不用为了改判读再烧一次模型。
+- **判读口径**：
+  - **通过项**（`report.json` 的 `checks`，全 true 才是 `passed`）：任务完成且无错误；模型自己建立了三章切片；至少一批提交被接受（`submit_extraction` 直接 accepted，或经 `patch_extraction_submission` 逐条改正后提交入库——真实流程常是后者）；每章都有事件、且没有整段漏读（每章切八段只作粗判：连续两段全空或空段多于 3/24 才算漏读——`M-01` 明确不设事件数/比例配额，单个空段是正常的叙事空隙，分位数字原样写进 `eighth_observation`）；所有证据落在 `[146, 16517)`；节点引文与坐标逐字相符；默认不产生 `action` 节点；`check_project` 无 error；导入后原文未被改写；被接受批次声明的范围覆盖三章。
+  - **观察项**（只记数字，不判失败）：(a) `category_source == "identity"` 的属性记录数（属性名恰好等于分类名，本轮新增规则）；(b) 同一属性在多事件用 `add` 累积的记录规模（本轮提示词新口径）。这两条是“模型有没有照规则做”的观察，数字不足说明规则没吃透，但不该让整轮基准失败，所以不进 `checks`。
+  - **不算通过证据**：提交的范围声明、`locate_source` 次数、token 用量都不等于语义穷尽；`semantic_review_status` 固定为 `pending_independent_source_comparison`，要与前三章原文人工对照后语义验收才算完成。
+
 ## 编写新测试
 
 1. **纯函数优先**。状态推导、校验、草稿归一化、编号与排序等，直接构造输入字典断言，不建工程。
