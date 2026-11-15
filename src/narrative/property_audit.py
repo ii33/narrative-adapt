@@ -125,6 +125,8 @@ def audit_properties(
     # Records nobody has classified yet, counted per node: one line per node is
     # more useful than one line per record.
     unclassified: dict[str, int] = defaultdict(int)
+    # 「属性名就是分类名」按 (节点, 属性名) 收一次就够，不然一条记录一行。
+    category_named: dict[tuple[str, str], dict] = {}
 
     for record in values:
         node_id = record.get("node_id")
@@ -194,6 +196,20 @@ def audit_properties(
                 node=node, property_id=property_id, records=[record],
                 suggestion="改成一个已有大类，或把它加进分类表；也可以留着，不影响取值",
             ))
+        # 分类是分组，属性名要说这条变更指的具体方面。拿分类名当属性名，一个类里就只剩
+        # 一条属性，读起来像「这个人只有一处外貌」；外貌会在多处被提及，类里本该并列多条。
+        if property_id in property_categories.vocabulary_for(node_type, categories) \
+                and property_id != property_categories.UNCLASSIFIED:
+            category_named[node_id, property_id] = node
+
+    for (_node_id, property_id), node in category_named.items():
+        issues.append(_issue(
+            "category_as_property", WARNING,
+            f"属性名「{property_id}」和分类名相同：分类是分组，一个类下该并列多条具体属性"
+            "（如外貌 → 身高、发型、瞳色）",
+            node=node, property_id=property_id,
+            suggestion="把属性名改成这条变更说的具体方面，分类继续用大类",
+        ))
 
     if unclassified:
         total = sum(unclassified.values())

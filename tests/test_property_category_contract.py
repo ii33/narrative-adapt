@@ -73,6 +73,47 @@ def test_property_name_no_longer_implies_a_category(ops):
     assert summary_row(ops, "身高")["category"] == "未分类"
 
 
+def test_a_category_holds_several_properties_side_by_side(ops):
+    """分类是分组：同一类下并列多条具体属性，而不是一条。"""
+    source = ops.import_source("并列属性", TEXT)
+    rows = [
+        {"node": "甲", "property": name, "value": value, "value_type": "string",
+         "scope": "world", "at_event": EVENT, "op": "set", "quotes": [TEXT], "category": "外貌"}
+        for name, value in (("身高", "一米七"), ("发型", "短马尾"), ("瞳色", "灰蓝"))
+    ]
+    nodes = [
+        {"type": "person", "name": PERSON, "quotes": [TEXT]},
+        {"type": "scene", "name": SCENE, "quotes": [TEXT]},
+        {"type": "event", "name": EVENT, "scene": SCENE, "participants": [PERSON],
+         "location": "未知", "quotes": [TEXT]},
+    ]
+    accepted = ops.submit_extraction(source, {"nodes": nodes, "properties": rows})
+    assert accepted["status"] == "accepted", accepted
+    payload = ops.property_node_summary(person_id(ops))
+    group = next(row for row in payload["categories"] if row["key"] == "外貌")
+    assert group["count"] == 3
+    assert {item["property_id"] for item in group["items"]} == {"身高", "发型", "瞳色"}
+    # 三条并列不会互相覆盖：每条都有自己的当前值。
+    assert len(payload["properties"]) == 3
+
+
+def test_property_named_like_a_category_is_diagnosed(ops):
+    """属性名写成分类名，一个类里就只剩一条——审计要说出来。"""
+    source = ops.import_source("分类当属性名", TEXT)
+    accepted = ops.submit_extraction(source, draft(category="外貌", property_name="外貌"))
+    assert accepted["status"] == "accepted", accepted
+    issue = next(row for row in ops.check_project()["issues"] if row["code"] == "category_as_property")
+    assert "外貌" in issue["message"]
+    assert "并列" in issue["message"]
+
+
+def test_a_specific_aspect_inside_a_category_is_not_diagnosed(ops):
+    source = ops.import_source("具体方面", TEXT)
+    accepted = ops.submit_extraction(source, draft(category="外貌", property_name="身高"))
+    assert accepted["status"] == "accepted", accepted
+    assert not any(row["code"] == "category_as_property" for row in ops.check_project()["issues"])
+
+
 def test_resolve_has_only_explicit_and_default_unclassified():
     assert property_categories.resolve({"property_id": "height"}, "person") == (
         "未分类", "default_unclassified")
