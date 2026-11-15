@@ -24,13 +24,13 @@
 | `U-05` | 精细级要不要给配角建档 | 要。精细级面向改编：**出场人物都要建档**：建人物节点并写清能支撑造型的属性，**提取阶段不建资料卡**；视觉资产据此建立。次要、无名同样建档，不按主线重要性筛除（`E-17`）。 |
 | `U-06` | 「明确指定」「实质进展」「清晰概括名」这类没有判定口径的措辞 | 有意留白，不写机械判据，靠模型判断与人工复核（`E-01`–`E-03`、`E-30` 一类只写方向不写阈值）。 |
 | `U-07` | 属性名能不能就是分类名 | **可以，而且鼓励**：属性名恰好是分类词表里的一项时，它自然就属于这一类（`category_source=identity`），不必为分类另造名字，也不报错、不拦。一个类下允许并列多条属性（外貌 → 身高、发型、瞳色）。 |
-| `U-08` | 同一属性被多次提及时，为什么前面几条只当历史 | 属性分两类，判据是一句可判定的问题：**这个属性的旧值会不会被新值取代？** 会取代是**状态型**（默认，`cardinality` 语义不变，后写覆盖前值）；不会取代、多个值可以同时成立是**累积型**（定义上 `accumulate: true`，每次提及都并列保留，只有显式 `remove`／`clear` 才让某个值失效）。规范只写这两类与这句判据，**不枚举属性名单**（`E-22`）。 |
+| `U-08` | 同一属性被多次提及时，前面几条算不算数、什么时候才并列 | **同一属性：后一次提及让前一次失效**——这是状态型，`cardinality` 语义不变，后写覆盖前值；所以「矮小黝黑」在改造事件被新描述取代后就是历史，读取当前值只有新的那条。**并列只发生在两处**：① 同一事件点里**同时成立**的多个值 → 一条记录装多值数组（`many`）；② 同一类别下的**不同方面**是不同属性名（身高、发型、瞳色各一条），它们本来就不会互相覆盖。**不要**为了"保留旧描述"把先后关系写成并列；要看旧值去历史／节点编辑器。规范只写这两条，**不枚举属性名单**（`E-22`）。 |
 
-到 2026-11 为止，`U-01`–`U-05`、`U-07` 与 `U-08` 已落进提示词（`extraction` v30、`granularity_fine` v8、`review` v12），`U-06` 永远留在「仅提示词」一侧。
+到 2026-11 为止，`U-01`–`U-05`、`U-07` 与 `U-08` 已落进提示词（`extraction` v31、`granularity_fine` v8、`review` v12），`U-06` 永远留在「仅提示词」一侧。
 
 ## 1 范围、引用与批次
 
-- 范围：原文是唯一事实来源，引文须逐字命中原文（`I-13`）；章节标题、原文切片和提交批次只作阅读索引与处理范围，不决定场景或事件边界（`M-06`）。来源：本页 §4（原 `docs/MODEL.md` 第 2 节）与提取提示词「提取通用要求」v30。
+- 范围：原文是唯一事实来源，引文须逐字命中原文（`I-13`）；章节标题、原文切片和提交批次只作阅读索引与处理范围，不决定场景或事件边界（`M-06`）。来源：本页 §4（原 `docs/MODEL.md` 第 2 节）与提取提示词「提取通用要求」v31。
 - 引用：本页与其它文档一律按「编号 + 结论」引用（§0），编号集合与出处见 `docs/README.md`；五层概念见 `docs/MODEL.md` 第 1 节。
 - 批次：一小批一次提交；本批引用 `@n` 从 1 起，数组索引从 0 起（见 §5「暂存、入库与编号」）；局部修补用 `patch_extraction_submission`（`I-28`）。
 
@@ -76,27 +76,27 @@
   - 程序：仅提示词，无校验；互查 `M-01`
   - 反例：按「一段一个事件」把一场铺陈切成 6 个事件。
 - `E-06` 场景边界按「现场是否还连续」判断；同一地点隔了很久、或同一时刻换到远处，都另起一场。
-  - 出处：`extraction` v30 ·「同一地点隔了很久，或同一时刻换到远处，都另起一场」
+  - 出处：`extraction` v31 ·「同一地点隔了很久，或同一时刻换到远处，都另起一场」
   - 程序：仅提示词，无校验；互查 `M-02`
   - 反例：把「三天后，同一间屋子」并进前一场。
 - `E-07` 大事件边界按「阶段是否换了」判断，同一语境下连续的一大段进展按披露顺序首尾相接。
-  - 出处：`extraction` v30 ·「判断：这一段进展是否换了阶段？」
+  - 出处：`extraction` v31 ·「判断：这一段进展是否换了阶段？」
   - 程序：仅提示词，无校验；互查 `M-03`
   - 反例：阶段没换，只因为换了地点就给这一段新建大事件。
 - `E-08` 章节标题、原文切片与提交批次只作阅读索引与处理范围，不用来切场景或事件的边界。
-  - 出处：`extraction` v30 ·「不是场景或事件的边界」
+  - 出处：`extraction` v31 ·「不是场景或事件的边界」
   - 程序：仅提示词，无校验；互查 `M-06`
   - 反例：章末的停顿就收尾一个事件，换章处再开一个新事件。
 - `E-09` 事件默认只写一条足以支持其身份与核心发生的代表性引文，不为起因、过程、结果各写一条。
-  - 出处：`extraction` v30 ·「事件默认只提交一条有代表性的准确原文引文」
+  - 出处：`extraction` v31 ·「事件默认只提交一条有代表性的准确原文引文」
   - 程序：`I-13`（只管逐字与唯一，不限条数）；互查 `M-13`
   - 反例：一个事件挂「起因」「经过」「结果」三条引文。
 - `E-10` 场景、大事件、主要故事不填 `quotes`／`closing_quote`，上层证据由程序从下级派生。
-  - 出处：`extraction` v30 ·「不由模型填写quotes或closing_quote」
+  - 出处：`extraction` v31 ·「不由模型填写quotes或closing_quote」
   - 程序：`I-10`（容器不落自身 `quotes`）
   - 反例：给场景手写一条 `quotes` 想证明它存在。
 - `E-11` 主要故事的完成边界取下级证据派生的 `completion`，不以章节结束或批次交完代替语义闭合。
-  - 出处：`extraction` v30 ·「不要求模型提供closing_quote」
+  - 出处：`extraction` v31 ·「不要求模型提供closing_quote」
   - 程序：`I-33`；互查 `M-04`
   - 反例：读完第 3 卷就把 T 的完成点定在第 3 卷末章。
 - `E-12` 动作默认不提取：只在用户明确要求时创建，且不把动作改标成事件。
@@ -111,7 +111,7 @@
   - 程序：`I-16`；互查 `M-12`
   - 反例：为补前情，把范围外上一段的句子当作本批证据提交。
 - `E-14` 拿不准的事实放进 `uncertainties`，不补默认值、不猜原文没交代的属性。
-  - 出处：`extraction` v30 ·「拿不准放进 uncertainties，不补默认值」
+  - 出处：`extraction` v31 ·「拿不准放进 uncertainties，不补默认值」
   - 程序：仅提示词，无校验；互查 `M-08`（未提及就留白）
   - 反例：原文没写年龄，按常识填「二十岁」。
 - `E-15` 按语境与引用依赖分批提交，一批语义完整就交，不攒成一份大草稿。
@@ -119,7 +119,7 @@
   - 程序：`I-28`
   - 反例：把整章读完再一次提交 300 个节点。
 - `E-16` 跨批复用已有对象时一律指向同一个已有 ID，不重复建同义节点。
-  - 出处：`extraction` v30 ·「原文里同一个人物、地点、物品、事件就是同一个」
+  - 出处：`extraction` v31 ·「原文里同一个人物、地点、物品、事件就是同一个」
   - 程序：仅提示词，无校验（`ID` 只管记录 ID 唯一）；互查 `M-15`
   - 反例：上一批已给 `P1`，这一批又给同一人物新建 `P7`。
 
@@ -134,42 +134,42 @@
   - 程序：仅提示词，无校验；互查 `M-15`（同名与位置相近不作依据）
   - 反例：两个「老人」被拆成两个人物节点，各写一段身世。
 - `E-19` 每个活动物品都在事件处记 `world` 持有者状态（节点引用、「无」或「未知」）；清除、遗漏与认知记录都不能代替未知。
-  - 出处：`extraction` v30 ·「每个活动物品都要有明确的持有者状态」
+  - 出处：`extraction` v31 ·「每个活动物品都要有明确的持有者状态」
   - 程序：`I-05`
   - 反例：物品最后一次出现后留空，事后再解释成「不知道在谁手里」。
 - `E-20` 每个事件都在自身事件处记 `world` 地点（`either` 节点引用或显式「无」「未知」）；场景不记地点，上层地点与认知都不能代替。
-  - 出处：`extraction` v30 ·「场景不记地点，只有事件自身的 world 地点有效」
+  - 出处：`extraction` v31 ·「场景不记地点，只有事件自身的 world 地点有效」
   - 程序：`I-01`、`I-03`
   - 反例：地点写在所属场景上，事件自己留空。
 
 ### 3.5 属性与状态（`extraction`）
 
 - `E-21` 属性变更只写在事件处：`set`／`add`／`remove` 带 `value`，`clear`／`unknown` 不带，`at_event` 指向该事件自身。
-  - 出处：`extraction` v30 ·「属性变更：set/add/remove 带 value，clear/unknown 不带」
+  - 出处：`extraction` v31 ·「属性变更：set/add/remove 带 value，clear/unknown 不带」
   - 程序：`I-19`、`I-18`
   - 反例：用 `clear` 外加一个空的 `value` 数组表示清空。
-- `E-22` `cardinality` 只约束录入：`one` 在同一事件点只允许一个当前值（多个对方就是多条记录），`many` 才把多项装在同一条记录里；读取一律返回全部当前有效值。属性另分状态型与累积型，判据是「旧值会不会被新值取代」：会取代是状态型（默认，后写覆盖前值），不会取代、多个值可同时成立是累积型（定义标 `accumulate`，每次提及都并列保留，只有 `remove`／`clear` 让某个值失效，`U-08`）。
-  - 出处：`extraction` v30 ·「旧值会不会被新值取代」
-  - 程序：`I-20`（`accumulate` 为严格布尔）；互查 `M-09`
-  - 反例：把「师父」改成 `many` 来容纳柯镇恶与洪七公；或把身高、瞳色当状态型用一次 `set` 覆盖，让前几次提及只剩历史。
+- `E-22` `cardinality` 只约束录入：`one` 在同一事件点只允许一个当前值（多个对方就是多条记录），`many` 才把多项装在同一条记录里；读取一律返回全部当前有效值。同一方面后写覆盖前值：同一属性的后一次提及让前一次失效，前面几条只作历史；并列只在「同一事件点同时成立（`many` 一条记录多值）」与「同一类别下的不同方面（不同属性名）」两处（`U-08`）。
+  - 出处：`extraction` v31 ·「同一属性以最后一次提及为准：后来的值是取代前值，前面的只作历史保留」
+  - 程序：`I-20`；互查 `M-09`
+  - 反例：把「师父」改成 `many` 来容纳柯镇恶与洪七公；或把一个属性的先后变化写成多条并列，让「矮小黝黑」与后来的外貌同时生效。
 - `E-23` 认知与主张只在事件里明确追加时才写，值优先用对象引用；世界事实变化不自动改写认知。
-  - 出处：`extraction` v30 ·「世界事实变化不自动改写角色认知」
+  - 出处：`extraction` v31 ·「世界事实变化不自动改写角色认知」
   - 程序：`I-12`；互查 `M-08`
   - 反例：主角得知真相后，回头把全篇所有人物的旧认知批量改成新认知。
 - `E-24` 每条属性变更给出该节点类型分类表里的一个大类，或显式写「未分类」；一个类下允许并列多条属性，属性名直接取分类名也完全可以（自然归入该类，`U-07`）；拿不准分类就写「未分类」，不硬凑。
-  - 出处：`extraction` v30 ·「拿不准就写「未分类」，不硬凑」
+  - 出处：`extraction` v31 ·「拿不准就写「未分类」，不硬凑」
   - 程序：无专属 `I-xx`（`category` 是草稿必填项，见 §5「属性分类」）；互查 `M-07`
   - 反例：把「身高」硬塞进「外貌」只为填满这一格。
 - `E-25` 进展属性写在直属下一级容器上：`storyline_progress` 记在大事件、`big_event_progress` 记在场景；写更上层会被跳过，不迁移旧层级。
-  - 出处：`extraction` v30 ·「部／卷的进展记在 B（storyline_progress）、B 的进展记在 S（big_event_progress）」
+  - 出处：`extraction` v31 ·「部／卷的进展记在 B（storyline_progress）、B 的进展记在 S（big_event_progress）」
   - 程序：`I-11`
   - 反例：把 `storyline_progress` 直接写在主要故事上。
 - `E-26` 容器属性与某个下属事件同组时以事件记录为准：容器写入被丢弃并回 `info`，不换近义属性名重试。
-  - 出处：`extraction` v30 ·「写入按判重规则丢弃并给 info」
+  - 出处：`extraction` v31 ·「写入按判重规则丢弃并给 info」
   - 程序：`I-09`；互查 `M-16`
   - 反例：换个近义属性名，把同一条状态再写进容器。
 - `E-27` 属性名描述取值相对节点的身份、关系或作用。方向按语义核对：互逆关系（父子、师生）正反两条都要记——A 是 B 的父亲，B 就是 A 的孩子；单向关系（喜欢、信任）只记有原文依据的方向；`symmetric` 只表示同一个值对称成立，不负责反向（`U-04`）。先查已有定义再新增，定义冲突时定向读取或显式更正，不换近义名绕过。
-  - 出处：`extraction` v30 ·「互逆关系（父子、师生）正反两条都要记」
+  - 出处：`extraction` v31 ·「互逆关系（父子、师生）正反两条都要记」
   - 程序：`I-20`（`symmetric` 为严格布尔）
   - 反例：A 是 B 的父亲，只记这一条、不给 B 记「孩子」；或反过来，凭「喜欢」猜对方也喜欢。
 
@@ -215,11 +215,11 @@
 ### 3.7 记录形状（`extraction`）
 
 - `E-37` 不手算 `sequence`、不填 `identity_note` 等存储字段：编号、坐标、去重与预检都由程序完成。
-  - 出处：`extraction` v30 ·「不手算 sequence、不填 identity_note 等存储字段」
+  - 出处：`extraction` v31 ·「不手算 sequence、不填 identity_note 等存储字段」
   - 程序：`I-18`（自带 `sequence` 按 `DRAFT_SCHEMA` 拒收）；互查 `M-12`
   - 反例：为了让变更排序稳定，自己给三条变更写 `sequence: 1/2/3`。
 - `E-38` 同一事件的多条变更共用同一个 `at_event`，不为挂属性另造事件。
-  - 出处：`extraction` v30 ·「同一事件的多条变更共用 at_event，不为挂属性另造事件」
+  - 出处：`extraction` v31 ·「同一事件的多条变更共用 at_event，不为挂属性另造事件」
   - 程序：`I-18`
   - 反例：为把一条属性挂进时间线，复制出一个「补充事件」。
 
@@ -281,7 +281,7 @@
 | I-17 | 属性记录 ID 非空且唯一、`kind` 只能是 `property_definition`／`property_change`、字段走白名单 | `src/narrative/property_core.py::validate_records` | `ID`，`KIND`，`FORMAT` | `tests/test_current_state_contract.py` |
 | I-18 | 变更必须锚定有效事件或动作，`sequence` 为非负整数，语境必须存在 | 同上 | `EVENT_REF`，`SEQUENCE`，`CONTEXT` | `tests/test_event_property_state.py` |
 | I-19 | `clear`／`unknown` 不得携带 `value`；many 集合元素唯一、节点引用有效（`M-07`）。这是**写入**约束，不描述查询形状 | 同上 | `VALUE` | `tests/test_current_state_contract.py` |
-| I-20 | 值类型与定义一致；`target_node_types` 只用于 `node` 定义；`symmetric`／`accumulate` 为严格布尔；`one`／`many` 是**录入规则**（`one` 同一事件点只允许一个当前值，`many` 允许并存）与「标量关系按对方分别维护」（`M-09`），**不决定查询形状**——`state()`／`property_state()` 的 `known` 一律返回 `values` 列表，单值也是长度 1 的列表。`accumulate: true` 的定义下 `set`／`add` 等价并入、`remove` 只减去指定值（`U-08`） | 同上 | `DEFINITION`，`VALUE` | `tests/test_property_symmetry.py`，`tests/test_state_values_contract.py`，`tests/test_property_accumulate.py` |
+| I-20 | 值类型与定义一致；`target_node_types` 只用于 `node` 定义；`symmetric` 为严格布尔；`one`／`many` 是**录入规则**（`one` 同一事件点只允许一个当前值，`many` 允许并存）与「标量关系按对方分别维护」（`M-09`），**不决定查询形状**——`state()`／`property_state()` 的 `known` 一律返回 `values` 列表，单值也是长度 1 的列表。同一属性后写覆盖前值，前一条只作历史；并列只在同一事件点同时成立（`many`）或不同属性名（不同方面）时发生（`U-08`） | 同上 | `DEFINITION`，`VALUE` | `tests/test_property_symmetry.py`，`tests/test_state_values_contract.py`，`tests/test_property_replacement.py` |
 | I-21 | 五层直属关系：`scene→big_event→storyline`、`event→scene`、`action→event`，不跳层 | `src/narrative/extraction_draft.py::_draft_input_diagnostics`（`expected_parent` 映射），`src/narrative/storyline_ranges.py::analyze`，`src/narrative/graph_service.py::precheck` | `STORYLINE_CHILD_TYPE`，`COMPOSITE` | `tests/test_adaptation_hierarchy_contract.py` |
 | I-22 | 每个活动事件必须经包含路径归属同语境的活动场景 | `src/narrative/containment_refs.py::event_scene_issues` | `EVENT_SCENE` | `tests/test_project_check.py` |
 | I-23 | 动作必须直属恰好一个同语境活动事件，且不能含子项（`M-05`） | 同上 | `ACTION_EVENT`，`ACTION_LEAF` | `tests/test_granularity_actions.py` |
@@ -363,12 +363,12 @@ flowchart LR
 
 | 记录 | 字段 |
 | --- | --- |
-| `property_definition` | `id`、`value_type`、`cardinality`，可选 `target_node_types`、`semantic`、`symmetric`、`accumulate` |
+| `property_definition` | `id`、`value_type`、`cardinality`，可选 `target_node_types`、`semantic`、`symmetric` |
 | `property_change` | `id`、`node_id`、`property_id`、`event_id`、`sequence`、`op`，以及按操作填写的 `value`、作用域、认知持有人、语境、证据与分类 |
 
 操作为 `set`（建立或设为）、`add`（增加）、`remove`（移除）、`clear`（失效整组）、`unknown`（明确未知）。前三者需要值；后两者不带值。集合值使用数组；人际标量关系按对方分别维护，移除某一对方不会清除其他关系，不能为了移除一个对象使用 `clear`。
 
-定义可标 `accumulate: true` 表示累积型（`U-08`）：这类属性的旧值不会被新值取代，`set` 与 `add` 都只是并入集合（同一事件内多条也合并，不报冲突），`remove` 只减去指定值，`clear`／`unknown` 语义不变；读取仍是 `{kind: 'known', values: [...]}` 并列列出全部当前值。状态型（默认）沿用上面的基数与覆盖规则。是否累积只看定义，程序不按属性名判断。累积型通常把 `cardinality` 写成 `many`（值用数组，一次可并列给多条）；写成 `one` 时仍按标量录入，读取同样并列列出。
+定义不带"累积"开关：同一属性只有一条当前值轴（`U-08`）。同一属性的后一次提及让前一次失效——`set` 覆盖前值、`add` 并入集合、`remove` 减去指定值、`clear` 让整组失效，前一条记录留在历史里但不再是当前值。并列只在两处发生：同一事件点同时成立的多个值装进一条 `many` 记录的多值数组；同一类别下的不同方面用不同属性名，各自一条、本来就互不覆盖。不要为了留住旧描述把先后关系写成并列。
 
 提取按正式原文顺序和事件 Unicode 披露位置排列事件，同事件按非负整数 `sequence` 排列。提取的序号由程序使用定位引文的起点生成，不让模型手算；人工新增由操作明确追加序号，更正保留原序。不同批次、记录 ID 和写入时间都不决定先后。同事件同序号的不相容操作报告冲突，不能任意挑选一个。
 
@@ -469,7 +469,7 @@ flowchart LR
 | `FORMAT` | 记录不是对象、带白名单外字段，或存储对象字段不合法 | 模型改草案 | `I-17` | `src/narrative/property_core.py::validate_records`、`src/narrative/graph_service.py::_normalized` | tests/test_project_check.py::test_checker_rejects_obsolete_merged_fields_without_following_redirects |
 | `KIND` | `kind` 不是 `property_definition` 或 `property_change` | 模型改草案 | `I-17` | `src/narrative/property_core.py::validate_records` | — |
 | `ID` | 属性记录 ID 为空、非字符串，或与已有／本批记录重复 | 模型改草案 | `I-17` | `src/narrative/property_core.py::validate_records` | — |
-| `DEFINITION` | 定义缺 `value_type`／`cardinality`、`symmetric`／`accumulate` 非严格布尔，或 `target_node_types` 用在非 `node` 定义上 | 模型改草案 | `I-20` | `src/narrative/property_core.py::validate_records` | tests/test_property_symmetry.py::test_non_boolean_definition_flag_is_rejected_atomically |
+| `DEFINITION` | 定义缺 `value_type`／`cardinality`、`symmetric` 非严格布尔，或 `target_node_types` 用在非 `node` 定义上 | 模型改草案 | `I-20` | `src/narrative/property_core.py::validate_records` | tests/test_property_symmetry.py::test_non_boolean_definition_flag_is_rejected_atomically |
 | `EVIDENCE` | 引文缺失、不是原文子串、不是逐字唯一命中，或 `evidence_spans` 形状／坐标不合法 | 模型改草案 | `I-13`、`I-14`、`I-16`、`E-09`、`E-13`、`M-12` | `src/narrative/property_core.py::validate_records`、`src/narrative/graph_service.py::precheck` | tests/test_source_location_contract.py::test_property_validation_scans_shared_evidence_once_and_never_across_calls |
 | `EVIDENCE_SPAN` | 节点证据跨度与原文对应位置不符 | 模型改草案 | `I-16` | `src/narrative/graph_service.py::precheck` | — |
 | `DISCLOSURE` | 披露坐标不是合法原文 Unicode 位置，或与逐字证据起点不一致 | 模型改草案 | `I-15` | `src/narrative/property_core.py::validate_records`、`src/narrative/graph_service.py::precheck` | tests/test_reviewed_location_regressions.py::test_repeated_evidence_requires_valid_exact_disclosure |
@@ -502,7 +502,7 @@ flowchart LR
 | 码 | 触发（可判定的一句话） | 处理方 | 相关编号 | 锚点（`文件.py::符号`） | 覆盖测试 |
 | --- | --- | --- | --- | --- | --- |
 | `STATE_GROUP` | 一次状态推导里混进了不同（主体／属性／语境／立场）分组 | 模型改草案 | `I-30`、`M-10` | `src/narrative/property_core.py::reduce_changes` | — |
-| `STATE_CONFLICT` | 同一事件同一 `sequence` 出现不相容变更（累积型定义下 `set`／`add` 只是并入，不算不相容） | 模型改草案 | `I-31`、`M-10`、`U-08` | `src/narrative/property_core.py::reduce_changes` | tests/test_state_values_contract.py::test_two_one_values_at_the_same_event_point_are_a_conflict |
+| `STATE_CONFLICT` | 同一事件同一 `sequence` 出现不相容变更（同一事件点同时成立的多个值须装进一条 `many` 记录） | 模型改草案 | `I-31`、`M-10`、`U-08` | `src/narrative/property_core.py::reduce_changes` | tests/test_state_values_contract.py::test_two_one_values_at_the_same_event_point_are_a_conflict |
 | `EVENT_ORDER` | 变更锚定的事件／动作没有正式阅读顺序 | 模型改草案 | `I-18` | `src/narrative/property_core.py::reduce_changes` | — |
 
 ### 6.5 容器写回与进展属性（`I-09`–`I-11`）
@@ -651,7 +651,7 @@ flowchart LR
 | id | 当前 version | 模板归属 | 覆盖的 E 条目 | 规范化状态 |
 | --- | --- | --- | --- | --- |
 | `system` | v11 | extract / screenplay / storyboard | `E-01` `E-02` `E-03` `E-04` | 已规范化（§3.1） |
-| `extraction` | v30 | extract | `E-06` `E-07` `E-08` `E-09` `E-10` `E-11` `E-14` `E-16` `E-19` `E-20` `E-21` `E-22` `E-23` `E-24` `E-25` `E-26` `E-27` `E-37` `E-38` | 已规范化（§3.2–§3.5、§3.7） |
+| `extraction` | v31 | extract | `E-06` `E-07` `E-08` `E-09` `E-10` `E-11` `E-14` `E-16` `E-19` `E-20` `E-21` `E-22` `E-23` `E-24` `E-25` `E-26` `E-27` `E-37` `E-38` | 已规范化（§3.2–§3.5、§3.7） |
 | `granularity_fine` | v8 | extract | `E-12` `E-17` `E-18` | 已规范化（§3.2、§3.4） |
 | `conversation_actions` | v3 | extract | `E-36` | 已规范化（§3.6） |
 | `granularity_standard` | v6 | — | `E-05` | 已规范化（§3.2） |

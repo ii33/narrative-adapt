@@ -14,7 +14,7 @@ def _invalid(message, field, *, related_fields=()):
 
 
 def record_change(ops, node_id, property_id, event_id, op, *, expected_revision, reason, value=MISSING,
-                  value_type=None, cardinality=None, symmetric=None, accumulate=None, scope='world', holder_id=None,
+                  value_type=None, cardinality=None, symmetric=None, scope='world', holder_id=None,
                   context_id='canon', quote=None, source_id=None, category=None, source=None, related_nodes=None):
     snapshot = ops.graph_snapshot()
     if type(expected_revision) is not int or expected_revision != snapshot['revision']:
@@ -32,8 +32,6 @@ def record_change(ops, node_id, property_id, event_id, op, *, expected_revision,
         raise _invalid('cardinality必须为one/many', 'cardinality')
     if symmetric is not None and type(symmetric) is not bool:
         raise _invalid('symmetric必须为布尔值', 'symmetric')
-    if accumulate is not None and type(accumulate) is not bool:
-        raise _invalid('accumulate必须为布尔值', 'accumulate')
     snapshot = ops.graph_snapshot()
     nodes = {row['id']: row for row in snapshot['nodes']}
     if node_id not in nodes or nodes.get(event_id, {}).get('node_type') not in {'event', 'action'}:
@@ -45,13 +43,10 @@ def record_change(ops, node_id, property_id, event_id, op, *, expected_revision,
         if value_type is None:
             raise _invalid('新属性定义必须明确value_type', 'value_type', related_fields=('property_id',))
         batch.append({'kind': 'property_definition', 'id': property_id, 'value_type': value_type,
-                      'cardinality': cardinality or 'one', 'symmetric': symmetric if symmetric is not None else False,
-                      'accumulate': accumulate if accumulate is not None else False})
+                      'cardinality': cardinality or 'one', 'symmetric': symmetric if symmetric is not None else False})
     else:
-        defaults = {'symmetric': False, 'accumulate': False, 'cardinality': 'one'}
-        for field, selected in [('value_type', value_type), ('cardinality', cardinality),
-                                ('symmetric', symmetric), ('accumulate', accumulate)]:
-            if selected is not None and selected != definition.get(field, defaults.get(field)):
+        for field, selected in [('value_type', value_type), ('cardinality', cardinality), ('symmetric', symmetric)]:
+            if selected is not None and selected != definition.get(field, False if field == 'symmetric' else 'one' if field == 'cardinality' else None):
                 raise _invalid(f'{field}与已有定义不一致，须显式更正定义', field, related_fields=('property_id',))
     record = {'kind': 'property_change', 'node_id': node_id, 'property_id': property_id, 'event_id': event_id,
               'op': op, 'sequence': max((row['sequence'] for row in records if row.get('kind') == 'property_change' and row['event_id'] == event_id), default=-1)+1,

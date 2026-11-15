@@ -71,7 +71,7 @@ Start-Process .venv\Scripts\python.exe -ArgumentList '-m','pytest','-q' `
   只跑一次，不自动重试；外部观察预算默认 3600 秒 / 2,000,000 token，到点由观察者停任务并记 `observation_expired`（这是 QA 预算，不是产品任务时限）。判读代码本身修正后，用 `--recheck <报告目录>` 对已有产物离线重算（不调用模型、不动工程数据，首次判读另存 `report-first-scoring.json`）——不用为了改判读再烧一次模型。
 - **判读口径**（依据 `AGENTS.md`：**提取正确性不由程序判断**）：
   - **结构结论**（`report.json` 的 `structural_checks`，程序能机械核对）：任务跑完且无框架错误；模型自建了三章切片；节点引文与坐标逐字相符；证据全部落在 `[146, 16517)`；`check_project` 无结构错误；导入后原文未被改写。
-  - **测量值**（`measurements`，只记数字、不判定）：接受批次与声明范围、各章事件数/证据数、八分位分布与空段、`action` 节点数，以及两份"本轮口径有没有被照做"的观察（`identity` 分类条数、`add` 累积规模）。
+  - **测量值**（`measurements`，只记数字、不判定）：接受批次与声明范围、各章事件数/证据数、八分位分布与空段、`action` 节点数，以及两份口径观察（`identity` 分类条数、跨事件仍用 `add` 累积的规模——按现行规则应接近 0，不为 0 说明模型把先后写成了并列）。
   - **结论固定为待人工判定**：`status` 只有 `structural_ok` / `structural_failed`，`verdict` 恒为 `pending_human_review`，`judgement_owner` 是 `human_or_model_review`。共享框架原本会按 `scene_count_2_to_3` 这类含质量含义的 check 给出 `passed`，那属于程序在判提取对错，已被 `normalize()` 改写并留档到 `measurements.program_view_not_a_verdict` / `harness_checks`。
   - **不算通过证据**：提交的范围声明、`locate_source` 次数、token 用量都不等于语义穷尽；要与前三章原文人工对照后语义验收才算完成。
   - 历史说明：首版判读曾要求"每章 8 个分位各至少 1 个事件"，这与 `M-01`（不设事件数/比例配额）冲突，已废；分位数字只作为测量值保留。

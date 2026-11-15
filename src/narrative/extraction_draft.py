@@ -42,7 +42,6 @@ RESULT_SCHEMA = {
                 "quotes": {"type": "array", "items": {"type": "string"}},
                 "cardinality": {"type": "string", "enum": ["one", "many"], "description": "新定义默认one；多值状态显式many且value为数组。已有定义省略沿用，显式冲突拒绝，须显式修改定义"},
                 "symmetric": {"type": "boolean", "description": "该关系性质对称时显式true；单向false，不按名称猜测"},
-                "accumulate": {"type": "boolean", "description": "累积型属性显式true（旧值不会被新值取代，多个值可同时成立，如外貌描述）：set与add都并列保留，只有remove/clear让某个值失效；状态型省略"},
                 "category": {"type": "string", "description": "必填：填该节点类型分类表里的一个大类；原文看不出归类时显式填「未分类」，程序不会按属性名或取值猜分类"}, "scope": {"type": "string", "enum": ["world", "cognition", "claim"], "description": "world为原文支持的客观事实；事件地点为world；cognition为某人物所知所信/主观判断，claim为人物言说主张，二者须给holder；对白可有客观事实依据，不机械全记claim"},
                 "holder": {"type": ["string", "null"], "description": "cognition的认知者或claim的说话人ID/@引用；node仍是被认知/被谈论的主体，可与holder不同；例如甲以为乙是教师：node乙、scope=cognition、holder甲；world不填"}, "source": {"type": "string"},
                 "related_nodes": {"type": "array", "items": {"type": "string"}},

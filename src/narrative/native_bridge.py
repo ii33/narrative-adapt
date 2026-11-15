@@ -983,7 +983,7 @@ class NativeBridge(QObject):
 
     @Slot("QVariantMap")
     def addPropertyRecord(self, payload: dict) -> None:
-        fields = {key: payload[key] for key in ("value", "value_type", "cardinality", "symmetric", "accumulate", "scope", "holder_id",
+        fields = {key: payload[key] for key in ("value", "value_type", "cardinality", "symmetric", "scope", "holder_id",
                   "context_id", "quote", "source_id", "category", "source", "related_nodes") if key in payload and (key not in {"quote", "source_id"} or payload[key])}
         self._project_task("property_add", lambda ops: ops.record_property_change(
             payload.get("node_id"), payload.get("property_id"), payload.get("event_id"), payload.get("op"),

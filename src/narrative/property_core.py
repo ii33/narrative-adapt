@@ -14,7 +14,7 @@ VALUE_TYPES = {'string', 'number', 'boolean', 'node', 'either', 'any'}
 CHANGE_FIELDS = {'id', 'kind', 'node_id', 'property_id', 'event_id', 'op', 'value', 'sequence',
                  'scope', 'holder_id', 'context_id', 'disclosure', 'evidence', 'evidence_spans',
                  'source', 'category', 'related_nodes', 'anchor_basis'}
-DEFINITION_FIELDS = {'id', 'kind', 'value_type', 'cardinality', 'target_node_types', 'semantic', 'symmetric', 'accumulate', 'evidence'}
+DEFINITION_FIELDS = {'id', 'kind', 'value_type', 'cardinality', 'target_node_types', 'semantic', 'symmetric', 'evidence'}
 
 
 def _issue(code, message, object_id=None, severity='error'):
@@ -96,22 +96,13 @@ def _rank(value):
     return value if isinstance(value, tuple) else tuple(value) if isinstance(value, list) else (value,)
 
 
-def _members(value):
-    """值可能写成标量，也可能写成数组；累积型两者都按元素并入。"""
-    return value if isinstance(value, list) else [value]
-
-
 def change_key(row, event_order):
     rank = event_order.get(row.get('event_id'))
     return None if rank is None else (_rank(rank), row.get('sequence', -1))
 
 
 def reduce_changes(changes, definition, nodes, *, event_order, cut=None):
-    """Fold one scoped property group; caller supplies its authoritative event axis.
-
-    状态型（默认）按 ``cardinality`` 后写覆盖前值；累积型（定义 ``accumulate: true``）
-    ``set`` 与 ``add`` 都只并入集合，``remove`` 只减去指定值——旧值不被新值取代。
-    """
+    """Fold one scoped property group; caller supplies its authoritative event axis."""
     rows = [r for r in changes if r.get('kind') == 'property_change']
     diagnostics = []
     groups = {change_group(r) for r in rows}
@@ -137,9 +128,6 @@ def reduce_changes(changes, definition, nodes, *, event_order, cut=None):
         elif limit is None or key <= limit:
             selected.append(row)
     selected.sort(key=lambda r: change_key(r, event_order) or ((-1,), -1))
-    # 累积型（`U-08`）：旧值不会被新值取代，set 与 add 都只是并入集合；状态型（默认）
-    # 仍是「谁在哪一刻是什么」，后写覆盖前值。判据只看定义上的 accumulate，不看属性名。
-    accumulate = definition.get('accumulate') is True
     relation = definition.get('cardinality', 'one') == 'one' and any(relation_target(r, nodes, {r.get('property_id'): definition}) is not None for r in rows)
     many = definition.get('cardinality') == 'many'
     state = {'kind': 'unrecorded'}
@@ -163,14 +151,7 @@ def reduce_changes(changes, definition, nodes, *, event_order, cut=None):
             additions = {_freeze(v) for r in batch if r['op'] == 'add' for v in r['value']}
             removals = {_freeze(v) for r in batch if r['op'] == 'remove' for v in r['value']}
             collection_commutes = not additions.intersection(removals)
-        accumulate_commutes = False
-        if accumulate and all(r.get('op') in {'set', 'add', 'remove'} for r in batch):
-            # 累积型没有「谁取代谁」：同一事件内多条 set 与 add 都只是并入，remove 只是减去，
-            # 只要同一取值没有既加又删，结果与顺序无关。
-            additions = {_freeze(v) for r in batch if r['op'] in {'set', 'add'} for v in _members(r.get('value'))}
-            removals = {_freeze(v) for r in batch if r['op'] == 'remove' for v in _members(r.get('value'))}
-            accumulate_commutes = not additions.intersection(removals)
-        if len(signatures) > 1 and not relation_commutes and not collection_commutes and not accumulate_commutes:
+        if len(signatures) > 1 and not relation_commutes and not collection_commutes:
             diagnostics.append(_issue('STATE_CONFLICT', '同一事件同sequence存在不相容变更，不能按ID或提交顺序猜测', batch[0].get('id')))
             state, active, partners, baseline = {'kind': 'conflict'}, [r['id'] for r in batch], {}, False
             continue
@@ -190,18 +171,6 @@ def reduce_changes(changes, definition, nodes, *, event_order, cut=None):
                 # 查询一律返回当前有效值列表（对齐原始契约）：单值属性也是长度 1 的列表。
                 state = {'kind': 'known', 'values': list(partners)} if partners else {'kind': 'absent'}
                 active = list(partners.values()) or [identifier]
-            elif accumulate:
-                # 累积型：每次提及都并列保留。set 与 add 等价（并入），remove 只减去指定值；
-                # 同一事件内多条也合并，不报冲突。
-                values = _members(value)
-                if op == 'remove':
-                    for v in values:
-                        known_members.pop(_freeze(v), None)
-                else:
-                    known_members.update({_freeze(v): v for v in values})
-                    baseline = True
-                active.append(identifier)
-                state = {'kind': 'known', 'values': list(known_members.values())} if baseline else {'kind': 'unknown'}
             elif many:
                 values = value if isinstance(value, list) else []
                 if op == 'set':
@@ -294,8 +263,6 @@ def validate_records(records, snapshot, existing_records=None, *, sources=None):
                 issues.append(_issue('DEFINITION', '定义须明确value_type与cardinality(one/many)', rid))
             if 'symmetric' in row and type(row['symmetric']) is not bool:
                 issues.append(_issue('DEFINITION', 'symmetric必须为布尔值', rid))
-            if 'accumulate' in row and type(row['accumulate']) is not bool:
-                issues.append(_issue('DEFINITION', 'accumulate必须为布尔值', rid))
             if row.get('target_node_types') and (not isinstance(row['target_node_types'], list) or row.get('value_type') != 'node'):
                 issues.append(_issue('DEFINITION', 'target_node_types只适用于node定义', rid))
             continue

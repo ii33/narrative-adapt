@@ -18,23 +18,44 @@ import accept_screenplay as qa
 from qa_live_observer import LiveObserver, observe_real_calls
 
 SOURCE_PATH = Path("C:/Users/youai/Downloads/飘邈之旅UTF8.txt")
-REPORT_ROOT = Path("data/acceptance/piaomiao-three-chapters")
 SOURCE_CHARS = 2027329
 HEADING_COUNT = 297
 HEADING_RE = r"(?m)^\s*第[零一二三四五六七八九十百千0-9]+集[^\n]*?第[零一二三四五六七八九十百千0-9]+章[^\n]*"
-# 前三章标题起点；第三章止于第四章起点。
-CHAPTER_STARTS = [146, 5783, 11193]
-TASK_START, TASK_END = 146, 16517
-CHAPTER_CHARS = 16371
+# 前四章的标题起点：选 N 章就是 [0, CHAPTER_STARTS[N])。
+CHAPTER_STARTS = [146, 5783, 11193, 16517]
+# 默认 1 章：一次 fine 提取几分钟跑完，适合改完提示词自检；
+# --chapters 3 是完整验收（约 20 分钟），留给"改完规则要一次总验"。
+SELECTED_CHAPTERS = 1
+TASK_START = CHAPTER_STARTS[0]
+TASK_END = CHAPTER_STARTS[SELECTED_CHAPTERS]
+CHAPTER_CHARS = TASK_END - TASK_START
+REPORT_ROOT = Path(f"data/acceptance/piaomiao-ch{SELECTED_CHAPTERS}-chapters")
 # 实测写死：text[146:16517] 的 UTF-8 sha256（第一次运行前用文件实算，不是抄来的）。
 CHAPTER_TEXT_SHA256 = "2e68b28d06f1d86ce169cb28b9e07d9be1a1c442d24975682ed201dfe8791dd6"
 
 # main() 会把 qa.TEXT 落成 input.txt；这里只放说明，原文不进验收目录。
 TEXT_NOTE = "外部版权原文按路径读取，未复制；范围、字数与摘要见 fixture.json 的 target_* 字段。"
-TASK = """请在当前空工程中处理《飘邈之旅》前三章的完整原文（源文本字符区间 146 到 16517，共 16371 字），按工程 fine 精细粒度逐章完整读取并提取。不缩短章节、不只做开头示例、不处理第四章。
-请自主读取标题小样，用 pattern 工具一次建立前三章切片；逐章完整读取并提取，允许按内容分批提交，但每批使用对应的实际原文范围与逐字证据。覆盖有叙事作用的主要及次要/无名人物、具体地点、关系（含互逆关系的正反两条）、心理认知、物品与持有者、事件及所属场景，不只列名词或梗概。核对人物身份与代词、叙事时空、关系方向、物品持有者及换手区间，事件归属场景。默认不提取动作，不为章节尚未结束的较大篇章创建临时主要故事。
-正常提取流程自主完成；报告各章实际完成范围、入库结果与存疑。若未完成不能声称三章全部完成。只处理指定三章，不修改其他业务对象，不另开任务或重试服务。"""
+TASK_TEMPLATE = """请在当前空工程中处理《飘邈之旅》前 {count} 章的完整原文（源文本字符区间 {start} 到 {end}，共 {chars} 字），按工程 fine 精细粒度逐章完整读取并提取。不缩短章节、不只做开头示例、不处理第 {next_chapter} 章。
+请自主读取标题小样，用 pattern 工具一次建立这 {count} 章的切片；逐章完整读取并提取，允许按内容分批提交，但每批使用对应的实际原文范围与逐字证据。覆盖有叙事作用的主要及次要/无名人物、具体地点、关系（含互逆关系的正反两条）、心理认知、物品与持有者、事件及所属场景，不只列名词或梗概。核对人物身份与代词、叙事时空、关系方向、物品持有者及换手区间，事件归属场景。默认不提取动作，不为章节尚未结束的较大篇章创建临时主要故事。
+正常提取流程自主完成；报告各章实际完成范围、入库结果与存疑。若未完成不能声称这几章全部完成。只处理指定的这几章，不修改其他业务对象，不另开任务或重试服务。"""
 OBSERVER = LiveObserver()
+
+
+def task_text() -> str:
+    """按本次选定的章数生成任务描述（默认 1 章，几分钟一轮）。"""
+    return TASK_TEMPLATE.format(count=SELECTED_CHAPTERS, start=TASK_START, end=TASK_END,
+                                chars=CHAPTER_CHARS, next_chapter=SELECTED_CHAPTERS + 1)
+
+
+def configure(chapters: int) -> None:
+    """选本次处理几章（1~3）：重算范围常量与报告目录。默认 1 章，几分钟一轮。"""
+    global SELECTED_CHAPTERS, TASK_START, TASK_END, CHAPTER_CHARS, REPORT_ROOT
+    if chapters not in (1, 2, 3):
+        raise SystemExit("--chapters 只接受 1、2、3（默认 1，约几分钟；3 约 20 分钟）")
+    SELECTED_CHAPTERS = chapters
+    TASK_START, TASK_END = CHAPTER_STARTS[0], CHAPTER_STARTS[chapters]
+    CHAPTER_CHARS = TASK_END - TASK_START
+    REPORT_ROOT = Path(f"data/acceptance/piaomiao-ch{chapters}-chapters")
 
 
 def load_input():
@@ -44,10 +65,12 @@ def load_input():
     headings = list(re.finditer(HEADING_RE, text))
     assert len(text) == SOURCE_CHARS, f"原文长度变了：{len(text)}"
     assert len(headings) == HEADING_COUNT, f"章节标题数变了：{len(headings)}"
-    assert [match.start() for match in headings[:3]] == CHAPTER_STARTS, [match.start() for match in headings[:3]]
-    assert headings[3].start() == TASK_END, f"第四章起点变了：{headings[3].start()}"
+    assert [match.start() for match in headings[:4]] == CHAPTER_STARTS, [match.start() for match in headings[:4]]
+    assert headings[SELECTED_CHAPTERS].start() == TASK_END, f"第 {SELECTED_CHAPTERS + 1} 章起点变了"
     assert TASK_END - TASK_START == CHAPTER_CHARS
-    assert qa.digest(text[TASK_START:TASK_END].encode()) == CHAPTER_TEXT_SHA256, "前三章文本摘要变了"
+    if SELECTED_CHAPTERS == 3:
+        # 三章全跑是完整验收：摘要写死，素材一换就硬失败；单章/双章只比对标题边界。
+        assert qa.digest(text[TASK_START:TASK_END].encode()) == CHAPTER_TEXT_SHA256, "前三章文本摘要变了"
     return text, headings
 
 
@@ -112,7 +135,7 @@ def _observations(ops, graph, records):
             "sample": identity[:10],
             "note": "属性名恰好等于分类词表项时 category_source 应为 identity（本轮新规则）；只观察，不判失败。",
         },
-        "accumulated_by_add": {
+        "cross_event_accumulation": {
             "add_record_count": add_records,
             "multi_event_property_count": len(multi),
             "records_in_multi_event_properties": sum(len(events) for events in multi.values()),
@@ -120,7 +143,7 @@ def _observations(ops, graph, records):
                 {"node_id": key[0], "property": key[1], "event_count": len(events)}
                 for key, events in list(multi.items())[:10]
             ],
-            "note": "同一属性在多事件用 add 累积而非一次 set 覆盖的记录规模（本轮提示词新口径）；只观察，不判失败。",
+            "note": "同一属性跨多个事件仍用 add 累积（而不是后写取代）的规模。按现行规则应接近 0：同一属性的先后是取代关系；并列只发生在同一事件点多值、以及不同属性名两种情形。不为 0 说明模型把先后写成了并列，属提示词要盯的点；只观察，不判失败。",
         },
     }
 
@@ -212,7 +235,7 @@ def validate(ops, fixture, screenplay, calls, report):
         "live_observation": OBSERVER.snapshot(),
         "coverage_limit": "提交的范围声明与已读全文不等于穷尽提取：这里只报实际证据坐标与事件分布，语义完整性需人工与众章原文对照。不设事件条数配额。",
     }
-    report["observations_are_not_failures"] = ["identity_category", "accumulated_by_add"]
+    report["observations_are_not_failures"] = ["identity_category", "cross_event_accumulation"]
     report["input_assets"] = {
         "source_path": str(SOURCE_PATH),
         "source_chars": fixture["source_chars"],
@@ -345,14 +368,14 @@ def recheck(directory):
 
 def main():
     text, _ = load_input()
-    qa.seed, qa.TEXT, qa.TASK = seed, TEXT_NOTE, TASK
+    qa.seed, qa.TEXT, qa.TASK = seed, TEXT_NOTE, task_text()
     qa.PROMPT_VERSION = "real-piaomiao-three-chapters-fine/1"
-    qa.FIXTURE_ORIGIN = "外部版权原文经 Operations 原样导入（只按路径读，不复制）；由真实模型自行建切片并提取前三章。"
+    qa.FIXTURE_ORIGIN = f"外部版权原文经 Operations 原样导入（只按路径读，不复制）；由真实模型自行建切片并提取前 {SELECTED_CHAPTERS} 章。"
     with observe_real_calls(OBSERVER):
         exit_code = qa.main(
             validate=validate,
             required_tools=["submit_extraction"],
-            prompt_factory=lambda fixture: TASK + "\nsource_id=" + fixture["source_id"],
+            prompt_factory=lambda fixture: task_text() + "\nsource_id=" + fixture["source_id"],
             use_writing_target=False,
             allow_extraction_change=True,
             on_started=OBSERVER.started,
@@ -379,6 +402,17 @@ def _argv():
 
     def given(name):
         return any(item == name or item.startswith(name + "=") for item in argv)
+
+    if given("--chapters"):
+        for index, item in enumerate(argv):
+            if item == "--chapters" and index + 1 < len(argv):
+                configure(int(argv[index + 1]))
+                del argv[index:index + 2]
+                break
+            if item.startswith("--chapters="):
+                configure(int(item.split("=", 1)[1]))
+                del argv[index]
+                break
 
     if not given("--output"):
         argv += ["--output", str(REPORT_ROOT / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))]
