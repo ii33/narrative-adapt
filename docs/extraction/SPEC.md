@@ -22,13 +22,13 @@
 | `U-04` | 关系方向与反向记录 | 按关系语义判断：**互逆关系**（父子、师生）正反两条都要记——A 是 B 的父亲，B 就是 A 的孩子；**单向关系**（喜欢、信任）只记有原文依据的方向；`symmetric` 只表示同一个值对称成立，不负责反向（`E-27`）。 |
 | `U-05` | 精细级要不要给配角建档 | 要。精细级面向改编：**出场人物都要建档**：建人物节点并写清能支撑造型的属性，**提取阶段不建资料卡**；视觉资产据此建立。次要、无名同样建档，不按主线重要性筛除（`E-17`）。 |
 | `U-06` | 「明确指定」「实质进展」「清晰概括名」这类没有判定口径的措辞 | 有意留白，不写机械判据，靠模型判断与人工复核（`E-01`–`E-03`、`E-30` 一类只写方向不写阈值）。 |
-| `U-07` | 属性名能不能就是分类名 | 不能。**分类是分组**，一个类下该并列多条具体属性（外貌 → 身高、发型、瞳色）；属性名写这条变更指的具体方面。拿分类名当属性名，一个类里就只剩一条，后面几次提及会被覆盖。审计报 `category_as_property`（`E-24`）。 |
+| `U-07` | 属性名能不能就是分类名 | **可以，而且鼓励**：属性名恰好是分类词表里的一项时，它自然就属于这一类（`category_source=identity`），不必为分类另造名字，也不报错、不拦。一个类下允许并列多条属性（外貌 → 身高、发型、瞳色）。 |
 
-到 2026-11 为止，`U-01`–`U-05` 与 `U-07` 已落进提示词（`extraction` v28、`granularity_fine` v8、`review` v12），`U-06` 永远留在「仅提示词」一侧。
+到 2026-11 为止，`U-01`–`U-05` 与 `U-07` 已落进提示词（`extraction` v29、`granularity_fine` v8、`review` v12），`U-06` 永远留在「仅提示词」一侧。
 
 ## 1 范围、引用与批次
 
-- 范围：原文是唯一事实来源，引文须逐字命中原文（`I-13`）；章节标题、原文切片和提交批次只作阅读索引与处理范围，不决定场景或事件边界（`M-06`）。来源：本页 §4（原 `docs/MODEL.md` 第 2 节）与提取提示词「提取通用要求」v28。
+- 范围：原文是唯一事实来源，引文须逐字命中原文（`I-13`）；章节标题、原文切片和提交批次只作阅读索引与处理范围，不决定场景或事件边界（`M-06`）。来源：本页 §4（原 `docs/MODEL.md` 第 2 节）与提取提示词「提取通用要求」v29。
 - 引用：本页与其它文档一律按「编号 + 结论」引用（§0），编号集合与出处见 `docs/README.md`；五层概念见 `docs/MODEL.md` 第 1 节。
 - 批次：一小批一次提交；本批引用 `@n` 从 1 起，数组索引从 0 起（见 §5「暂存、入库与编号」）；局部修补用 `patch_extraction_submission`（`I-28`）。
 
@@ -74,27 +74,27 @@
   - 程序：仅提示词，无校验；互查 `M-01`
   - 反例：按「一段一个事件」把一场铺陈切成 6 个事件。
 - `E-06` 场景边界按「现场是否还连续」判断；同一地点隔了很久、或同一时刻换到远处，都另起一场。
-  - 出处：`extraction` v28 ·「同一地点隔了很久，或同一时刻换到远处，都另起一场」
+  - 出处：`extraction` v29 ·「同一地点隔了很久，或同一时刻换到远处，都另起一场」
   - 程序：仅提示词，无校验；互查 `M-02`
   - 反例：把「三天后，同一间屋子」并进前一场。
 - `E-07` 大事件边界按「阶段是否换了」判断，同一语境下连续的一大段进展按披露顺序首尾相接。
-  - 出处：`extraction` v28 ·「判断：这一段进展是否换了阶段？」
+  - 出处：`extraction` v29 ·「判断：这一段进展是否换了阶段？」
   - 程序：仅提示词，无校验；互查 `M-03`
   - 反例：阶段没换，只因为换了地点就给这一段新建大事件。
 - `E-08` 章节标题、原文切片与提交批次只作阅读索引与处理范围，不用来切场景或事件的边界。
-  - 出处：`extraction` v28 ·「不是场景或事件的边界」
+  - 出处：`extraction` v29 ·「不是场景或事件的边界」
   - 程序：仅提示词，无校验；互查 `M-06`
   - 反例：章末的停顿就收尾一个事件，换章处再开一个新事件。
 - `E-09` 事件默认只写一条足以支持其身份与核心发生的代表性引文，不为起因、过程、结果各写一条。
-  - 出处：`extraction` v28 ·「事件默认只提交一条有代表性的准确原文引文」
+  - 出处：`extraction` v29 ·「事件默认只提交一条有代表性的准确原文引文」
   - 程序：`I-13`（只管逐字与唯一，不限条数）；互查 `M-13`
   - 反例：一个事件挂「起因」「经过」「结果」三条引文。
 - `E-10` 场景、大事件、主要故事不填 `quotes`／`closing_quote`，上层证据由程序从下级派生。
-  - 出处：`extraction` v28 ·「不由模型填写quotes或closing_quote」
+  - 出处：`extraction` v29 ·「不由模型填写quotes或closing_quote」
   - 程序：`I-10`（容器不落自身 `quotes`）
   - 反例：给场景手写一条 `quotes` 想证明它存在。
 - `E-11` 主要故事的完成边界取下级证据派生的 `completion`，不以章节结束或批次交完代替语义闭合。
-  - 出处：`extraction` v28 ·「不要求模型提供closing_quote」
+  - 出处：`extraction` v29 ·「不要求模型提供closing_quote」
   - 程序：`I-33`；互查 `M-04`
   - 反例：读完第 3 卷就把 T 的完成点定在第 3 卷末章。
 - `E-12` 动作默认不提取：只在用户明确要求时创建，且不把动作改标成事件。
@@ -109,7 +109,7 @@
   - 程序：`I-16`；互查 `M-12`
   - 反例：为补前情，把范围外上一段的句子当作本批证据提交。
 - `E-14` 拿不准的事实放进 `uncertainties`，不补默认值、不猜原文没交代的属性。
-  - 出处：`extraction` v28 ·「拿不准放进 uncertainties，不补默认值」
+  - 出处：`extraction` v29 ·「拿不准放进 uncertainties，不补默认值」
   - 程序：仅提示词，无校验；互查 `M-08`（未提及就留白）
   - 反例：原文没写年龄，按常识填「二十岁」。
 - `E-15` 按语境与引用依赖分批提交，一批语义完整就交，不攒成一份大草稿。
@@ -117,7 +117,7 @@
   - 程序：`I-28`
   - 反例：把整章读完再一次提交 300 个节点。
 - `E-16` 跨批复用已有对象时一律指向同一个已有 ID，不重复建同义节点。
-  - 出处：`extraction` v28 ·「原文里同一个人物、地点、物品、事件就是同一个」
+  - 出处：`extraction` v29 ·「原文里同一个人物、地点、物品、事件就是同一个」
   - 程序：仅提示词，无校验（`ID` 只管记录 ID 唯一）；互查 `M-15`
   - 反例：上一批已给 `P1`，这一批又给同一人物新建 `P7`。
 
@@ -132,42 +132,42 @@
   - 程序：仅提示词，无校验；互查 `M-15`（同名与位置相近不作依据）
   - 反例：两个「老人」被拆成两个人物节点，各写一段身世。
 - `E-19` 每个活动物品都在事件处记 `world` 持有者状态（节点引用、「无」或「未知」）；清除、遗漏与认知记录都不能代替未知。
-  - 出处：`extraction` v28 ·「每个活动物品都要有明确的持有者状态」
+  - 出处：`extraction` v29 ·「每个活动物品都要有明确的持有者状态」
   - 程序：`I-05`
   - 反例：物品最后一次出现后留空，事后再解释成「不知道在谁手里」。
 - `E-20` 每个事件都在自身事件处记 `world` 地点（`either` 节点引用或显式「无」「未知」）；场景不记地点，上层地点与认知都不能代替。
-  - 出处：`extraction` v28 ·「场景不记地点，只有事件自身的 world 地点有效」
+  - 出处：`extraction` v29 ·「场景不记地点，只有事件自身的 world 地点有效」
   - 程序：`I-01`、`I-03`
   - 反例：地点写在所属场景上，事件自己留空。
 
 ### 3.5 属性与状态（`extraction`）
 
 - `E-21` 属性变更只写在事件处：`set`／`add`／`remove` 带 `value`，`clear`／`unknown` 不带，`at_event` 指向该事件自身。
-  - 出处：`extraction` v28 ·「属性变更：set/add/remove 带 value，clear/unknown 不带」
+  - 出处：`extraction` v29 ·「属性变更：set/add/remove 带 value，clear/unknown 不带」
   - 程序：`I-19`、`I-18`
   - 反例：用 `clear` 外加一个空的 `value` 数组表示清空。
 - `E-22` `cardinality` 只约束录入：`one` 在同一事件点只允许一个当前值（多个对方就是多条记录），`many` 才把多项装在同一条记录里；读取一律返回全部当前有效值。
-  - 出处：`extraction` v28 ·「换个对方还是同一个属性就用」
+  - 出处：`extraction` v29 ·「换个对方还是同一个属性就用」
   - 程序：`I-20`；互查 `M-09`
   - 反例：把「师父」改成 `many` 来容纳柯镇恶与洪七公。
 - `E-23` 认知与主张只在事件里明确追加时才写，值优先用对象引用；世界事实变化不自动改写认知。
-  - 出处：`extraction` v28 ·「世界事实变化不自动改写角色认知」
+  - 出处：`extraction` v29 ·「世界事实变化不自动改写角色认知」
   - 程序：`I-12`；互查 `M-08`
   - 反例：主角得知真相后，回头把全篇所有人物的旧认知批量改成新认知。
-- `E-24` 每条属性变更给出该节点类型分类表里的一个大类，或显式写「未分类」；属性名写这条变更说的具体方面，**不拿分类名当属性名**（一个类下该并列多条）；拿不准分类就写「未分类」，不硬凑（`U-07`）。
-  - 出处：`extraction` v28 ·「拿不准就写「未分类」，不硬凑」
+- `E-24` 每条属性变更给出该节点类型分类表里的一个大类，或显式写「未分类」；一个类下允许并列多条属性，属性名直接取分类名也完全可以（自然归入该类，`U-07`）；拿不准分类就写「未分类」，不硬凑。
+  - 出处：`extraction` v29 ·「拿不准就写「未分类」，不硬凑」
   - 程序：无专属 `I-xx`（`category` 是草稿必填项，见 §5「属性分类」）；互查 `M-07`
   - 反例：把「身高」硬塞进「外貌」只为填满这一格。
 - `E-25` 进展属性写在直属下一级容器上：`storyline_progress` 记在大事件、`big_event_progress` 记在场景；写更上层会被跳过，不迁移旧层级。
-  - 出处：`extraction` v28 ·「部／卷的进展记在 B（storyline_progress）、B 的进展记在 S（big_event_progress）」
+  - 出处：`extraction` v29 ·「部／卷的进展记在 B（storyline_progress）、B 的进展记在 S（big_event_progress）」
   - 程序：`I-11`
   - 反例：把 `storyline_progress` 直接写在主要故事上。
 - `E-26` 容器属性与某个下属事件同组时以事件记录为准：容器写入被丢弃并回 `info`，不换近义属性名重试。
-  - 出处：`extraction` v28 ·「写入按判重规则丢弃并给 info」
+  - 出处：`extraction` v29 ·「写入按判重规则丢弃并给 info」
   - 程序：`I-09`；互查 `M-16`
   - 反例：换个近义属性名，把同一条状态再写进容器。
 - `E-27` 属性名描述取值相对节点的身份、关系或作用。方向按语义核对：互逆关系（父子、师生）正反两条都要记——A 是 B 的父亲，B 就是 A 的孩子；单向关系（喜欢、信任）只记有原文依据的方向；`symmetric` 只表示同一个值对称成立，不负责反向（`U-04`）。先查已有定义再新增，定义冲突时定向读取或显式更正，不换近义名绕过。
-  - 出处：`extraction` v28 ·「互逆关系（父子、师生）正反两条都要记」
+  - 出处：`extraction` v29 ·「互逆关系（父子、师生）正反两条都要记」
   - 程序：`I-20`（`symmetric` 为严格布尔）
   - 反例：A 是 B 的父亲，只记这一条、不给 B 记「孩子」；或反过来，凭「喜欢」猜对方也喜欢。
 
@@ -213,11 +213,11 @@
 ### 3.7 记录形状（`extraction`）
 
 - `E-37` 不手算 `sequence`、不填 `identity_note` 等存储字段：编号、坐标、去重与预检都由程序完成。
-  - 出处：`extraction` v28 ·「不手算 sequence、不填 identity_note 等存储字段」
+  - 出处：`extraction` v29 ·「不手算 sequence、不填 identity_note 等存储字段」
   - 程序：`I-18`（自带 `sequence` 按 `DRAFT_SCHEMA` 拒收）；互查 `M-12`
   - 反例：为了让变更排序稳定，自己给三条变更写 `sequence: 1/2/3`。
 - `E-38` 同一事件的多条变更共用同一个 `at_event`，不为挂属性另造事件。
-  - 出处：`extraction` v28 ·「同一事件的多条变更共用 at_event，不为挂属性另造事件」
+  - 出处：`extraction` v29 ·「同一事件的多条变更共用 at_event，不为挂属性另造事件」
   - 程序：`I-18`
   - 反例：为把一条属性挂进时间线，复制出一个「补充事件」。
 
@@ -384,7 +384,7 @@ flowchart LR
 
 分类保存在 `property_change.category`，提取草稿里它是必填项：填该节点类型分类表里的一个大类，或显式填「未分类」。移动分类通过 `Operations.property_categorize` 直接编辑所选取值的当前字段；不追加分类日志、撤回记录或别名映射。工程分类词表保存在工程配置，按对象类型提供默认分组，「未分类」是词表末项，也是唯一的人工「暂不归类」选项。
 
-分类只来自显式值，程序不做任何推断：不按属性名猜（「身高」不再自动落到「外貌」），也不按取值猜。已保存的记录里没有 `category` 的（旧工程或手工写入），读取时显示为「未分类」，`category_source` 为 `default_unclassified`；有显式值的记录为 `explicit`。程序不会自动补写分类，也不会批量回填——要归类就在浏览页用 `property_categorize` 手动选，或显式保留未分类。
+分类来自显式值，或来自属性名本身就是分类名这一种情形（`identity`：属性叫「外貌」就归「外貌」）。除此之外程序不做推断：不按近义词猜（「身高」不会自动落到「外貌」），也不按取值猜。已保存的记录里没有 `category` 的（旧工程或手工写入），读取时显示为「未分类」，`category_source` 为 `default_unclassified`；有显式值的记录为 `explicit`。程序不会自动补写分类，也不会批量回填——要归类就在浏览页用 `property_categorize` 手动选，或显式保留未分类。
 
 分类不在当前词表里时，静态检查报 `category_unknown`（warning），不影响取值；完全未分类的记录由 `category_unassigned` 汇总成一条工程级提示（「N 条属性未分类」），没有可跳转的具体对象。
 
@@ -411,7 +411,7 @@ flowchart LR
 
 ## 6 诊断码总表
 
-提取域的 **88 个诊断码**逐条登记。拿到任一个码，本表能回答四件事：谁触发、谁处理、哪段代码、哪条测试。反向覆盖由 `tests/test_extraction_spec.py::test_extraction_domain_codes_are_all_documented` 强制：§6 少写一个提取域的码就红。
+提取域的 **87 个诊断码**逐条登记。拿到任一个码，本表能回答四件事：谁触发、谁处理、哪段代码、哪条测试。反向覆盖由 `tests/test_extraction_spec.py::test_extraction_domain_codes_are_all_documented` 强制：§6 少写一个提取域的码就红。
 
 **怎么读**
 
@@ -421,7 +421,7 @@ flowchart LR
 - 「锚点」是抛出该码的函数（不是行号）；一个码有多处触发时列主锚点，其余用顿号分隔。
 - 「覆盖测试」只写真实存在且**断言了该码明文**的用例；写 `—` 的表示没有这样的用例，清单与处置建议见文末「附：无测试覆盖的码」。
 
-**基数**：16 个提取域模块（`extraction`、`extraction_draft`、`extraction_staging`、`extraction_refs`、`property_core`、`property_operations`、`property_audit`、`event_location`、`item_possession`、`containment_refs`、`container_evidence`、`graph_service`、`project_check`、`temporal_state`、`storyline_ranges`、`business_staging`）共出现 **88** 个唯一码（94 个「模块×码」定义点；`FORMAT`、`EVIDENCE`、`REVISION`、`DISCLOSURE` 等跨模块重复），§6 覆盖 **87**（100%）。按处理方：模型改草案 **61**、用户决定 **22**、程序跳过 **4**、待确认 **0**。有断言用例 **39** 个，无 **48** 个。
+**基数**：16 个提取域模块（`extraction`、`extraction_draft`、`extraction_staging`、`extraction_refs`、`property_core`、`property_operations`、`property_audit`、`event_location`、`item_possession`、`containment_refs`、`container_evidence`、`graph_service`、`project_check`、`temporal_state`、`storyline_ranges`、`business_staging`）共出现 **87** 个唯一码（94 个「模块×码」定义点；`FORMAT`、`EVIDENCE`、`REVISION`、`DISCLOSURE` 等跨模块重复），§6 覆盖 **87**（100%）。按处理方：模型改草案 **61**、用户决定 **22**、程序跳过 **4**、待确认 **0**。有断言用例 **39** 个，无 **48** 个。
 
 扫描口径（不是凭印象）：`tests/test_extraction_spec.py::_module_codes` 用 AST 只认三种定义点——dict 的 `code` 键、`code=` 关键字、issue 构造函数的字面量实参——锚点取最近的外层函数，`code` 是变量时按同名局部变量展开；「覆盖测试」列由 `test_section6_rows_bind_real_anchors_and_tests` 按引号形式回查用例源码。16 个模块里**没有** `f"{kind}_REQUIRED"` 式的动态拼接；只有两处动态：`src/narrative/extraction_draft.py::_prepare` 的 `item.get("code", "EXTRACTION_INFO")` 兜底（默认值即 §6 里的 `EXTRACTION_INFO`）和 `src/narrative/item_possession.py::item_possession_issues` 里按冲突类型赋给局部变量 `code` 的两条（`ITEM_HOLDER_CONFLICT`／`ITEM_HOLDER_VALUE`，已逐条登记）。`project_check.py` 自己不产码，它是聚合器（把 `graph_service`、`property_core`、`temporal_state`、`property_audit` 的码加上定位后输出）。
 
@@ -533,7 +533,6 @@ flowchart LR
 | `holder_missing` | 认知／声称记录没有持有人 | 用户决定 | `I-12`、`E-30` | `src/narrative/property_audit.py::audit_properties` | — |
 | `holder_unknown` | 记录的持有人不在节点表里 | 用户决定 | `I-12` | `src/narrative/property_audit.py::audit_properties` | — |
 | `category_unknown` | 分类不在该节点类型的分类词表里（warning，不影响取值） | 用户决定 | `E-24` | `src/narrative/property_audit.py::audit_properties` | tests/test_property_category_contract.py::test_category_outside_the_vocabulary_is_diagnosed |
-| `category_as_property` | 属性名和分类名相同（分类是分组，一个类下该并列多条具体属性；warning，不影响取值） | 模型改草案 | `E-24`、`U-07` | `src/narrative/property_audit.py::audit_properties` | tests/test_property_category_contract.py::test_property_named_like_a_category_is_diagnosed |
 | `category_unassigned` | 工程里有 N 条属性未分类，汇总成一条工程级 `info` | 用户决定 | `E-24` | `src/narrative/property_audit.py::audit_properties` | tests/test_project_check_locations.py::test_uncategorized_aggregate_is_project_level_in_a_real_check |
 | `duplicate_value` | 同一披露位置重复记录同一个值 | 用户决定 | `M-10` | `src/narrative/property_audit.py::audit_properties` | tests/test_relation_contract.py::test_exact_duplicate_at_same_disclosure_is_still_reported |
 | `repeated_value` | 多个位置重申同一个值（允许，只作 `info`） | 用户决定 | — | `src/narrative/property_audit.py::audit_properties` | — |
@@ -648,7 +647,7 @@ flowchart LR
 | id | 当前 version | 模板归属 | 覆盖的 E 条目 | 规范化状态 |
 | --- | --- | --- | --- | --- |
 | `system` | v11 | extract / screenplay / storyboard | `E-01` `E-02` `E-03` `E-04` | 已规范化（§3.1） |
-| `extraction` | v28 | extract | `E-06` `E-07` `E-08` `E-09` `E-10` `E-11` `E-14` `E-16` `E-19` `E-20` `E-21` `E-22` `E-23` `E-24` `E-25` `E-26` `E-27` `E-37` `E-38` | 已规范化（§3.2–§3.5、§3.7） |
+| `extraction` | v29 | extract | `E-06` `E-07` `E-08` `E-09` `E-10` `E-11` `E-14` `E-16` `E-19` `E-20` `E-21` `E-22` `E-23` `E-24` `E-25` `E-26` `E-27` `E-37` `E-38` | 已规范化（§3.2–§3.5、§3.7） |
 | `granularity_fine` | v8 | extract | `E-12` `E-17` `E-18` | 已规范化（§3.2、§3.4） |
 | `conversation_actions` | v3 | extract | `E-36` | 已规范化（§3.6） |
 | `granularity_standard` | v6 | — | `E-05` | 已规范化（§3.2） |

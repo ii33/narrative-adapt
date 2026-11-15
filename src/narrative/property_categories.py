@@ -131,10 +131,12 @@ def resolve(
 ) -> tuple[str, str]:
     """The category of one value record and where the decision came from.
 
-    Two answers only: ``explicit`` when the change carries a category (written by
-    the model or picked by a human), ``default_unclassified`` when it carries
-    none. Nothing is inferred from the property name or the value, and a record
-    without a category is never filed under a specific one.
+    三种答案：``explicit``（变更自带分类，模型或人选的）、``identity``（属性名本身
+    就是分类词表里的一项——「外貌」既是属性名也是分类名，那它自然属于这一类，
+    不必再选一次）、``default_unclassified``（既没写分类、名字也不是分类名）。
+
+    除「属性名恰好等于分类名」这一条以外不做任何推断：不按近义词猜、不按取值猜，
+    没有分类的记录也不会被塞进某个具体分类。
     """
     record_id = record.get("id")
     if overrides and isinstance(record_id, str) and record_id in overrides:
@@ -142,6 +144,11 @@ def resolve(
     explicit = record.get("category")
     if isinstance(explicit, str) and explicit.strip():
         return explicit.strip(), "explicit"
+    property_id = record.get("property_id")
+    if isinstance(property_id, str):
+        name = property_id.strip()
+        if name and name != UNCLASSIFIED and name in vocabulary_for(node_type, config):
+            return name, "identity"
     return UNCLASSIFIED, "default_unclassified"
 
 

@@ -97,21 +97,24 @@ def test_a_category_holds_several_properties_side_by_side(ops):
     assert len(payload["properties"]) == 3
 
 
-def test_property_named_like_a_category_is_diagnosed(ops):
-    """属性名写成分类名，一个类里就只剩一条——审计要说出来。"""
+def test_a_property_named_like_its_category_lands_in_that_category(ops):
+    """属性名就叫「外貌」时自然属于「外貌」这一类：不报错、不用另选分类。"""
     source = ops.import_source("分类当属性名", TEXT)
     accepted = ops.submit_extraction(source, draft(category="外貌", property_name="外貌"))
     assert accepted["status"] == "accepted", accepted
-    issue = next(row for row in ops.check_project()["issues"] if row["code"] == "category_as_property")
-    assert "外貌" in issue["message"]
-    assert "并列" in issue["message"]
+    row = summary_row(ops, "外貌")
+    assert row["category"] == "外貌"
+    assert not any("分类" in issue["message"] and issue["severity"] == "error"
+                   for issue in ops.check_project()["issues"])
 
 
-def test_a_specific_aspect_inside_a_category_is_not_diagnosed(ops):
-    source = ops.import_source("具体方面", TEXT)
-    accepted = ops.submit_extraction(source, draft(category="外貌", property_name="身高"))
-    assert accepted["status"] == "accepted", accepted
-    assert not any(row["code"] == "category_as_property" for row in ops.check_project()["issues"])
+def test_property_named_like_a_category_resolves_without_an_explicit_value():
+    """没写分类也行：属性名本身是分类名，就按 identity 归位。"""
+    assert property_categories.resolve({"property_id": "外貌"}, "person") == ("外貌", "identity")
+    assert property_categories.resolve({"property_id": "身高"}, "person") == (
+        "未分类", "default_unclassified")
+    assert property_categories.resolve({"property_id": "外貌", "category": "未分类"}, "person") == (
+        "未分类", "explicit")
 
 
 def test_resolve_has_only_explicit_and_default_unclassified():
