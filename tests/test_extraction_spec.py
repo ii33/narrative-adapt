@@ -12,12 +12,18 @@ MODEL 第 2、3 节搬了进来；P2 把提示词里可判定的硬约束规范�
    ``TEMPLATE_PROMPT_KEYS`` 每个模板用到的提示词；
 6. §3 的 ``E-xx`` 编号唯一连续、四要素齐全、每条至少一个 ``I-xx``／``M-xx`` 交叉引用，
    且 ``出处`` 指向真实提示词条目（写了版本就必须等于运行时版本）；
-7. §5 的「仅提示词约束」表只能是指针：每行都指到某个 ``E-xx``，不允许两处各写一份。
+7. §5 的「仅提示词约束」表只能是指针：每行都指到某个 ``E-xx``，不允许两处各写一份；
+8. §6 的提取域**反向覆盖**：16 个提取域模块里抛出的每个诊断码都必须在 §6 有一行
+   （``test_extraction_domain_codes_are_all_documented``，白名单要写原因）；
+9. §6 每行的锚点、覆盖测试、处理方、相关编号都真实可用——锚点是真函数、测试文件真的存在、
+   处理方只取三种、引用的 ``I-xx``／``E-xx``／``M-xx`` 都能在本页查到；
+10. §5 出现的码必须在 §6 有行；§6 里「未挂规则的码」附录必须与 ``相关编号`` 为 ``—`` 的行一致。
 
 纯文本，不建工程、不碰数据库，默认套件可并行跑。
 """
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -261,3 +267,223 @@ def test_prompt_only_table_points_at_e_items():
     assert not unassigned, (
         "§5「仅提示词约束」里这些行没有指到 E-xx（允许两处各写一份即失守）：\n"
         + "\n".join(unassigned))
+
+
+# --- P3：§6 诊断码总表 -------------------------------------------------------------
+
+# 提取域 = 提取任务的写入、校验、状态推导、静态检查这几个模块。§6 必须 100% 覆盖它们的码。
+EXTRACTION_DOMAIN_MODULES = (
+    "extraction", "extraction_draft", "extraction_staging", "extraction_refs",
+    "property_core", "property_operations", "property_audit", "event_location",
+    "item_possession", "containment_refs", "container_evidence", "graph_service",
+    "project_check", "temporal_state", "storyline_ranges", "business_staging",
+)
+
+# 反向覆盖的白名单：只有「扫得到、但确实不该进 §6」时登记，键是 ``模块名:码``，
+# 值一句话写清为什么。空字典是当前的事实：一个都没漏。
+CODE_EXCEPTIONS: dict[str, str] = {}
+
+# 会「抛出诊断码」的构造函数名；第一实参或 ``code=`` 是码。
+ISSUE_FUNCS = {"_issue", "report", "issue", "_problem", "_finding"}
+CODE_SHAPE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+CODE_HANDLERS = ("模型改草案", "用户决定", "程序跳过")
+SECTION_6 = SECTION_HEADINGS[6]
+SECTION_5 = SECTION_HEADINGS[5]
+UNRULED_HEADING = "### 附：未挂规则的码"
+UNTESTED_HEADING = "### 附：无测试覆盖的码"
+ROW_CODE = re.compile(r"`([A-Za-z][A-Za-z0-9_]*)`")
+ANCHOR = re.compile(r"`([A-Za-z0-9_./\-]+\.py)::([A-Za-z_][A-Za-z0-9_]*)`")
+TEST_REF = re.compile(r"(tests/[A-Za-z0-9_]+\.py)(?:::([A-Za-z0-9_]+))?")
+M_RULE = re.compile(r"^\s*-\s+`(M-\d{2})`")
+
+
+def _assigned_code_literals(node) -> set[str]:
+    """函数内 ``code = 'A'`` / ``code, message = 'A', '…'`` 给局部变量赋的码。"""
+    found: set[str] = set()
+    for child in ast.walk(node):
+        if not isinstance(child, ast.Assign):
+            continue
+        targets: list[str] = []
+        for target in child.targets:
+            if isinstance(target, ast.Name):
+                targets.append(target.id)
+            elif isinstance(target, ast.Tuple):
+                targets.extend(item.id for item in target.elts if isinstance(item, ast.Name))
+        if "code" not in targets:
+            continue
+        for item in ast.walk(child.value):
+            if (isinstance(item, ast.Constant) and isinstance(item.value, str)
+                    and CODE_SHAPE.match(item.value) and "_" in item.value):
+                found.add(item.value)
+    return found
+
+
+def _module_codes(path: Path) -> set[str]:
+    """一个模块抛出的诊断码：dict 的 ``code`` 键、``code=``、issue 构造函数的字面量实参。
+
+    ``code`` 值是变量时（``item_possession.py`` 按冲突类型分支赋值）按同名局部变量的
+    字面量展开；``.get("code", "EXTRACTION_INFO")`` 的默认值也算——运行时它就是真正的码。
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    codes: set[str] = set()
+    for owner in ast.walk(tree):
+        if not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        local = _assigned_code_literals(owner)
+        for node in ast.walk(owner):
+            if isinstance(node, ast.Dict):
+                keys = [key.value if isinstance(key, ast.Constant) else None for key in node.keys]
+                if "code" in keys:
+                    value = node.values[keys.index("code")]
+                    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                        codes.add(value.value)
+                    elif isinstance(value, ast.Name):
+                        codes |= local
+            if not isinstance(node, ast.Call):
+                continue
+            keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+            if isinstance(keywords.get("code"), ast.Constant):
+                codes.add(keywords["code"].value)
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            if name == "get" and len(node.args) >= 2:
+                key, default = node.args[0], node.args[1]
+                if (isinstance(key, ast.Constant) and key.value == "code"
+                        and isinstance(default, ast.Constant) and isinstance(default.value, str)):
+                    codes.add(default.value)
+            if name in ISSUE_FUNCS and node.args:
+                first = node.args[0]
+                branches = (first.body, first.orelse) if isinstance(first, ast.IfExp) else (first,)
+                for branch in branches:
+                    if isinstance(branch, ast.Constant) and isinstance(branch.value, str):
+                        codes.add(branch.value)
+    return {code for code in codes if CODE_SHAPE.match(code)}
+
+
+def _scanned_codes() -> dict[str, set[str]]:
+    """模块名 -> 该模块抛出的码。"""
+    return {module: _module_codes(ROOT / "src" / "narrative" / f"{module}.py")
+            for module in EXTRACTION_DOMAIN_MODULES}
+
+
+def _subsection(heading: str) -> list[str]:
+    """取 ``heading`` 到下一个 ``##``／``###`` 标题之间的正文行。"""
+    lines = _spec_text().splitlines()
+    assert heading in lines, f"SPEC 缺少小节：{heading}"
+    body = []
+    for line in lines[lines.index(heading) + 1:]:
+        if line.startswith(("## ", "### ")):
+            break
+        body.append(line)
+    return body
+
+
+def _section6_rows() -> dict[str, list[str]]:
+    """§6 主表：码 -> 六列的单元格（表头、分隔行、附表的行都不算）。"""
+    rows: dict[str, list[str]] = {}
+    for line in _section(_spec_text(), SECTION_6):
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        match = ROW_CODE.fullmatch(cells[0]) if len(cells) == 6 else None
+        if match:
+            rows[match.group(1)] = cells
+    return rows
+
+
+def _appendix_codes(heading: str) -> set[str]:
+    """附表第一列里的码。"""
+    return {match.group(1) for line in _subsection(heading)
+            if line.startswith("|") and (match := re.match(r"^\|\s*`([A-Za-z][A-Za-z0-9_]*)`", line))}
+
+
+def test_extraction_domain_codes_are_all_documented():
+    """反向覆盖：提取域模块抛出的每个码都必须在 §6 有行（这里失败=文档漏了码）。"""
+    documented = set(_section6_rows())
+    assert documented, "§6 主表空了（表头应是 | 码 | 触发 | 处理方 | 相关编号 | 锚点 | 覆盖测试 |）"
+    scanned = _scanned_codes()
+    total = sum(len(codes) for codes in scanned.values())
+    missing = [
+        f"{module}.py 抛出 {code} 但 §6 没有这一行"
+        + (f"（白名单理由：{CODE_EXCEPTIONS[f'{module}:{code}']}）" if f"{module}:{code}" in CODE_EXCEPTIONS else "")
+        for module, codes in sorted(scanned.items())
+        for code in sorted(codes)
+        if code not in documented and f"{module}:{code}" not in CODE_EXCEPTIONS
+    ]
+    assert not missing, (
+        f"提取域共 {total} 个码定义点（{len(set().union(*scanned.values()))} 个唯一码），"
+        f"§6 只登记了 {len(documented)} 个。缺：\n" + "\n".join(missing))
+    assert total >= 80, f"只扫到 {total} 个码，扫描口径可能被改坏了（AST 规则见 _module_codes）"
+    unknown = sorted(documented - {code for codes in scanned.values() for code in codes})
+    assert not unknown, f"§6 登记了提取域扫不到的码：{unknown}"
+
+
+def test_section6_rows_bind_real_anchors_and_tests():
+    """每行的锚点是真函数、覆盖测试是真用例；两者都不许凭印象写。"""
+    problems = []
+    for code, cells in sorted(_section6_rows().items()):
+        anchors = ANCHOR.findall(cells[4])
+        if not anchors:
+            problems.append(f"{code}: 锚点列没有 `文件.py::符号`（现在是「{cells[4]}」）")
+        for relative, symbol in anchors:
+            target = ROOT / relative
+            if not target.is_file():
+                problems.append(f"{code}: 锚点文件不存在 {relative}")
+            elif not re.search(rf"^\s*(def|class)\s+{re.escape(symbol)}\b",
+                               target.read_text(encoding="utf-8"), re.M):
+                problems.append(f"{code}: {relative} 里没有函数／类 {symbol}")
+        for relative, case in TEST_REF.findall(cells[5]):
+            target = ROOT / relative
+            if not target.is_file():
+                problems.append(f"{code}: 覆盖测试文件不存在 {relative}")
+            elif case and not re.search(rf"^\s*(?:async\s+)?def\s+{re.escape(case)}\b",
+                                        target.read_text(encoding="utf-8"), re.M):
+                problems.append(f"{code}: {relative} 里没有用例 {case}")
+    assert not problems, "\n".join(problems)
+
+
+def test_section6_handlers_and_rule_refs_are_valid():
+    """处理方只能三选一（待确认要进清单），相关编号必须能在本页查到。"""
+    text = _spec_text()
+    invariants = {line.split("|")[1].strip() for line in _section(text, SECTION_5)
+                  if line.startswith("| I-")}
+    e_numbers = {f"E-{number}" for number, _ in _e_items()}
+    m_numbers = {match.group(1) for line in _section(text, SECTION_HEADINGS[4])
+                 if (match := M_RULE.match(line))}
+    unruled = _appendix_codes(UNRULED_HEADING)
+    problems = []
+    for code, cells in sorted(_section6_rows().items()):
+        if cells[2] not in CODE_HANDLERS + ("待确认",):
+            problems.append(f"{code}: 处理方「{cells[2]}」不是三选一（模型改草案／用户决定／程序跳过）")
+        elif cells[2] == "待确认" and code not in _appendix_codes("### 附：待确认清单"):
+            problems.append(f"{code}: 处理方是「待确认」但没进「附：待确认清单」")
+        if cells[3] == "—" and code not in unruled:
+            problems.append(f"{code}: 相关编号是 `—` 但没列进「附：未挂规则的码」")
+        for token in re.findall(r"`([IEM]-\d{2})`", cells[3]):
+            known = {"I": invariants, "E": e_numbers, "M": m_numbers}[token[0]]
+            if token not in known:
+                problems.append(f"{code}: 相关编号 {token} 在本页查不到")
+    assert not problems, "\n".join(problems)
+
+
+def test_section5_codes_are_documented_in_section6():
+    """§5 出现的码必须在 §6 有行：不变量表与诊断码总表不能各说一套。"""
+    documented = set(_section6_rows())
+    text5 = "\n".join(_section(_spec_text(), SECTION_5))
+    quoted = set(re.findall(r"`([A-Za-z][A-Za-z0-9_]*)`", text5))
+    upper = {token for token in quoted if re.fullmatch(r"[A-Z][A-Z0-9_]+", token)}
+    lowered = {code for codes in _scanned_codes().values() for code in codes if code in quoted}
+    missing = sorted((upper | lowered) - documented)
+    assert not missing, (
+        "§5 引用了这些码，§6 却没有行（拿到码查不到触发与锚点）：\n" + "\n".join(missing))
+
+
+def test_section6_appendices_match_the_table():
+    """两个附表必须与主表一致：不允许多列、漏列或和 `—` 对不上。"""
+    rows = _section6_rows()
+    unruled = _appendix_codes(UNRULED_HEADING)
+    untested = _appendix_codes(UNTESTED_HEADING)
+    assert unruled == {code for code, cells in rows.items() if cells[3] == "—"}, (
+        "「附：未挂规则的码」与主表 `相关编号 = —` 的行不一致")
+    assert untested == {code for code, cells in rows.items() if cells[5] == "—"}, (
+        "「附：无测试覆盖的码」与主表 `覆盖测试 = —` 的行不一致")

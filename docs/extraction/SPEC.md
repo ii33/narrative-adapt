@@ -395,7 +395,234 @@ flowchart LR
 
 ## 6 诊断码总表
 
-待 P3 填充。
+提取域的 **87 个诊断码**逐条登记。拿到任一个码，本表能回答四件事：谁触发、谁处理、哪段代码、哪条测试。反向覆盖由 `tests/test_extraction_spec.py::test_extraction_domain_codes_are_all_documented` 强制：§6 少写一个提取域的码就红。
+
+**怎么读**
+
+- 「触发」抄代码里的判据压成一句人话，不看代码也能对照数据判断。
+- 「处理方」只取三种：**模型改草案**（返回 `staged`，模型按问题 `path` 用 `patch_extraction_submission` 修）、**用户决定**（已入库数据上的判断／取舍，人或人在场的 agent 才能定）、**程序跳过**（记 `info` 或直接丢弃写入，因而安全）。同一条码可能在两条通道都出现（提交时 `staged` 与 `project_check` 静态检查），表里写的是**主责**处理方。
+- 「相关编号」是这条码在替哪条规则把关：`I-xx` 见 §5，`E-xx` 见 §3，`M-xx` 见 §4；`—` 表示未挂规则，清单与理由见文末「附：未挂规则的码」。
+- 「锚点」是抛出该码的函数（不是行号）；一个码有多处触发时列主锚点，其余用顿号分隔。
+- 「覆盖测试」只写真实存在且**断言了该码明文**的用例；写 `—` 的表示没有这样的用例，清单与处置建议见文末「附：无测试覆盖的码」。
+
+**基数**：16 个提取域模块（`extraction`、`extraction_draft`、`extraction_staging`、`extraction_refs`、`property_core`、`property_operations`、`property_audit`、`event_location`、`item_possession`、`containment_refs`、`container_evidence`、`graph_service`、`project_check`、`temporal_state`、`storyline_ranges`、`business_staging`）共出现 **87** 个唯一码（94 个「模块×码」定义点；`FORMAT`、`EVIDENCE`、`REVISION`、`DISCLOSURE` 等跨模块重复），§6 覆盖 **87**（100%）。按处理方：模型改草案 **61**、用户决定 **22**、程序跳过 **4**、待确认 **0**。有断言用例 **39** 个，无 **48** 个。
+
+扫描口径（不是凭印象）：`tests/test_extraction_spec.py::_module_codes` 用 AST 只认三种定义点——dict 的 `code` 键、`code=` 关键字、issue 构造函数的字面量实参——锚点取最近的外层函数，`code` 是变量时按同名局部变量展开；「覆盖测试」列由 `test_section6_rows_bind_real_anchors_and_tests` 按引号形式回查用例源码。16 个模块里**没有** `f"{kind}_REQUIRED"` 式的动态拼接；只有两处动态：`src/narrative/extraction_draft.py::_prepare` 的 `item.get("code", "EXTRACTION_INFO")` 兜底（默认值即 §6 里的 `EXTRACTION_INFO`）和 `src/narrative/item_possession.py::item_possession_issues` 里按冲突类型赋给局部变量 `code` 的两条（`ITEM_HOLDER_CONFLICT`／`ITEM_HOLDER_VALUE`，已逐条登记）。`project_check.py` 自己不产码，它是聚合器（把 `graph_service`、`property_core`、`temporal_state`、`property_audit` 的码加上定位后输出）。
+
+### 6.1 事件地点与持有状态（`I-01`–`I-07`）
+
+| 码 | 触发（可判定的一句话） | 处理方 | 相关编号 | 锚点（`文件.py::符号`） | 覆盖测试 |
+| --- | --- | --- | --- | --- | --- |
+| `EVENT_LOCATION_REQUIRED` | 活动事件没有自己的 `world` 地点，或清空、移除后没重新记为无／未知 | 模型改草案 | `I-01`、`E-20` | `src/narrative/event_location.py::event_location_issues` | tests/test_event_location.py::test_missing_or_other_scope_never_becomes_unknown |
+| `EVENT_LOCATION_ANCHOR` | 地点变更锚在别的事件上，借用不到本事件的地点 | 模型改草案 | `I-02`、`E-20` | `src/narrative/event_location.py::event_location_issues` | tests/test_event_location.py::test_later_event_cannot_clear_or_supply_another_event_location |
+| `EVENT_LOCATION_VALUE` | 地点值既不是同语境的 `location` 节点，也不是显式的无／未知 | 模型改草案 | `I-03`、`E-20` | `src/narrative/event_location.py::event_location_issues` | tests/test_event_location.py::test_invalid_location_values_are_rejected |
+| `EVENT_LOCATION_CONFLICT` | 同一事件点出现不相容的地点状态 | 模型改草案 | `I-04`、`M-10` | `src/narrative/event_location.py::event_location_issues` | tests/test_event_location.py::test_anchor_conflict_multi_locations_alias_and_semantic |
+| `ITEM_HOLDER_REQUIRED` | 活动物品没有 `world` 持有状态（没有记录，或只剩已失效／未记录） | 模型改草案 | `I-05`、`E-19` | `src/narrative/item_possession.py::item_possession_issues` | tests/test_item_possession.py::test_audit_still_reports_an_item_without_any_holder_record |
+| `ITEM_HOLDER_VALUE` | 持有者既不是合法有效节点，也不是显式的无／未知（含指向物品自己） | 模型改草案 | `I-06`、`E-19` | `src/narrative/item_possession.py::item_possession_issues` | — |
+| `ITEM_HOLDER_CONFLICT` | 同一事件位置的持有状态互相冲突，程序不按提交顺序挑一个 | 模型改草案 | `I-07`、`E-19` | `src/narrative/item_possession.py::item_possession_issues` | — |
+
+### 6.2 结构与层级（`I-21`–`I-26`、`I-33`）
+
+| 码 | 触发（可判定的一句话） | 处理方 | 相关编号 | 锚点（`文件.py::符号`） | 覆盖测试 |
+| --- | --- | --- | --- | --- | --- |
+| `EVENT_SCENE` | 活动事件没有经包含路径归属于同语境的活动场景 | 模型改草案 | `I-22` | `src/narrative/containment_refs.py::event_scene_issues` | tests/test_project_check.py::test_corrupt_event_facts_report_specific_targets_without_mutation |
+| `ACTION_EVENT` | 动作不是恰好直属一个同语境事件（直接挂场景或大事件、或跨语境） | 模型改草案 | `I-23`、`E-35`、`M-05` | `src/narrative/containment_refs.py::event_scene_issues` | tests/test_action_extraction.py::test_new_actions_require_an_event_parent_without_writing |
+| `ACTION_LEAF` | 动作是最小包含层级，却还带着子项 | 模型改草案 | `I-23`、`M-05` | `src/narrative/containment_refs.py::event_scene_issues` | — |
+| `CONTAINMENT_CYCLE` | `events` 包含关系成环 | 模型改草案 | `I-24` | `src/narrative/containment_refs.py::event_scene_issues` | tests/test_adaptation.py::test_invalid_structure_items_and_values_cannot_leak_partial_edits |
+| `COMPOSITE` | 非五层容器记了子项、子项类型不符五层直属关系，或节点包含自己 | 模型改草案 | `I-21` | `src/narrative/graph_service.py::precheck` | — |
+| `STORYLINE_CHILD_TYPE` | 层级跳级（例如主要故事直属事件、大事件直属事件） | 模型改草案 | `I-21` | `src/narrative/storyline_ranges.py::analyze` | tests/test_storyline_contract.py::test_skipped_major_story_level_is_rejected |
+| `STORYLINE_POSITION` | 容器没有可定位的直属成员，无法确定阅读起点 | 模型改草案 | `I-33` | `src/narrative/storyline_ranges.py::analyze` | — |
+| `STORYLINE_OVERLAP` | 成员跨出已完成主要故事的区间，或与下一区间重叠、交错 | 模型改草案 | `I-33` | `src/narrative/storyline_ranges.py::analyze` | tests/test_storyline_contract.py::test_completed_major_story_intervals_cannot_overlap |
+| `STORYLINE_COMPLETION` | 主要故事的完成边界缺失、坐标不合法，或早于所属成员的起点 | 模型改草案 | `I-33`、`E-11` | `src/narrative/storyline_ranges.py::analyze` | tests/test_storyline_contract.py::test_completed_story_requires_explicit_valid_end_and_does_not_reveal_summary_early |
+| `STORYLINE_MEMBERSHIP` | 已闭区间的成员缺失归属或归入另一个区间（error 档） | 模型改草案 | `I-33` | `src/narrative/storyline_ranges.py::analyze` | tests/test_storyline_contract.py::test_membership_errors_remain_after_disclosure_warning_removal |
+| `STORYLINE_OPEN_SCENE` | 与 `STORYLINE_MEMBERSHIP` 同一判据，但区间尚未闭合，因此只报 warning | 模型改草案 | `I-33` | `src/narrative/storyline_ranges.py::analyze` | — |
+| `STORYLINE_MEMBER_OWNER` | 同一成员交错归属多个同层阅读区间 | 模型改草案 | — | `src/narrative/storyline_ranges.py::analyze` | tests/test_storyline_contract.py::test_shared_and_interleaved_members_are_static_errors |
+| `STORYLINE_START` | 同层相邻阅读区间的起点相同 | 模型改草案 | — | `src/narrative/storyline_ranges.py::analyze` | — |
+| `STORYLINE_SCENE_POSITION` | 所属区间的成员本身不可定位，区间无法归属 | 模型改草案 | — | `src/narrative/storyline_ranges.py::analyze` | — |
+| `BIG_EVENT_STORYLINE` | 大事件同时属于多个主要故事，或所属主要故事跨语境 | 模型改草案 | — | `src/narrative/storyline_ranges.py::analyze` | tests/test_five_level_extraction.py::test_conflicting_distinct_parents_are_not_deduplicated_away |
+| `EMPTY` | 候选里一条操作都没有 | 模型改草案 | `I-33` | `src/narrative/graph_service.py::precheck` | — |
+
+### 6.3 属性记录、证据与引用（`I-08`、`I-12`–`I-20`、`I-27`、`I-32`）
+
+| 码 | 触发（可判定的一句话） | 处理方 | 相关编号 | 锚点（`文件.py::符号`） | 覆盖测试 |
+| --- | --- | --- | --- | --- | --- |
+| `FORMAT` | 记录不是对象、带白名单外字段，或存储对象字段不合法 | 模型改草案 | `I-17` | `src/narrative/property_core.py::validate_records`、`src/narrative/graph_service.py::_normalized` | tests/test_project_check.py::test_checker_rejects_obsolete_merged_fields_without_following_redirects |
+| `KIND` | `kind` 不是 `property_definition` 或 `property_change` | 模型改草案 | `I-17` | `src/narrative/property_core.py::validate_records` | — |
+| `ID` | 属性记录 ID 为空、非字符串，或与已有／本批记录重复 | 模型改草案 | `I-17` | `src/narrative/property_core.py::validate_records` | — |
+| `DEFINITION` | 定义缺 `value_type`／`cardinality`、`symmetric` 非严格布尔，或 `target_node_types` 用在非 `node` 定义上 | 模型改草案 | `I-20` | `src/narrative/property_core.py::validate_records` | tests/test_property_symmetry.py::test_non_boolean_definition_flag_is_rejected_atomically |
+| `EVIDENCE` | 引文缺失、不是原文子串、不是逐字唯一命中，或 `evidence_spans` 形状／坐标不合法 | 模型改草案 | `I-13`、`I-14`、`I-16`、`E-09`、`E-13`、`M-12` | `src/narrative/property_core.py::validate_records`、`src/narrative/graph_service.py::precheck` | tests/test_source_location_contract.py::test_property_validation_scans_shared_evidence_once_and_never_across_calls |
+| `EVIDENCE_SPAN` | 节点证据跨度与原文对应位置不符 | 模型改草案 | `I-16` | `src/narrative/graph_service.py::precheck` | — |
+| `DISCLOSURE` | 披露坐标不是合法原文 Unicode 位置，或与逐字证据起点不一致 | 模型改草案 | `I-15` | `src/narrative/property_core.py::validate_records`、`src/narrative/graph_service.py::precheck` | tests/test_reviewed_location_regressions.py::test_repeated_evidence_requires_valid_exact_disclosure |
+| `TARGET` | 属性变更的主体节点或属性定义不存在 | 模型改草案 | — | `src/narrative/property_core.py::validate_records` | tests/test_project_check.py::test_checker_reports_current_value_with_missing_definition |
+| `EVENT_REF` | 变更没有锚定有效的事件或动作节点 | 模型改草案 | `I-18`、`E-21` | `src/narrative/property_core.py::validate_records` | — |
+| `SEQUENCE` | `sequence` 不是非负整数（提取里由程序按引文起点生成） | 模型改草案 | `I-18`、`E-37` | `src/narrative/property_core.py::validate_records`、`src/narrative/property_core.py::reduce_changes` | — |
+| `CONTEXT` | 记录里的语境 ID 不存在 | 模型改草案 | `I-18` | `src/narrative/property_core.py::validate_records` | — |
+| `SCOPE` | `world` 带了 `holder_id`，或 `claim`／`cognition` 没带人物 `holder_id` | 模型改草案 | `I-12`、`E-30`、`M-08` | `src/narrative/property_core.py::validate_records` | — |
+| `NODE_REF` | `related_nodes` 引用了不存在的节点 | 模型改草案 | — | `src/narrative/property_core.py::validate_records` | tests/test_adaptation.py::test_properties_and_concurrency_are_atomic |
+| `OP` | `op` 不在 set/add/remove/clear/unknown 里，或单值属性用了 add/remove 而它不是人物对方关系 | 模型改草案 | `I-19`、`E-21`、`M-07` | `src/narrative/property_core.py::validate_records`、`src/narrative/property_core.py::reduce_changes` | — |
+| `VALUE` | 值类型、集合唯一性或节点引用不合法，或 `clear`／`unknown` 带了 `value` | 模型改草案 | `I-19`、`I-20`、`E-22`、`M-09` | `src/narrative/property_core.py::validate_records`、`src/narrative/property_core.py::reduce_changes` | tests/test_project_check_locations.py::test_static_record_error_has_record_location_and_source_coordinates |
+| `PROPERTY` | 变更引用的属性定义不存在 | 模型改草案 | `E-27` | `src/narrative/property_core.py::definition_reference_issues` | tests/test_project_check.py::test_checker_reports_current_value_with_missing_definition |
+| `HOLDER` | 观点（语境）的持有人不是人物节点 | 模型改草案 | `I-12`、`M-08` | `src/narrative/graph_service.py::precheck` | — |
+| `REF` | 父级、参与者、前后继、语境或时间轴引用指向「已有或本批」之外的对象 | 模型改草案 | `E-16` | `src/narrative/graph_service.py::precheck` | tests/test_project_check_locations.py::test_static_node_error_preserves_producer_field_location |
+| `SOURCE` | 证据、披露、完成边界或阅读顺序引用的来源不存在 | 模型改草案 | `M-12`、`E-13` | `src/narrative/graph_service.py::precheck` | — |
+| `COMPLETION` | 主要故事的 `completion` 起点越出原文范围 | 模型改草案 | `I-33`、`E-11` | `src/narrative/graph_service.py::precheck` | — |
+| `TIME_REF` | 事件边界的发生时间引用了非事件／非动作节点 | 模型改草案 | — | `src/narrative/graph_service.py::precheck` | — |
+| `TIME_RANGE` | 故事有效期终点早于起点 | 模型改草案 | — | `src/narrative/graph_service.py::precheck` | — |
+| `ID_KIND` | 对象 ID 跨类型复用 | 模型改草案 | `I-17` | `src/narrative/graph_service.py::precheck` | — |
+| `DUPLICATE_ID` | 同一候选内出现重复对象 ID | 模型改草案 | `I-17` | `src/narrative/graph_service.py::precheck` | — |
+| `SOURCE_ORDER` | 同一语境的披露序号对应不同来源，或同一来源在一条阅读序列里登记两次 | 模型改草案 | `I-32` | `src/narrative/graph_service.py::_check_source_order` | — |
+| `SOURCE_ORDER_IMMUTABLE` | 改写已登记的阅读顺序 | 模型改草案 | `I-32` | `src/narrative/graph_service.py::precheck` | — |
+| `INFRA_IMMUTABLE` | 修订正篇语境 `canon` 或故事时间轴标识 | 模型改草案 | `I-32` | `src/narrative/graph_service.py::precheck` | — |
+| `CONTEXT_CYCLE` | 语境继承关系成环 | 模型改草案 | — | `src/narrative/graph_service.py::_check_context_cycles` | — |
+| `EVENT_CHAIN` | 非事件节点记录前驱／后继，前驱后继不是事件，或事件指向自己 | 模型改草案 | `I-26` | `src/narrative/graph_service.py::precheck` | — |
+| `PARTICIPANTS` | 非事件／动作记参与者，或参与者不是人物、群体节点 | 模型改草案 | `I-25`、`E-17` | `src/narrative/graph_service.py::precheck` | tests/test_item_possession.py::test_legacy_non_person_participant_reads_but_the_next_write_is_rejected |
+
+### 6.4 状态推导与冲突（`I-30`–`I-31`）
+
+| 码 | 触发（可判定的一句话） | 处理方 | 相关编号 | 锚点（`文件.py::符号`） | 覆盖测试 |
+| --- | --- | --- | --- | --- | --- |
+| `STATE_GROUP` | 一次状态推导里混进了不同（主体／属性／语境／立场）分组 | 模型改草案 | `I-30`、`M-10` | `src/narrative/property_core.py::reduce_changes` | — |
+| `STATE_CONFLICT` | 同一事件同一 `sequence` 出现不相容变更 | 模型改草案 | `I-31`、`M-10` | `src/narrative/property_core.py::reduce_changes` | tests/test_state_values_contract.py::test_two_one_values_at_the_same_event_point_are_a_conflict |
+| `EVENT_ORDER` | 变更锚定的事件／动作没有正式阅读顺序 | 模型改草案 | `I-18` | `src/narrative/property_core.py::reduce_changes` | — |
+
+### 6.5 容器写回与进展属性（`I-09`–`I-11`）
+
+| 码 | 触发（可判定的一句话） | 处理方 | 相关编号 | 锚点（`文件.py::符号`） | 覆盖测试 |
+| --- | --- | --- | --- | --- | --- |
+| `CONTAINER_PROPERTY_DEDUP` | 容器写入与某下属事件同组，容器那条被丢弃并回 `info`（附 `duplicate_of`） | 程序跳过 | `I-09`、`E-26`、`M-16` | `src/narrative/extraction.py::build_extraction` | tests/test_container_property_dedup.py::test_container_write_duplicating_a_descendant_event_is_dropped_with_info |
+| `progress_owner` | 进展属性写在非直属层级（`storyline_progress` 不在大事件、`big_event_progress` 不在场景） | 程序跳过 | `I-11`、`E-25` | `src/narrative/property_audit.py::audit_properties` | — |
+
+### 6.6 提取草稿、暂存与入库（`I-27`–`I-28`）
+
+| 码 | 触发（可判定的一句话） | 处理方 | 相关编号 | 锚点（`文件.py::符号`） | 覆盖测试 |
+| --- | --- | --- | --- | --- | --- |
+| `DRAFT_SCHEMA` | 草稿形状不合 `RESULT_SCHEMA`：未知字段、缺必填（含 `participants`、`category`）、模型自带 `sequence` | 模型改草案 | `I-08`、`E-37` | `src/narrative/extraction_draft.py::_draft_input_diagnostics`、`src/narrative/extraction_draft.py::_prepare` | tests/test_property_category_contract.py::test_property_row_without_category_is_rejected |
+| `EXTRACTION_CONTENT` | 草稿内容过不了节点／属性校验：引用、引文、类型不符，或程序丢弃某行时给出的原因 | 模型改草案 | `I-08`、`E-13` | `src/narrative/extraction_draft.py::_prepare` | tests/test_extraction_diagnostic_paths.py::test_non_subject_entities_are_rejected_as_participants_with_a_reason |
+| `EXTRACTION_INFO` | 程序丢弃了某些输入行并回 `info`，而该条没有专属码时的兜底码 | 程序跳过 | — | `src/narrative/extraction_draft.py::_prepare` | — |
+| `CHECK_PENDING` | 暂存稿刚写入、静态检查尚未完成的过渡态（紧随其后的求值会覆盖它） | 程序跳过 | `I-28` | `src/narrative/extraction_staging.py::submit`、`src/narrative/business_staging.py::_new` | tests/test_extraction_staging.py::test_pending_is_discoverable_after_interrupted_check_and_pages_are_bounded |
+| `FORMAL_REVISION_CHANGED` | 准备入库时发现正式资料版本已变，草稿保留为 `staged` | 模型改草案 | `I-27` | `src/narrative/extraction_staging.py::_evaluate` | tests/test_extraction_staging.py::test_conflicting_formal_revision_retains_draft_without_committing |
+| `REVISION` | `expected_revision` 与当前正式版本不一致 | 模型改草案 | `I-27` | `src/narrative/graph_service.py::precheck`、`src/narrative/property_operations.py::record_change` | — |
+| `CONTENT_VALIDATION` | 业务／属性编辑的入参不合法，可以暂存为局部修补 | 模型改草案 | — | `src/narrative/property_operations.py::_invalid`、`src/narrative/business_staging.py::_problem` | tests/test_add_property_types.py::test_new_definition_requires_strict_explicit_type_and_symmetry_without_write |
+| `SUBMISSION_REJECTED` | 暂存操作重放时被拒，不能延后自动执行，需要人重新提交或放弃 | 用户决定 | — | `src/narrative/business_staging.py::_attempt`、`src/narrative/business_staging.py::invoke` | — |
+
+### 6.7 静态检查与项目审计（`project_check`）
+
+| 码 | 触发（可判定的一句话） | 处理方 | 相关编号 | 锚点（`文件.py::符号`） | 覆盖测试 |
+| --- | --- | --- | --- | --- | --- |
+| `record_incomplete` | 属性记录缺 `node_id` 或 `property_id` | 用户决定 | `I-17` | `src/narrative/property_audit.py::audit_properties` | — |
+| `definition_missing` | 取值没有对应的 `property_definition` | 用户决定 | `E-27` | `src/narrative/property_audit.py::audit_properties` | tests/test_project_check.py::test_checker_reports_current_value_with_missing_definition |
+| `evidence_missing` | 属性记录没有原文引文，无法回查 | 用户决定 | `I-13`、`E-13` | `src/narrative/property_audit.py::audit_properties` | — |
+| `anchor_missing` | 属性记录没有披露锚点事件 | 用户决定 | `I-18` | `src/narrative/property_audit.py::audit_properties` | — |
+| `anchor_retracted` | 属性记录锚在已撤回的事件上，披露位置随之失效 | 用户决定 | `I-18` | `src/narrative/property_audit.py::audit_properties` | — |
+| `holder_missing` | 认知／声称记录没有持有人 | 用户决定 | `I-12`、`E-30` | `src/narrative/property_audit.py::audit_properties` | — |
+| `holder_unknown` | 记录的持有人不在节点表里 | 用户决定 | `I-12` | `src/narrative/property_audit.py::audit_properties` | — |
+| `category_unknown` | 分类不在该节点类型的分类词表里（warning，不影响取值） | 用户决定 | `E-24` | `src/narrative/property_audit.py::audit_properties` | tests/test_property_category_contract.py::test_category_outside_the_vocabulary_is_diagnosed |
+| `category_unassigned` | 工程里有 N 条属性未分类，汇总成一条工程级 `info` | 用户决定 | `E-24` | `src/narrative/property_audit.py::audit_properties` | tests/test_project_check_locations.py::test_uncategorized_aggregate_is_project_level_in_a_real_check |
+| `duplicate_value` | 同一披露位置重复记录同一个值 | 用户决定 | `M-10` | `src/narrative/property_audit.py::audit_properties` | tests/test_relation_contract.py::test_exact_duplicate_at_same_disclosure_is_still_reported |
+| `repeated_value` | 多个位置重申同一个值（允许，只作 `info`） | 用户决定 | — | `src/narrative/property_audit.py::audit_properties` | — |
+| `name_variant` | 同一节点同一方面用了多个属性名，会各自多出一条「当前值」 | 用户决定 | `E-27` | `src/narrative/property_audit.py::audit_properties` | tests/test_relation_contract.py::test_distinct_roles_for_same_counterpart_do_not_suggest_synonym_merge |
+| `node_retracted_with_values` | 节点已撤回，但仍留有属性记录 | 用户决定 | — | `src/narrative/property_audit.py::audit_properties` | — |
+| `relation_pair_name` | 关系用了成对叫法（父子、夫妻），读不出谁是谁的哪一边 | 用户决定 | `E-27` | `src/narrative/property_audit.py::audit_properties` | — |
+| `relation_same_both_ways` | 两侧都写同一个单边称呼，方向没了 | 用户决定 | `E-27` | `src/narrative/property_audit.py::audit_properties` | — |
+| `relation_not_a_person` | 关系值指向的不是人物节点 | 用户决定 | `E-27` | `src/narrative/property_audit.py::audit_properties` | — |
+| `relation_untyped_reference` | 分类是「关系」但定义是普通值，画不进人物关系图 | 用户决定 | `E-27` | `src/narrative/property_audit.py::audit_properties` | tests/test_relation_structure.py::test_relation_id_literal_warns_only_for_explicit_relation_category |
+| `self_reference` | 关系值就是节点自己 | 用户决定 | `E-27` | `src/narrative/property_audit.py::audit_properties` | — |
+| `scene_without_big_event` | 场景没有归入任何大事件（`info`，说明这一章还没读出大事件边界） | 用户决定 | `M-03` | `src/narrative/property_audit.py::audit_properties` | tests/test_project_check_locations.py::test_node_level_issue_carries_node_and_source_coordinates |
+| `label_missing` | 属性名没有中文对照，界面上直接显示英文（`info`） | 用户决定 | — | `src/narrative/property_audit.py::audit_properties` | — |
+| `definition_unused` | 属性定义没有任何取值记录（`info`；无取值不等于漏提） | 用户决定 | — | `src/narrative/property_audit.py::audit_properties` | tests/test_project_check_locations.py::test_unused_definition_points_at_the_definition_not_the_project |
+
+### 附：其它域码表
+
+下面这些码**不在**提取域，本表不为它们逐条建行；发现它们出现在 `project_check` 输出里不必回来补 §6。同域复用 `business_staging` 的三个码（`CONTENT_VALIDATION`、`CHECK_PENDING`、`SUBMISSION_REJECTED`）已按提取域登记在 §6.6，剧本／资产用户看同一行即可。
+
+| 域 | 码 | 负责文档 |
+| --- | --- | --- |
+| 剧本层（场表、正文、编译） | `screenplay_operations.py`、`screenplay_compile.py`：`SCREENPLAY_STRUCTURE`、`SPAN_OVERLAP`、`OUTLINE_CHANGED`、`SEGMENT_DURATION_EXCEEDED`、`BODY_BASIS_*` | `docs/screenplay/SCREENPLAY_DATA_DESIGN.md` 与 `docs/features/AGENT_API.md`（工具诊断字段）；剧本层目前没有独立的诊断码表 |
+| 复制与项目目录 | `project_copy.py`：`HISTORICAL_PATHS_PRESERVED`；`node_material.py`：`MATERIAL_POSITION` | `docs/TESTING.md` 与 `docs/features/AGENT_API.md` |
+| 会话与主机 | `conversation_session.py`：`host_cleanup_failed` | `docs/features/AGENT_API.md` |
+| 业务内容暂存（共用） | `business_staging.py` 的 `CONTENT_VALIDATION`、`CHECK_PENDING`、`SUBMISSION_REJECTED` 按提取域登记在 §6.6；同域其它业务（资产、剧本）复用同一套码 | 本页 §6.6 |
+
+另：`src/narrative/business_staging.py::_attempt` 会按 `{"REVISION", "VERSION", "CONFLICT"}` 判断是否把失败归类为冲突，但 `src/` 里目前**没有任何代码抛出 `VERSION` 或 `CONFLICT`**（只有 `REVISION`）。这里如实登记这个悬空分支，不替它编规则；将来接入时必须同批补 §6。
+
+### 附：未挂规则的码
+
+共 **16** 个码查不到可指的 `I-xx`／`E-xx`／`M-xx`。它们仍然必要：没有这些码，相应违规就只能静默通过或变成一句泛泛的报错。要「补规则」得先改 §3／§4／§5（那是规范变更），不能在本表里顺手给它们挂一个编号。
+
+| 码 | 为什么它仍然必要 |
+| --- | --- |
+| `STORYLINE_MEMBER_OWNER` | 阅读区间归属的排他性：`M-04` 只定义「主要故事＝部／卷」，没有写「成员只能属于一个区间」。 |
+| `STORYLINE_START` | 同层相邻区间起点相同的排他判据，`M-04`／`I-33` 都没写到这一条。 |
+| `STORYLINE_SCENE_POSITION` | 区间成员的坐标缺失导致区间不可定位；`I-33` 只说完成边界要给坐标。 |
+| `BIG_EVENT_STORYLINE` | 大事件归属唯一性；`I-21` 只约束直属层级类型，不约束归属数量。 |
+| `TARGET` | 存储层的主体／定义存在性检查，`I-18` 只覆盖事件锚点。 |
+| `NODE_REF` | `related_nodes` 引用有效性；`I-25` 只管参与者，`I-17` 只管字段白名单。 |
+| `TIME_REF` | 故事时间轴的发生边界类型校验，属于存储对象合同而非提取规则。 |
+| `TIME_RANGE` | 故事有效期起止序关系，同上。 |
+| `CONTEXT_CYCLE` | 语境继承成环，属于存储对象合同。 |
+| `EXTRACTION_INFO` | 兜底码：程序丢弃输入行时若没有专属码就用它，语义由具体 info 条目决定。 |
+| `CONTENT_VALIDATION` | 工具入参通用校验码，跨业务域共用，不对应某条提取规则。 |
+| `SUBMISSION_REJECTED` | 业务暂存的执行结果码，不是规则违反。 |
+| `repeated_value` | `info` 提示：重申同一个值是允许的，没有规则被违反。 |
+| `node_retracted_with_values` | 撤回节点的清理提醒，`I-29` 只约束回滚清理，不约束撤回。 |
+| `label_missing` | 界面显示提醒，不是语义规则。 |
+| `definition_unused` | `info` 提示：无取值不等于漏提，规则层刻意不约束。 |
+
+### 附：无测试覆盖的码
+
+共 **48** 个码没有任何用例断言其明文（占 55%）。「有断言用例」的门槛是：用例源码里以引号形式出现该码，且用例通过。这份清单比码表本身更有用——它直接说明下一步该补测试还是该降级说明。
+
+| 码 | 建议 |
+| --- | --- |
+| `ITEM_HOLDER_VALUE` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `ITEM_HOLDER_CONFLICT` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `ACTION_LEAF` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `COMPOSITE` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `STORYLINE_POSITION` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `STORYLINE_OPEN_SCENE` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `STORYLINE_START` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `STORYLINE_SCENE_POSITION` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `EMPTY` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `KIND` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `ID` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `EVIDENCE_SPAN` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `EVENT_REF` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `SEQUENCE` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `CONTEXT` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `SCOPE` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `OP` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `HOLDER` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `SOURCE` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `COMPLETION` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `TIME_REF` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `TIME_RANGE` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `ID_KIND` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `DUPLICATE_ID` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `SOURCE_ORDER` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `SOURCE_ORDER_IMMUTABLE` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `INFRA_IMMUTABLE` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `CONTEXT_CYCLE` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `EVENT_CHAIN` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `STATE_GROUP` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `EVENT_ORDER` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `progress_owner` | 降级说明：结果里的 `skipped` 已带原因，`I-11` 另有语义；补一条 info 断言即可，不必单开用例。 |
+| `EXTRACTION_INFO` | 降级说明：兜底码，语义完全由所属 info 条目决定；断言它等于断言别人的码。 |
+| `REVISION` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `SUBMISSION_REJECTED` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `record_incomplete` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `evidence_missing` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `anchor_missing` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `anchor_retracted` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `holder_missing` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `holder_unknown` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `repeated_value` | 降级说明：`info`，重申本来就是允许的；没有可判定的失败行为可断言。 |
+| `node_retracted_with_values` | 降级说明：撤回后的边界情形，`warning`；改由「撤回时一并撤回属性」的合同用例覆盖更合适。 |
+| `relation_pair_name` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `relation_same_both_ways` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `relation_not_a_person` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `self_reference` | 该补测试：行为可判定，构造一个违规数据即可断言该码。 |
+| `label_missing` | 降级说明：`info`，只影响界面显示；由属性名中文对照的合同用例覆盖更合适。 |
+
+优先补这几类：`REVISION`／`SEQUENCE`／`EVENT_ORDER`／`STATE_GROUP` 是「正式顺序与状态推导」的地基，现在只有实现没有断言；`ITEM_HOLDER_CONFLICT`／`ITEM_HOLDER_VALUE` 与已覆盖的 `ITEM_HOLDER_REQUIRED` 不对称；`STORYLINE_POSITION`／`STORYLINE_OPEN_SCENE`／`STORYLINE_START`／`STORYLINE_SCENE_POSITION` 四个只报不测；审计域的 5 个关系方向／关系值码（`relation_pair_name`、`relation_same_both_ways`、`relation_not_a_person`、`relation_untyped_reference`、`self_reference`）只覆盖 1 个。
 
 ## 7 提示词索引
 

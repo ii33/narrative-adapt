@@ -42,6 +42,7 @@
 | 主题 | 文档 |
 | --- | --- |
 | 提取任务规范（`M-xx`／`E-xx`／`I-xx`、诊断码、属性合同） | [extraction/SPEC.md](extraction/SPEC.md) |
+| 诊断码总表（87 个：码 → 触发／处理方／锚点／覆盖测试，含未挂规则与无测试覆盖清单） | [extraction/SPEC.md](extraction/SPEC.md) 第 6 节 |
 | 术语对照与易混概念（`G-xx`） | [GLOSSARY.md](GLOSSARY.md) |
 | 概念速览、事实源锚点表、验证与常见误改（9 条） | [AGENT_GUIDE.md](AGENT_GUIDE.md) |
 | 架构总览、环境与启动、数据流、常见任务与取舍 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) |
