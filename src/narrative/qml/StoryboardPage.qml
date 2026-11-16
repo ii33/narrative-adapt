@@ -169,6 +169,9 @@ Item {
         const task = "请把这个场（unit_id=" + unitId + "）的正文拆成分镜镜头："
             + "每镜给出标题、时长与对应正文块，用 apply_storyboard_changes 的 create_shot 一次提交。"
             + "怎么分、分几个、每镜多长由你判断——不要按段落或句子机械切分。"
+        // 发任务的同时把协作者面板打开：拆镜是一个多轮过程，用户要看着它做，
+        // 而不是发完看不到任何动静。
+        if (typeof app !== "undefined" && app && typeof app.assistantOpen !== "undefined") app.assistantOpen = true
         bridge.assistantTurnOnPage(task, "[]", "storyboard")
     }
     function resetView() {
