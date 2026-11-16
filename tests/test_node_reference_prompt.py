@@ -16,7 +16,7 @@ def test_reference_prompt_is_concise_and_does_not_require_repeating_existing_nod
         initial=assistant._first_prompt("请补充已知人物的属性。", extraction_granularity=detail)
         prompt='\n'.join(row['text'] for row in tool_guidance(project, ['submit_extraction'])['guides'])
         assert "@1" not in prompt and "@2" not in prompt and "nodes数组从1开始" not in prompt
-        assert "上一批及更早的节点一律用正式 ID" in prompt and "同一批里刚建的节点用它的名称" in prompt
+        assert "一律用正式 ID" in prompt and "暂存时" in prompt and "node_ids" in prompt
         # 行号还有，但它只说明「第几行」，不再兼任引用写法。
         assert "行号只是第几行，不是节点引用" in prompt
         assert "P1" in prompt and "E2" in prompt

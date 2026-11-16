@@ -83,7 +83,7 @@ def test_guidance_uses_feedback_direct_patch_and_never_claims_staged_as_committe
     assert '不重发整批' in flow and 'submission_revision' in flow
     # 行号只是「section 里的第几行」，节点引用写名称或正式 ID（`I-29`）。
     assert 'index从0起' in flow and '不是节点引用' in flow
-    assert '正式ID' in flow and '本批刚建的用它的名称' in flow
+    assert '正式 ID' in flow and '同一批里刚建的节点用它的名称' in flow
     for name in ['source_extraction', 'review', 'action_extraction']:
         text = DEFAULT_PROMPTS[name]['text']
         assert 'staged' in text

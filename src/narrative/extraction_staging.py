@@ -222,6 +222,10 @@ def _evaluate(ops, row, expected, reason):
     row['counts'] = {key: len(value) for key, value in row['result'].items() if isinstance(value, list)}
     row['last_reason'] = reason
     if not outcome['valid']:
+        # 暂存时就已经把编号算出来了，这里一并返回：模型从这一刻起可以按 ID 引用这些节点，
+        # 不必等到入库，也不必靠回忆复述梗概名（`U-14`）。
+        if built.get('node_ids'):
+            outcome['node_ids'] = built['node_ids']
         with ops.project.store.connect(write=True) as db:
             _cas(db, row['submission_id'], expected)
             _save(db, row)
