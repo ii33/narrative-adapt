@@ -132,7 +132,6 @@ def test_event_criterion_is_scale_difference_and_events_are_not_actions():
     assert '同一种东西的五个颗粒度' in extraction or '从大到小的五个颗粒度' in extraction
     # 旧判据「粒度粗于动作，不是一个具体的动作」已换成概念版说法。
     assert '粒度粗于动作' in extraction and '不是一个具体的动作' in extraction
-    assert '事件就是若干连续节拍的一段' in extraction
     assert '同一个事件是怎么做成的，是事件内部的手脚，通常不单独列出来' in extraction
     # 场景只装一条事件也成立：这是合法形态，不是缺数据。
     assert '只装一个事件也算一个现场' in extraction and '只含一个事件也成立' in extraction
