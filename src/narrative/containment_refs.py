@@ -16,7 +16,10 @@ def resolve_parent(reference: str, kind: str, context: str, snapshot: dict,
         candidates = [current[reference]]
     else:
         local = [row for row in declared if row['name'] == reference and row['type'] == kind]
-        local_ids = {mention_ids.get((row['type'], row['name'], row['quotes'][0])) for row in local}
+        # 只有事件一定带引文；U-09 之后实体与容器都不带，这里必须容忍空列表，
+        # 否则一个正常批次会在解析父级时抛 IndexError（实跑里报成 tool_failed）。
+        local_ids = {mention_ids.get((row['type'], row['name'], (row.get('quotes') or [''])[0]))
+                     for row in local}
         local_ids.discard(None)
         candidates = [current.get(identifier) or {'id': identifier, 'node_type': kind, 'context_id': context}
                       for identifier in local_ids]

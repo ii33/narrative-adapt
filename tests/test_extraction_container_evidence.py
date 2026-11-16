@@ -219,3 +219,24 @@ def test_same_name_unquoted_containers_with_different_children_remain_distinct(p
     assert len(scenes) == 2
     assert scenes[0]['events'] != scenes[1]['events']
     assert scenes[0]['evidence_spans'] != scenes[1]['evidence_spans']
+
+
+def test_scene_without_quotes_can_declare_its_big_event(project):
+    """U-09 之后场景与实体都不带引文：解析父级时不能假设 quotes[0] 存在（实跑里这曾抛 IndexError）。"""
+    ops = project
+    source = ops.import_source('父子', '林岚宣布会议结束。')
+    draft = {'nodes': [
+        {'type': 'big_event', 'name': '第一篇章'},
+        {'type': 'scene', 'name': '会场', 'big_event': '第一篇章'},
+        {'type': 'person', 'name': '林岚'},
+        {'type': 'location', 'name': '会议室'},
+        {'type': 'event', 'name': '会议结束', 'scene': '会场', 'participants': ['林岚'],
+         'location': '会议室', 'quotes': ['林岚宣布会议结束。']},
+    ], 'properties': []}
+    result = ops.submit_extraction(source, draft)
+    assert result.get('status') in {'accepted', 'staged'}, result
+    assert not any(row.get('code') == 'tool_failed' for row in (result.get('problems') or []))
+    scene = next((n for n in ops.graph_snapshot()['nodes'] if n['node_type'] == 'scene'
+                  and n['name'] == '会场'), None)
+    if result.get('status') == 'accepted':
+        assert scene is not None
