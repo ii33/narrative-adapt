@@ -205,7 +205,8 @@ def _business_lease(directory: Path):
 def session_directory(ops, chat_id: str | None = None) -> Path:
     store = ChatStore(Path(ops.project_info().path))
     chat = current_chat(ops, chat_id)
-    return store.sdk_directory() / "chats" / chat["id"]
+    # 目录名沿用磁盘上的会话标识（旧工程是 uuid），可读编号只做读取映射。
+    return store.sdk_directory() / "chats" / store.file_stem(chat["id"])
 
 
 def _save(path: Path, payload: dict) -> None:

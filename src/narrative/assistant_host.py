@@ -122,7 +122,10 @@ def _safe_host_method(function):
         try:
             return function(self, *args, **kwargs)
         except Exception as error:
-            raise ValueError(_redact(str(error), bound.secrets)) from None
+            # 模型可见的错误只说哪一类事、哪个可读编号；路径与哈希留在审计里。
+            from .model_text import scrub
+
+            raise ValueError(scrub(_redact(str(error), bound.secrets))) from None
     return invoke
 
 

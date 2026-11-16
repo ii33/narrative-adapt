@@ -42,6 +42,11 @@ class BatchReader:
     def property_records(self) -> list[dict]:
         return deepcopy(self.batch._records)
 
+    def property_vocabulary(self) -> dict:
+        """五层属性白名单（`U-12`）：提取时按它收属性行，表外的名字丢弃并回 `info`。"""
+        from . import property_vocabulary
+        return property_vocabulary.load(self.batch.store)
+
     def source(self, identifier: str) -> dict:
         if identifier not in self.batch._sources:
             raise ValueError('原文不存在')

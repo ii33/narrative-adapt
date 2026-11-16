@@ -37,10 +37,9 @@ def setup(project, *, item=False):
     if item:
         nodes.append({"type": "item", "name": "纸条"})
         properties.extend([
-            # 纸条靠事件自己的节点属性引用进入导入范围：参与者域已收窄为人物/群体，
-            # 物品不能顶替参与者，改用属性引用表达"这个事件涉及纸条"。
-            {"node": "事件1", "property": "涉及物品", "category": "未分类", "value": "纸条", "value_type": "node",
-             "at_event": "事件1"},
+            # 纸条的持有状态记在它自己身上（物品属性自由命名），由下面那条非提取写入
+            # 把它拉进导入范围：事件类节点的属性名受五层白名单约束（`U-12`），
+            # 「事件涉及纸条」不能再写成事件侧的自由属性行。
             {"node": "纸条", "property": "持有者", "category": "未分类", "value": "甲", "value_type": "either", "scope": "world",
              "at_event": "事件0"},
             {"node": "纸条", "property": "持有者", "category": "未分类", "value": "无", "value_type": "either", "scope": "world",
@@ -50,6 +49,17 @@ def setup(project, *, item=False):
         row["op"]="set"
     result = project.submit_extraction(sid, {"nodes": nodes, "properties": properties})
     assert result["status"] == "accepted", result
+    ids = {n["name"]: n["id"] for n in project.graph_snapshot()["nodes"]}
+    if item:
+        # 参与者域已收窄为人物/群体，物品不能顶替参与者；这条引用是人工/程序侧写入
+        # （不走提取草稿），用来表达「这个事件涉及纸条」并把物品拉进导入闭包。
+        applied = project.apply_changes([], [
+            {"kind": "property_definition", "id": "涉及物品", "value_type": "node", "cardinality": "one"},
+            {"kind": "property_change", "id": "PC涉及物品1", "node_id": ids["事件1"], "property_id": "涉及物品",
+             "op": "set", "value": ids["纸条"], "event_id": ids["事件1"], "sequence": 1,
+             "category": "未分类"},
+        ], project.graph_project_info()["revision"], "合成：这个事件涉及纸条")
+        assert applied["status"] == "accepted", applied
     return {n["name"]: n["id"] for n in project.graph_snapshot()["nodes"]}
 
 

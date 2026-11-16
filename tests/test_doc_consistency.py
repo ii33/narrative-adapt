@@ -58,7 +58,18 @@ LITERAL_ROOTS = ("src", "tests", "scripts")
 RETIRED = {
     "主要故事仅在模型确认完整大篇章真正结束后总结创建": "T 是范围，可在进行中创建并持续修订，不等该部完结",
     "场景是连续时空或叙事语境的容器": "场景是空间接近、时间连续的事件归纳，地点只记在事件上（剧本场次另说）",
+    # v34 撤掉的事件判据：「对任何一句对白都成立」等于没有判据，换成了「事件不是动作」＋「层级之间是粒度差」。
+    "可独立概括": "事件不是动作：事件里还分得出「怎么做的」那几步，拆不开、只有一步的属于动作层（M-01、E-05）",
+    "起因、推进": "层级之间是粒度差：五层都是「事件」，只是粒度等级不同，粗的一级装得下细的一级若干条（M-01、E-05）",
+    "起因与落点": "层级之间是粒度差：大事件是阶段级、场景装得下相邻事件、动作是事件里的一步（M-01、E-05）",
+    "判断三问": "自检一句就够：放进上一层或下一层都说得通，说明它还没被定层（M-01）",
 }
+
+# 变更记录要引用被撤掉的原文才说得清改了什么：旧口径只允许出现在「记录」文件里，不许出现在判据文件里。
+RETIRED_HISTORY_FILES = frozenset({
+    "docs/extraction/PROMPT_CHANGELOG.md",
+    "docs/EXTRACTION_PROMPT_REWRITE.md",
+})
 
 # 「场景是连续时空或叙事语境的容器」这类表述在讲剧本场次时仍然成立：白名单只放讲场次的上下文。
 SCENE_POLICY_MARKERS = ("场次", "剧本", "script_unit")
@@ -265,6 +276,8 @@ def check_retired_phrasings(root: Path = ROOT) -> list[Problem]:
     """旧口径长句不得在文档或提示词默认值里复现。"""
     problems = []
     for path in [*_prose_files(root), *_doc_candidates_for_scan(root)]:
+        if _rel(path, root) in RETIRED_HISTORY_FILES:
+            continue
         lines = _read(path).splitlines()
         for index, line in enumerate(lines):
             for phrase, replacement in RETIRED.items():

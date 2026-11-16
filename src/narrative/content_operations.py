@@ -17,6 +17,7 @@ CONTENT_OPERATIONS = {
     'submit_extraction': ContentOperationSpec(('result',), ('source_id', 'start', 'end'), medium='extraction'),
     'create_source_slices': ContentOperationSpec(('slices',), ('source_id',)),
     'set_property_categories': ContentOperationSpec(('config',)),
+    'set_property_vocabulary': ContentOperationSpec(('config',)),
     'property_categorize': ContentOperationSpec(('category', 'note'), ('targets',)),
     'apply_changes': ContentOperationSpec(('graph_objects', 'property_records')),
     'record_property_change': ContentOperationSpec(('property_id', 'op', 'value', 'value_type', 'cardinality', 'symmetric', 'scope', 'holder_id', 'context_id', 'quote', 'source_id', 'category', 'source', 'related_nodes'), ('node_id', 'event_id')),
@@ -266,6 +267,8 @@ def capture_basis(ops, operation, arguments):
             return {'asset_revision': db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0]}
     if operation == 'set_property_categories':
         return ops.property_categories()
+    if operation == 'set_property_vocabulary':
+        return ops.property_vocabulary()
     if operation == 'property_categorize':
         ids = arguments.get('targets') or []
         return [row for row in ops.property_records() if row['id'] in ids]

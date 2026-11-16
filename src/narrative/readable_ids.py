@@ -48,6 +48,44 @@ def allocate_id(db: Connection, namespace: str, prefix: str, existing_ids: Itera
     return identifier
 
 
+_GENERATED_PATTERNS = (
+    re.compile(r"\d{8}T\d{6,}\d*Z(?:-[0-9a-f]{6,})?"),   # 时间戳+短哈希的运行号
+    re.compile(r"host-task-\d{8}T\d{6,}\d*Z"),             # 旧的无业务任务号
+    re.compile(r"[0-9a-f]{8,}"),                            # uuid 截断、sha 前缀
+    re.compile(r"[0-9a-f]{8,}-[0-9a-f]{4,}(?:-[0-9a-f]{4,})*"),  # 分段 uuid
+)
+
+
+def looks_generated(identifier: str) -> bool:
+    """Whether a name is a machine code (uuid/sha/timestamp) rather than a readable id.
+
+    Only generated names get补映射 to ``chat-N``/``task-N``; hand-written readable
+    names (``first-chat``、``task1``) keep their identity.
+    """
+    return isinstance(identifier, str) and any(
+        pattern.fullmatch(identifier) for pattern in _GENERATED_PATTERNS)
+
+
+def next_file_id(index: dict, prefix: str, taken: Iterable[str] = ()) -> str:
+    """Bump a file-backed counter and return ``prefix + ordinal``.
+
+    Chat and task identities are files, not rows, so their counters live in a
+    small JSON index the caller writes atomically. The rule is the same as the
+    database one: never reuse a number, never require a semantic-free id.
+    """
+    if not isinstance(index, dict):
+        raise ValueError("ID计数器须为对象")
+    if not isinstance(prefix, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*-", prefix):
+        raise ValueError("ID前缀须为可读类型名并带分隔符")
+    previous = index.get("next")
+    number = previous if type(previous) is int and previous > 0 else 1
+    used = {value for value in taken if isinstance(value, str)}
+    while f"{prefix}{number}" in used:
+        number += 1
+    index["next"] = number + 1
+    return f"{prefix}{number}"
+
+
 def reserve_id(db: Connection, namespace: str, prefix: str, identifier: str) -> str:
     """Retain an explicit numeric ID's high-water mark without allocating a slot.
 

@@ -336,6 +336,14 @@ def validate(ops, fixture, screenplay, calls, report):
         "whole_original_source_unchanged": qa.digest(ops.source(fixture["source_id"])["text"].encode())
         == fixture["source_text_sha256"],
     }
+    # 事件密度：同一批事件换几个分母看规模（每场景、每千字、单场景最多）。
+    # 场景装哪些事件记在场景节点的 `events` 上（图快照不往事件上写 parent_id）；
+    # 一个场景装一条事件也成立，所以分母不从事件数反推，也不要求每场景多于一条。
+    scene_events = {
+        node["id"]: len(node.get("events") or [])
+        for node in graph["nodes"] if node["node_type"] == "scene"
+    }
+    target_chars = max(1, TASK_END - TASK_START)
     # 提取质量的测量值：只记数字，不判定。分八段与事件密度都不是配额（`M-01`）。
     report["measurements"] = {
         "accepted_batches": len(accepted),
@@ -347,13 +355,18 @@ def validate(ops, fixture, screenplay, calls, report):
         "empty_eighth_bins": empty_bins,
         "longest_empty_run": longest_gap,
         "action_nodes": sum(1 for node in graph["nodes"] if node["node_type"] == "action"),
+        "event_count_total": len(events),
+        "scene_count": len(scene_events),
+        "events_per_scene": round(len(events) / len(scene_events), 2) if scene_events else None,
+        "events_per_1000_chars": round(len(events) * 1000 / target_chars, 2),
+        "max_events_in_one_scene": max(scene_events.values(), default=0),
         "slice_bounds": [{"start": row["start"], "end": row["end"]} for row in slices],
         "evidence_outside_task_range": [
             {"start": span["start"], "end": span["end"]}
             for span in spans if span["start"] < TASK_START or span["end"] > TASK_END
         ][:10],
         "chapter_bounds": [{"index": c["index"], "start": c["start"], "end": c["end"]} for c in fixture["chapters"]],
-        "note": "这些是测量，不是判定：事件密度、覆盖与动作有无都不能说明提取对错（M-01）。",
+        "note": "这些是测量，不是判定：事件密度、覆盖与动作有无都不能说明提取对错。事件密度只报规模，不设阈值——判据是粒度差（M-01），不是每千字几个事件；密度偏高通常意味着把动作层的微节拍立成了事件。",
     }
     return structural
 

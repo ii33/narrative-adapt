@@ -15,7 +15,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
@@ -1896,7 +1895,10 @@ class NativeBridge(QObject):
             fail_start(exc)
             return
 
-        job = {"chat_id": requested_chat, "task_id": f"{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}-{uuid4().hex[:8]}", "runtime": None,
+        from .task_ids import next_task_id
+
+        # 任务身份是工程内序数 task-12：能读、能复述，不是时间戳加哈希。
+        job = {"chat_id": requested_chat, "task_id": next_task_id(path), "runtime": None,
                "cancel": threading.Event(), "stop_reason": "user_stopped"}
         if writing_task is not None:
             job.update(writing_target=writing_task.get("target", {}), project_path=str(path))
@@ -2020,9 +2022,12 @@ class NativeBridge(QObject):
                                 from .screenplay_writing import validate_script_writing_tool_call
                                 validate_script_writing_tool_call(writing_task, effective_name, decode_tool_parameters(ops, effective_args), ops=ops)
                         except ValueError as exc:
+                            from .model_text import scrub
+
+                            message = redact(scrub(str(exc)))
                             native_steps.append({"tool": name, "args": args, "ok": False,
-                                                 "error": str(exc), "diagnostic": "writing_target_scope"})
-                            raise
+                                                 "error": message, "diagnostic": "writing_target_scope"})
+                            raise ValueError(message) from exc
                         from .tool_execution_context import bind_tool_execution_metadata
                         task_metadata = (audit.get("writing_task_metadata") if access_mode == "standard" else None) or {
                             "task_id": task_id, "manifest_ref": str(audit_dir / "task.json")}
@@ -2168,7 +2173,11 @@ class NativeBridge(QObject):
                         pass
                     failure_metadata = getattr(exc, "metadata", None) or {}
                     diagnostic_path = getattr(exc, "diagnostic_path", "") or str(audit_dir / "task.json")
-                    reason = redact(str(exc))
+                    from .model_text import scrub
+                    from .task_ids import task_reference
+
+                    # 给模型与面板的话只说哪一类事、哪个可读编号；完整路径留在审计里。
+                    reason = redact(scrub(str(exc)))
                     if getattr(exc, "code", "") == "tool_input_invalid_json" and "提取" in message:
                         reason = "模型工具参数 JSON 格式错误，本次提取未完成"
                     revision = ops.graph_project_info()["revision"]
@@ -2192,7 +2201,8 @@ class NativeBridge(QObject):
                                    "graph_reset_required": revision != starting_revision,
                                    "audit_directory": str(audit_dir)}
                         return outcome
-                    raise ValueError(reason + "。" + state + "诊断：" + diagnostic_path) from exc
+                    raise ValueError(reason + "。" + state + "诊断见" + task_reference(task_id)
+                                     + "的本地任务记录（不随消息发送）。") from exc
                 finally:
                     host_cleanup = None
                     if session_runner is not None:

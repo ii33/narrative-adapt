@@ -138,9 +138,28 @@ def _public(ops, record):
 class ChatAttachmentOperationsMixin:
     _store: GraphStore
 
-    def import_chat_attachments(self, chat_id, paths, task_id=None):
+    def _selected_chat(self, chat_id):
+        """会话编号是内部细节：工具里省略时取当前会话，返回可读编号。"""
+        store = ChatStore(self._store.path)
+        if not chat_id:
+            from .tool_execution_context import current_chat_id
+
+            chat_id = current_chat_id()
+        if not chat_id:
+            raise ValueError('请先选择会话，再导入或读取附件')
+        return store.readable(store.load(chat_id)['id'])
+
+    def _current_task(self, task_id):
+        if task_id:
+            return task_id
+        from .tool_execution_context import current_task_id
+
+        return current_task_id()
+
+    def import_chat_attachments(self, chat_id=None, paths=None, task_id=None):
         """Explicit user selection, not an assistant tool for arbitrary external reads."""
-        ChatStore(self._store.path).load(chat_id)
+        chat_id = self._selected_chat(chat_id)
+        task_id = self._current_task(task_id)
         if not isinstance(paths, list) or not paths:
             raise ValueError('请提供至少一个用户选择的附件')
         sources = [selected_file(value) for value in paths]
@@ -173,14 +192,18 @@ class ChatAttachmentOperationsMixin:
             rollback.pop_all()
         return {'chat_id': chat_id, 'attachments': [_public(self, record) for record in records]}
 
-    def list_chat_attachments(self, chat_id):
-        ChatStore(self._store.path).load(chat_id)
+    def list_chat_attachments(self, chat_id=None):
+        chat_id = self._selected_chat(chat_id)
+        store = ChatStore(self._store.path)
         with self._store.connect() as db:
             records = [json.loads(row[0]) for row in db.execute("SELECT value FROM meta WHERE key LIKE 'chat_attachment:%' ORDER BY rowid")]
-        return {'chat_id': chat_id, 'attachments': [_public(self, record) for record in records if record['chat_id'] == chat_id]}
+        return {'chat_id': chat_id, 'attachments': [_public(self, record) for record in records
+                                                   if store.readable(str(record.get('chat_id') or '')) == chat_id]}
 
-    def read_chat_attachment(self, chat_id, attachment_id, offset=0, limit=16000):
-        ChatStore(self._store.path).load(chat_id)
+    def read_chat_attachment(self, chat_id=None, attachment_id=None, offset=0, limit=16000):
+        chat_id = self._selected_chat(chat_id)
+        if not isinstance(attachment_id, str) or not attachment_id:
+            raise ValueError('请提供附件可读编号')
         if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 65536:
             raise ValueError('附件字符offset须非负，limit须1..65536')
         with self._store.connect() as db:
@@ -188,7 +211,7 @@ class ChatAttachmentOperationsMixin:
         if row is None:
             raise ValueError('附件不属于当前工程')
         record = json.loads(row[0])
-        if record['chat_id'] != chat_id:
+        if ChatStore(self._store.path).readable(str(record.get('chat_id') or '')) != chat_id:
             raise ValueError('附件不属于指定聊天')
         result = _public(self, record)
         if not result['available']:

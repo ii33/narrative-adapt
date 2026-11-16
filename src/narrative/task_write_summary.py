@@ -358,31 +358,40 @@ class TaskWriteSummaryOperationsMixin:
     def summarize_task_writes(self, steps, status='completed', task_id=None):
         return build_submission_summary(steps, status, task_id=task_id)
 
-    def read_task_write_summary(self, task_id, chat_id=None):
+    def read_task_write_summary(self, task_id=None, chat_id=None):
+        from .chat_store import ChatStore
         from .project_package import layout
+        from .task_ids import readable_task_id, task_file_stem
+        from .tool_execution_context import current_chat_id, current_task_id
+        task_id = task_id or current_task_id()
+        chat_id = chat_id or current_chat_id()
         if not isinstance(task_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,160}', task_id):
             raise ValueError('任务编号无效')
-        root = layout(self.project_info().path).extraction / 'assistant' / 'tasks'
-        path = root / task_id / 'task.json'
+        project = self.project_info().path
+        store = ChatStore(project)
+        readable = readable_task_id(project, task_id)
+        stem = task_file_stem(project, task_id)
+        root = layout(project).extraction / 'assistant' / 'tasks'
+        path = root / stem / 'task.json'
         if not path.resolve().is_relative_to(root.resolve()):
             raise ValueError('任务不属于当前工程')
         if path.is_file():
             audit = json.loads(path.read_text(encoding='utf-8'))
-            if chat_id and audit.get('chat_id') != chat_id:
+            if chat_id and store.readable(str(audit.get('chat_id') or '')) != store.readable(chat_id):
                 raise ValueError('任务不属于指定聊天')
-            return build_submission_summary(audit.get('steps', []), audit.get('status', 'incomplete'), task_id=task_id,
+            return build_submission_summary(audit.get('steps', []), audit.get('status', 'incomplete'), task_id=readable,
                                             host_cleanup=audit.get('host_cleanup'))
         if not chat_id:
-            raise ValueError('任务审计不存在；读取无头任务总结须明确chat_id')
-        from .chat_store import ChatStore
-        store = ChatStore(self.project_info().path)
+            raise ValueError('任务审计不存在；读取无头任务总结须明确会话')
         store.load(chat_id)
-        turn_root = root.parent / 'chats' / chat_id / 'turns'
+        turn_root = root.parent / 'chats' / store.file_stem(chat_id) / 'turns'
         latest = None
         seen = set()
         for metadata_path in sorted(turn_root.glob('*/metadata.json')):
             metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
-            if metadata.get('task_id') != task_id or metadata.get('chat_id') != chat_id:
+            if task_file_stem(project, str(metadata.get('task_id') or '')) != stem:
+                continue
+            if store.readable(str(metadata.get('chat_id') or '')) != store.readable(chat_id):
                 continue
             turn_id = metadata.get('usage_turn_id')
             summary = metadata.get('commit_summary')
@@ -395,4 +404,4 @@ class TaskWriteSummaryOperationsMixin:
         if not seen:
             raise ValueError('该聊天中不存在指定任务的程序入库总结')
         assert latest is not None
-        return deepcopy(latest) | {'task_id': task_id}
+        return deepcopy(latest) | {'task_id': readable}

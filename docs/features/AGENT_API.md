@@ -243,7 +243,7 @@ result = tool_api.call("event_state", {"event_id": "E1"}, project="C:/projects/e
 
 常规提取直接`submit_extraction`，程序自动定位与静态检查；合法立即原子入库，问题批持久暂存，只按反馈的submission_id和问题索引局部patch。成功仅返回必要状态、修订和计数；暂存不是人工审批候选，也不算正式入库。完整诊断、原始模型消息及存疑理由保留宿主审计，preview仅用于独立试查。
 
-层级为主要故事（storyline/T）→大事件（big_event/B）→场景（scene/S）→事件（event/E）→动作（action/A）。主要故事可用 `children:[B1,B2]` 归并已有大事件，无需重列或手填引文；`completion` 由程序从下级已验证证据派生，不要求 `closing_quote`。边界怎么判、完成与进展属性怎么写，见[提取规范](../extraction/SPEC.md) §4 `M-01`–`M-04`、§5 `I-11`、`I-33`。
+层级为主要故事（storyline/T）→大事件（big_event/B）→场景（scene/S）→事件（event/E）→动作（action/A）。主要故事可用 `children:[B1,B2]` 归并已有大事件，无需重列或手填引文；`completion` 由程序从下级已验证证据派生，不要求 `closing_quote`。边界怎么判、五层能写哪些属性名（白名单）、改名怎么写，见[提取规范](../extraction/SPEC.md) §4 `M-01`–`M-04`、§0.1 `U-12`／`U-13`、§5 `I-11`、`I-33`。
 
 大事件在同语境内依原文顺序形成 `[start,next.start)` 的连续阅读区间。末个大事件已归入完成的主要故事时，以该主要故事的 `completion` 为末端；否则保持 `end=null`。这不是故事发生时间区间。`attach_children(parent_id,child_ids)` 可直接归入已有直属子项，主要故事归大事件、大事件归场景、场景归事件（或嵌套场景）、事件归动作；不保留旧场景直属主要故事的接口。
 

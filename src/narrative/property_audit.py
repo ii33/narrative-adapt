@@ -283,14 +283,8 @@ def audit_properties(
                 suggestion="节点撤回时一并撤回它的属性记录，或恢复该节点",
             ))
 
-    # 两级进展记录在直属子级，容器仅汇总。
-    expected_progress = {property_labels.STORYLINE_PROGRESS: "big_event", property_labels.BIG_EVENT_PROGRESS: "scene"}
-    for record in values:
-        expected = expected_progress.get(str(record.get("property_id") or ""))
-        node = names.get(record.get("node_id") or "") or {}
-        if expected and node.get("node_type") != expected:
-            issues.append(_issue("progress_owner", INFO, f"进展须记录在直属子级{expected}上", node=node,
-                                 property_id=record.get("property_id"), records=[record]))
+    # 不再有「进展属性」：大事件与主要故事的进展就是当前生效的名字（`U-13`），
+    # 所以这里也不再有「进展须记录在直属子级」这一条。
 
     # 关系名要指清是哪一边。成对的叫法（父子）读不出谁是谁的父亲；单边称呼
     # （父亲）写两侧各一次是对的，但两侧都写同一个词，方向就没了。

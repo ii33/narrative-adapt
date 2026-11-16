@@ -29,10 +29,12 @@ def register(Tool, register_tool, validate):
         register_tool(Tool(name, summary, params, invoke, writes=writes))
 
     add("read_task_write_summary", "只读当前工程可信任务审计的程序入库总结；只计实际成功写入，取消/失败保留已提交内容，不把预览/只读/拒绝当写入", {
-        "task_id": text | {"required": True}, "chat_id": {"type": ["string", "null"]}})
+        "task_id": {"type": ["string", "null"], "description": "任务可读编号；对话任务省略即当前任务"},
+        "chat_id": {"type": ["string", "null"], "description": "会话内部编号；对话任务省略即当前会话"}})
 
     add("read_usage_statistics", "只读统计当前聊天/任务provider请求用量、缓存命中token及加权命中率、最近generation上下文输入；缓存是输入拆分不重复加总，缺报或无可比输入时命中率null，部分覆盖单列已知请求命中率，上下文不等于累计tokens", {
-        "chat_id": {"type": ["string", "null"]}, "task_id": {"type": ["string", "null"]}})
+        "chat_id": {"type": ["string", "null"], "description": "会话内部编号；对话任务省略即当前会话"},
+        "task_id": {"type": ["string", "null"], "description": "任务可读编号；对话任务省略即当前任务"}})
 
     add("load_creative_agreement", "读取统一创作约定：工程默认、单份剧本逐项覆盖和实际生效值；字段为tone/audiovisual_style/dialogue_style/rhythm/audience/adaptation_principles/format_length/production_constraints/other。省略剧本时只读工程默认", {
         "screenplay_id": {"type": ["string", "null"]}})

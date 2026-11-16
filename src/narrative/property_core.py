@@ -74,7 +74,12 @@ def container_property_duplicate(record, records, nodes):
     judgement at all.
     """
     from .container_evidence import CONTAINER_TYPES, descendant_events
+    from .property_vocabulary import is_name_property
     if record.get('kind') != 'property_change':
+        return None
+    if is_name_property(record.get('property_id')):
+        # 名字是节点自己的身份属性（`U-13`），不是对下属事件的归纳：场景／大事件／
+        # 主要故事的名字不会因为它的事件也有名字就被判重丢掉。
         return None
     node = nodes.get(record.get('node_id')) if isinstance(record.get('node_id'), str) else None
     if not node or node.get('node_type') not in CONTAINER_TYPES:

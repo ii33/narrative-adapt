@@ -43,3 +43,14 @@ def test_only_events_need_their_own_pointer():
     text = SPEC.read_text(encoding="utf-8")
     assert "只有事件" in text
     assert "anchor" in text
+
+
+def test_identity_is_the_id_and_name_is_only_a_property():
+    """身份是编号，名字只是属性；名字随披露变更、旧名失效。"""
+    model = MODEL.read_text(encoding="utf-8")
+    glossary = (ROOT / "docs" / "GLOSSARY.md").read_text(encoding="utf-8")
+    assert "名字不是身份" in model
+    assert "旧名失效、新名生效" in model
+    assert "名字只是一条属性" in glossary
+    # 编号只表身份那句旧说法必须已经改掉，别再和「同一类型内编号即顺序」打架。
+    assert "只表身份" not in glossary

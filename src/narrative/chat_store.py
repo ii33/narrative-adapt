@@ -14,12 +14,15 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import threading
 import time
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
 from uuid import uuid4
+
+from .readable_ids import looks_generated, next_file_id
 
 MAX_TITLE = 24
 
@@ -29,8 +32,13 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds")
 
 
-def _new_id() -> str:
-    return uuid4().hex[:12]
+_ID_INDEX = ".chat_ids"
+# 新式会话编号：工程内序数。旧工程的 uuid 文件名只在读取时补映射，不改写。
+_READABLE_CHAT = re.compile(r"chat-[1-9][0-9]*\Z")
+
+
+def _is_readable(identifier: str) -> bool:
+    return bool(_READABLE_CHAT.fullmatch(identifier))
 
 
 def _replace(temporary: Path, target: Path) -> None:
@@ -93,12 +101,119 @@ class ChatStore:
         # 包和裸工程问同一处：包里的会话在 <包>/chats。
         self.root = layout(self.project).chats
 
+    # -- 可读会话编号 --------------------------------------------------
+
+    def _index_path(self) -> Path:
+        return self.root / _ID_INDEX
+
+    def _read_index(self) -> dict:
+        try:
+            data = json.loads(self._index_path().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = None
+        raw = data if isinstance(data, dict) else {}
+        legacy = raw.get("legacy")
+        legacy = legacy if isinstance(legacy, dict) else {}
+        next_number = raw.get("next")
+        return {
+            "next": next_number if type(next_number) is int and next_number > 0 else 1,
+            "legacy": {stem: readable for stem, readable in legacy.items()
+                       if isinstance(stem, str) and isinstance(readable, str) and _is_readable(readable)},
+        }
+
+    def _write_index(self, index: dict) -> None:
+        path = self._index_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=".chat-ids-", suffix=".tmp")
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+                json.dump(index, stream, ensure_ascii=False, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        except BaseException:
+            Path(temporary).unlink(missing_ok=True)
+            raise
+
+    def _legacy_stems(self) -> list[str]:
+        """旧工程里 uuid 命名的会话文件，按创建时间排序（同一时刻按文件名兜底）。"""
+        rows: list[tuple[str, str]] = []
+        for path in self.root.glob("*.json"):
+            if path.name.startswith(".") or not looks_generated(path.stem):
+                continue
+            try:
+                created = str(json.loads(path.read_text(encoding="utf-8")).get("created_at") or "")
+            except (OSError, json.JSONDecodeError, AttributeError):
+                created = ""
+            rows.append((created, path.stem))
+        return [stem for _created, stem in sorted(rows)]
+
+    def _ensure_index(self) -> dict:
+        """给还没编号的旧会话补 ``chat-N``：按出现（创建）顺序，只写索引不动历史文件。"""
+        index = self._read_index()
+        if not self.root.is_dir():
+            return index
+        # 常见情况：没有待补的旧文件，一次目录枚举即可，不读会话内容。
+        unmapped = any(path.name and not path.name.startswith(".") and looks_generated(path.stem)
+                       and path.stem not in index["legacy"] for path in self.root.glob("*.json"))
+        if not unmapped:
+            return index
+        missing = [stem for stem in self._legacy_stems() if stem not in index["legacy"]]
+        if not missing:
+            return index
+        for stem in missing:
+            number = index["next"]
+            while (self.root / f"chat-{number}.json").is_file() or f"chat-{number}" in index["legacy"].values():
+                number += 1
+            index["legacy"][stem] = f"chat-{number}"
+            index["next"] = number + 1
+        self._write_index(index)
+        return index
+
+    def file_stem(self, chat_id: str) -> str:
+        """会话编号对应的文件名（可读编号与旧 uuid 都能认）。"""
+        identifier = str(chat_id)
+        for stem, readable in self._read_index()["legacy"].items():
+            if readable == identifier:
+                return stem
+        if (self.root / f"{identifier}.json").is_file():
+            return identifier
+        # 还没补映射的旧工程：这时才扫一次目录，把 uuid 文件名认成 chat-N。
+        for stem, readable in self._ensure_index()["legacy"].items():
+            if readable == identifier or stem == identifier:
+                return stem
+        return identifier
+
+    def _readable(self, stem: str) -> str:
+        if _is_readable(stem):
+            return stem
+        for legacy, readable in self._ensure_index()["legacy"].items():
+            if legacy == stem:
+                return readable
+        return stem
+
+    def readable(self, chat_id: str) -> str:
+        """任何形式的会话编号 → 可读编号；进模型的字段只用这一个。"""
+        try:
+            return self._readable(self.file_stem(chat_id))
+        except ValueError:
+            return str(chat_id)
+
+    def _next_chat_id(self) -> str:
+        index_path = self._index_path()
+        with _path_lock(index_path):
+            index = self._ensure_index()
+            taken = set(index["legacy"].values()) | {path.stem for path in self.root.glob("chat-*.json")}
+            identifier = next_file_id(index, "chat-", taken)
+            self._write_index(index)
+            return identifier
+
     # -- 读写 ----------------------------------------------------------
 
     def path_for(self, chat_id: str) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", str(chat_id)):
             raise ValueError("会话编号无效")
-        return self.root / f"{chat_id}.json"
+        return self.root / f"{self.file_stem(str(chat_id))}.json"
 
     @_locked_chat
     def load(self, chat_id: str) -> dict:
@@ -108,8 +223,9 @@ class ChatStore:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError(f"会话文件损坏：{chat_id}")
-        data.setdefault("id", chat_id)
-        data.setdefault("session", f"chat-{chat_id}")
+        # 可读编号就是会话身份；旧文件里的 uuid 只留在磁盘上。
+        data["id"] = self._readable(path.stem)
+        data.setdefault("session", data["id"])
         data.setdefault("title", "新会话")
         data.setdefault("access_mode", "standard")
         data.setdefault("access_revision", 0)
@@ -121,12 +237,19 @@ class ChatStore:
         return data
 
     def _save(self, data: dict) -> dict:
-        with _path_lock(self.path_for(str(data["id"]))):
+        identifier = str(data["id"])
+        stem = self.file_stem(identifier)
+        path = self.root / f"{stem}.json"
+        with _path_lock(path):
+            data["id"] = self._readable(stem)
             data["updated_at"] = _now()
             self.root.mkdir(parents=True, exist_ok=True)
-            path = self.path_for(str(data["id"]))
+            payload = {key: value for key, value in data.items() if not key.startswith("_")}
+            if not _is_readable(stem):
+                # 旧文件的 uuid 身份不改写；可读编号只在读取时映射。
+                payload["id"] = stem
             temporary = path.with_suffix(f".{uuid4().hex}.tmp")
-            temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             _replace(temporary, path)
             return data
 
@@ -167,10 +290,11 @@ class ChatStore:
     # -- 会话 ----------------------------------------------------------
 
     def create(self, title: str = "", *, template: dict | None = None) -> dict:
-        chat_id = _new_id()
+        # 编号就是身份：工程内序数 chat-3，文件也叫 chat-3.json。
+        chat_id = self._next_chat_id()
         chat = self._save({
             "id": chat_id,
-            "session": f"chat-{chat_id}",
+            "session": chat_id,
             "title": (title or "").strip() or "新会话",
             "created_at": _now(),
             "access_mode": "standard",
@@ -189,6 +313,8 @@ class ChatStore:
             return []
         rows: list[dict] = []
         for path in self.root.glob("*.json"):
+            if path.name.startswith("."):
+                continue  # .chat_ids 一类的索引文件不是会话
             try:
                 with _path_lock(path):
                     data = json.loads(path.read_text(encoding="utf-8"))
@@ -198,9 +324,10 @@ class ChatStore:
                 continue
             raw = data.get("messages")
             messages: list = raw if isinstance(raw, list) else []
+            identifier = self._readable(path.stem)
             rows.append({
-                "id": str(data.get("id") or path.stem),
-                "session": str(data.get("session") or f"chat-{path.stem}"),
+                "id": identifier,
+                "session": str(data.get("session") or identifier),
                 "title": str(data.get("title") or "新会话"),
                 "updated_at": str(data.get("updated_at") or ""),
                 "created_at": str(data.get("created_at") or ""),

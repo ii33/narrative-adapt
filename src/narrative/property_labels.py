@@ -10,10 +10,6 @@ than to a guess, so a new aspect shows up as what it is.
 
 from __future__ import annotations
 
-# 主要故事从大事件汇总，阶段性大事件从场景汇总。
-STORYLINE_PROGRESS = "storyline_progress"
-BIG_EVENT_PROGRESS = "big_event_progress"
-
 LABELS: dict[str, str] = {
     # 人物
     "age": "年龄",
@@ -142,8 +138,6 @@ LABELS: dict[str, str] = {
     "build": "体型",
     "location": "位置",
     "state": "状态",
-    STORYLINE_PROGRESS: "主要故事进展",
-    BIG_EVENT_PROGRESS: "大事件进展",
     "process": "过程",
     "result": "结果",
     "outcome": "结果",

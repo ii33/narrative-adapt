@@ -218,6 +218,7 @@ def _context(turns, sampled_at, live):
 def read_statistics(project_path, chat_id=None, task_id=None, *, _refresh_history=True):
     from .chat_store import ChatStore
     from .project_package import layout
+    from .task_ids import readable_task_id
     project = layout(project_path)
     store = ChatStore(project.db)
     if not chat_id:
@@ -227,6 +228,8 @@ def read_statistics(project_path, chat_id=None, task_id=None, *, _refresh_histor
         except (OSError, ValueError, KeyError, TypeError):
             rows = store.list()
             chat_id = rows[0]['id'] if rows else None
+    chat_id = store.readable(str(chat_id)) if chat_id else None
+    task_id = readable_task_id(project_path, str(task_id)) if task_id else None
     history_key = (str(project.db.resolve()), chat_id)
     with _LOCK:
         history = _HISTORY.get(history_key)
@@ -249,28 +252,28 @@ def read_statistics(project_path, chat_id=None, task_id=None, *, _refresh_histor
         except (OSError, ValueError) as exc:
             diagnostics.append({'code': 'usage_record_unreadable', 'message': f'{path.parent.name}: {type(exc).__name__}'})
             continue
-        if audit.get('chat_id') != chat_id:
+        if store.readable(str(audit.get('chat_id') or '')) != chat_id:
             continue
-        identifier = str(audit.get('task_id') or audit.get('id') or path.parent.name)
+        identifier = readable_task_id(project_path, str(audit.get('task_id') or audit.get('id') or path.parent.name))
         stamp = datetime.fromtimestamp(modified, UTC).isoformat()
         data_time = max(data_time or stamp, stamp)
         tasks[identifier] = {'turns': {str(m.get('usage_turn_id') or index + 1): m for index, m in enumerate(audit.get('calls') or []) if isinstance(m, dict)}, 'sampled_at': stamp, 'live': False, 'sequence': 0}
     if refresh and chat_id:
         owners = {turn: identifier for identifier, task in tasks.items() for turn in task['turns']}
-        turn_root = project.extraction / 'assistant' / 'chats' / chat_id / 'turns'
+        turn_root = project.extraction / 'assistant' / 'chats' / store.file_stem(chat_id) / 'turns'
         for path in sorted(turn_root.glob('*/metadata.json')) if turn_root.exists() else []:
             try:
                 metadata, modified = _read_json(path)
             except (OSError, ValueError) as exc:
                 diagnostics.append({'code': 'usage_record_unreadable', 'message': f'{path.parent.name}: {type(exc).__name__}'})
                 continue
-            if metadata.get('chat_id') not in (None, chat_id):
+            if store.readable(str(metadata.get('chat_id') or '')) not in ('', chat_id):
                 continue
             turn = metadata.get('usage_turn_id')
             if not isinstance(turn, str) or not turn.strip():
                 diagnostics.append({'code': 'usage_source_identity_missing', 'message': f'{path.parent.name}: 独立用量记录缺少usage_turn_id，无法确认与任务审计的关系，已跳过；统计不完整'})
                 continue
-            identifier = owners.get(turn) or str(metadata.get('task_id') or turn)
+            identifier = owners.get(turn) or readable_task_id(project_path, str(metadata.get('task_id') or turn))
             stamp = datetime.fromtimestamp(modified, UTC).isoformat()
             data_time = max(data_time or stamp, stamp)
             prior = tasks.get(identifier, {'turns': {}, 'sampled_at': stamp, 'live': False, 'sequence': 0})
@@ -286,7 +289,7 @@ def read_statistics(project_path, chat_id=None, task_id=None, *, _refresh_histor
     with _LOCK:
         live_observations = list(_LIVE.items())
     for (owner, owner_chat, identifier), observation in live_observations:
-        if owner == str(project.db.resolve()) and owner_chat == chat_id:
+        if owner == str(project.db.resolve()) and store.readable(str(owner_chat)) == chat_id:
             saved = tasks.get(identifier, {'turns': {}})
             turns = observation['turns'] | saved['turns'] if saved.get('sampled_at', '') >= observation['sampled_at'] else saved['turns'] | observation['turns']
             tasks[identifier] = saved | observation | {'turns': turns, 'live': True}
@@ -330,4 +333,9 @@ class UsageStatisticsOperationsMixin:
         raise NotImplementedError
 
     def read_usage_statistics(self, chat_id=None, task_id=None):
+        if not chat_id or not task_id:
+            from .tool_execution_context import current_chat_id, current_task_id
+
+            chat_id = chat_id or current_chat_id()
+            task_id = task_id or current_task_id()
         return read_statistics(self.project_info().path, chat_id, task_id)

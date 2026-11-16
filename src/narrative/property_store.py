@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from . import property_categories, property_labels
+from . import property_categories, property_labels, property_vocabulary
 from .graph_store import GraphStore
 from .property_core import canonical_definitions, change_group, reduce_changes
 from .property_core import relation_target as relation_target
@@ -72,6 +72,13 @@ class PropertyStore:
     def categories(self):
         return property_categories.load(self.store)
 
+    def vocabulary(self):
+        """五层属性白名单（`U-12`）：事件类节点的属性名从这张表里取。"""
+        return property_vocabulary.load(self.store)
+
+    def set_vocabulary(self, config):
+        return property_vocabulary.save(self.store, config)
+
     def set_categories(self, config):
         previous = property_categories.load(self.store)
         vocabulary = property_categories.save(self.store, config)
@@ -107,21 +114,9 @@ class PropertyStore:
             raise ValueError('请选择存在的属性变更记录')
         return self._apply_categorizations([(t, category.strip()) for t in dict.fromkeys(targets)], note or '移动分类')
 
-    def _container_progress(self, node_id, snapshot, records, cut=None):
-        nodes = {n['id']: n for n in snapshot['nodes']}
-        owner = nodes.get(node_id, {})
-        level = {'storyline': ('big_event', property_labels.STORYLINE_PROGRESS), 'big_event': ('scene', property_labels.BIG_EVENT_PROGRESS)}.get(owner.get('node_type'))
-        if not level:
-            return []
-        children = {c for c in owner.get('events', []) if nodes.get(c, {}).get('node_type') == level[0]}
-        candidates = [r for r in projected_changes(snapshot, records, cut) if r.get('node_id') in children and r.get('property_id') == level[1]]
-        if not candidates:
-            return []
-        order = event_order(snapshot)
-        latest = max(candidates, key=lambda r: (order.get(r['event_id'], (-1, -1)), r['sequence']))
-        return [latest | {'node_id': node_id, 'derived_from': latest['node_id'], 'derived': True}]
-
     def node_properties(self, node_id, cut=None, include_derived=False):
+        # 大事件与主要故事的「进展」就是当前生效的名字（`U-13`），不再是一条从下级
+        # 场景借来的进展属性；`include_derived` 仅为兼容调用形状保留。
         snapshot = self.store.snapshot()
         records = self.accepted_records()
         nodes = {n['id']: n for n in snapshot['nodes']}
@@ -134,9 +129,6 @@ class PropertyStore:
         groups = {}
         for row in records:
             if row.get('kind') == 'property_change' and row.get('node_id') == node_id:
-                groups.setdefault(change_group(row), []).append(row)
-        if include_derived:
-            for row in self._container_progress(node_id, snapshot, records, cut):
                 groups.setdefault(change_group(row), []).append(row)
         visible_ids = {r['id'] for r in visible}
         items, hidden = [], 0

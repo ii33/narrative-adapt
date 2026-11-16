@@ -33,21 +33,23 @@ def test_original_indices_survive_sorting_and_rejected_nodes():
     assert {tuple(row['path']) for row in parsed['rejected']} == {('nodes', 0, 'participants')}
 
 
-def test_event_owner_event_target_and_existing_definition_type_are_preserved(project):
+def test_node_owner_event_target_and_existing_definition_type_are_preserved(project):
+    # 事件类的属性名受五层白名单约束（`U-12`），所以这条引用类型用例把主体放在
+    # 人物上（人物属性自由命名），目标仍然是一个事件节点。
     sid = project.import_source('事件引用', TEXT)
     payload = draft()
-    payload['properties'] = [{'node': '@3', 'property': '对应过程', "category": "未分类" , 'value': '@4', 'value_type': 'node',
+    payload['properties'] = [{'node': '@1', 'property': '对应过程', "category": "未分类" , 'value': '@4', 'value_type': 'node',
                               'op': 'set', 'at_event': '@3', 'related_nodes': ['@4']}]
     original = copy.deepcopy(payload)
     result = project.submit_extraction(sid, payload)
     assert result['status'] == 'accepted', result
     assert payload == original
-    first, second = result['node_ids']['@3'], result['node_ids']['@4']
+    first, second = result['node_ids']['@1'], result['node_ids']['@4']
     row = next(row for row in project.property_records() if row['kind'] == 'property_change' and row['property_id'] == '对应过程')
-    assert (row['node_id'], row['value'], row['event_id']) == (first, second, first)
+    assert (row['node_id'], row['value'], row['event_id']) == (first, second, result['node_ids']['@3'])
     assert row['related_nodes'] == [second]
     follow = {'nodes': [], 'properties': [{'node': first, 'property': '对应过程', "category": "未分类"  , 'value': second,
-                                          'op': 'set', 'at_event': second}]}
+                                          'op': 'set', 'at_event': result['node_ids']['@4']}]}
     assert project.submit_extraction(sid, follow)['status'] == 'accepted'
     values = [row for row in project.property_records() if row['kind'] == 'property_change' and row['property_id'] == '对应过程']
     assert len(values) == 2 and all(row['value'] == second for row in values)

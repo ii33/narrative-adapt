@@ -330,17 +330,8 @@ class _View:
                     "history_changes": history, "diagnostics": reduction.get("diagnostics", []),
                     "record_count": len(history), "later_count": 0, "records": values}
             items.append(item)
-        if derived and owner["node_type"] in {"storyline", "big_event"}:
-            progress = {"storyline": ("big_event", "storyline_progress"), "big_event": ("scene", "big_event_progress")}[owner["node_type"]]
-            candidates = [row for row in self.current_records(cutoff) if row.get("node_id") in self.descendants(identifier)
-                          and self.nodes[row["node_id"]]["node_type"] == progress[0] and row.get("property_id") == progress[1]]
-            if candidates:
-                source = max(candidates, key=self.record_key)
-                # 派生行也是"查询态"载荷：只给 state.values，不给单值 value。
-                items.append({"property_id": progress[1], "property_ids": [progress[1]], "label": label_for(progress[1]),
-                              "category": property_categories.UNCLASSIFIED, "records": [], "derived": True,
-                              "state": {"kind": "known", "values": [source["value"]]}, "state_kind": "known",
-                              "from_scene": self.ref(source["node_id"], cutoff), "is_current": True, "scope": "world"})
+        # 大事件与主要故事的「进展」就是当前生效的名字（`U-13`），不再从下级场景借一条
+        # 进展属性过来：名字是属性，改名就是一条新的「名称」变更，旧名随 set 失效。
         categories = list(dict.fromkeys(item["category"] for item in items))
         inbound, claims, heard = [], [], []
         for row in sorted(self.current_records(cutoff), key=self.record_key):

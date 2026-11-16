@@ -43,7 +43,8 @@ def test_current_node_and_tool_contracts_have_no_provisional_field(project):
     assert schema["schema_version"] == GRAPH_SCHEMA_VERSION == 11
     from narrative.tool_loading import tool_guidance
     guidance = tool_guidance(project, ['submit_extraction'])
-    assert any("直接用清晰概括名，未完也不加暂称" in row['text'] for row in guidance['guides'])
+    # 五层段（`U-12`/`U-13` 一起重写的那一段）随 submit_extraction 的指南一起加载。
+    assert any("五层结构：五层都是「事件」" in row['text'] for row in guidance['guides'])
 
 
 def test_old_draft_field_is_dropped_before_writing_but_the_store_still_refuses_it(project):
@@ -213,31 +214,30 @@ def test_completed_story_requires_explicit_valid_end_and_does_not_reveal_summary
     assert any(row['code'] == 'STORYLINE_COMPLETION' for row in analyze(snapshot)[1])
 
 
-def test_progress_has_distinct_direct_child_semantics_and_cut():
-    from narrative.property_store import PropertyStore
+def test_renaming_is_a_name_change_and_the_old_name_expires():
+    """`U-13`：编号是身份，名字是一条「名称」属性；改名后旧名失效、新名生效。
+
+    读取跟着阅读位置走：还没读到那条变更就是旧名（没有变更则回落到节点初始名），
+    读到之后才是新名——两个名字从不同时出现。
+    """
+    from narrative import property_vocabulary
     snapshot = graph()
     records = [
-        {'id': 'big_event_progress', 'kind': 'property_definition', 'value_type': 'string', 'cardinality': 'one'},
-        {'id': 'storyline_progress', 'kind': 'property_definition', 'value_type': 'string', 'cardinality': 'one'},
-        {'id': 'PV1', 'kind': 'property_change', 'op': 'set', 'node_id': 'S99',
-         'property_id': 'big_event_progress', 'value': '第一阶段推进', 'event_id': 'E99',
-         'sequence': 10, 'disclosure': {'source_id': 'SRC1', 'start': 10}},
+        {'id': '名称', 'kind': 'property_definition', 'value_type': 'string', 'cardinality': 'one'},
+        {'id': 'PV1', 'kind': 'property_change', 'op': 'set', 'node_id': 'B50',
+         'property_id': '名称', 'value': '初入天庭', 'event_id': 'E50', 'sequence': 20},
         {'id': 'PV2', 'kind': 'property_change', 'op': 'set', 'node_id': 'B50',
-         'property_id': 'storyline_progress', 'value': '整部故事推进', 'event_id': 'E50',
-         'sequence': 20, 'disclosure': {'source_id': 'SRC1', 'start': 20}},
-        {'id': 'PV3', 'kind': 'property_change', 'op': 'set', 'node_id': 'S1',
-         'property_id': 'big_event_progress', 'value': '未来阶段', 'event_id': 'E1',
-         'sequence': 30, 'disclosure': {'source_id': 'SRC1', 'start': 30}},
+         'property_id': '名称', 'value': '误入天庭', 'event_id': 'E1', 'sequence': 30},
     ]
-    store = object.__new__(PropertyStore)
-    assert store._container_progress('B99', snapshot, records, None)[0]['value'] == '第一阶段推进'
-    assert store._container_progress('T99', snapshot, records, None)[0]['value'] == '整部故事推进'
-    assert store._container_progress('T99', snapshot, records, {'source_id': 'SRC1', 'start': 10}) == []
-    rows = {row['id']: row for row in moment_tree(snapshot, records=records)['nodes']}
-    assert rows['T99']['summary'] == '整部故事推进'
-    assert rows['B99']['summary'] == '第一阶段推进'
-    cut = {row['id']: row for row in moment_tree(snapshot, 'E99', records)['nodes']}
-    assert 'T99' not in cut and cut['B99']['summary'] == '第一阶段推进'
+    def names(cut):
+        return {row['id']: row['name'] for row in moment_tree(snapshot, cut, records)['nodes']}
+    assert names('E50')['B50'] == '初入天庭'      # 第 4 点：旧名
+    assert names('E1')['B50'] == '误入天庭'       # 第 6 点：新名
+    assert names('E50')['B99'] == 'B99'          # 没有变更：回落到节点初始名
+    # 不再有「进展属性」：大事件与主要故事的进展就是它此刻的名字。
+    allowed = [name for layer in property_vocabulary.LAYERS
+               for name in property_vocabulary.allowed_names(layer)]
+    assert allowed and not any('progress' in name for name in allowed)
 
 
 def test_major_story_completion_can_leave_gap_before_next_summary():

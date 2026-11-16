@@ -10,6 +10,8 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from .model_text import scrub
+
 
 class TaskToolHost:
     """Expose only the supplied task handler, never filesystem or shell access."""
@@ -93,7 +95,8 @@ class TaskToolHost:
                     message = str(exc).replace(token, "[REDACTED]")
                     if redact is not None:
                         message = redact(message)
-                    result = {"ok": False, "error": message, "error_type": type(exc).__name__}
+                    # 模型只看到「哪一类 + 可读编号」；内部路径与哈希留在审计里。
+                    result = {"ok": False, "error": scrub(message), "error_type": type(exc).__name__}
                 raw = json.dumps(result, ensure_ascii=False).encode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json; charset=utf-8")

@@ -18,9 +18,9 @@ from __future__ import annotations
 
 from collections import Counter
 
+from . import property_vocabulary
 from .graph_query import revealed
 from .order_ids import label_id, order_key
-from .property_labels import STORYLINE_PROGRESS
 
 GRANULARITIES = ("scene", "event", "action")
 LABELS = {"storyline": "主要故事", "big_event": "大事件", "scene": "场景", "event": "事件", "action": "动作"}
@@ -125,19 +125,25 @@ def cut_for(snapshot: dict, step_id: str) -> dict | None:
     }
 
 
-def steps(snapshot: dict, granularity: str = "scene") -> list[dict]:
-    """Reading positions offered for one granularity, in reading order."""
+def steps(snapshot: dict, granularity: str = "scene",
+          records: list[dict] | None = None) -> list[dict]:
+    """Reading positions offered for one granularity, in reading order.
+
+    `name` 是当前生效的名字（`U-13`）：给了 `records` 就取截至最新的最后一条「名称」，
+    没给就回落到节点初始名。
+    """
     kind = granularity if granularity in GRANULARITIES else "scene"
     picked = [
         node for node in snapshot.get("nodes", [])
         if node.get("node_type") == kind and not node.get("retracted")
     ]
     picked.sort(key=_reading_key(snapshot))
+    names = _names_at(snapshot, records, None)
     return [
         {
             "id": node["id"],
             "label_id": label_id(node["id"], kind),
-            "name": node.get("name") or node["id"],
+            "name": names.get(node["id"]) or node.get("name") or node["id"],
             "kind": kind,
             "label": LABELS[kind],
             "start": (node.get("disclosure") or {}).get("start"),
@@ -146,25 +152,35 @@ def steps(snapshot: dict, granularity: str = "scene") -> list[dict]:
     ]
 
 
-def _progress_by_member(snapshot: dict, records: list[dict] | None) -> dict[str, dict]:
-    """主要故事进展记在大事件上，大事件进展记在场景上。"""
+def _names_at(snapshot: dict, records: list[dict] | None, cut_key: tuple | None) -> dict[str, str]:
+    """每个节点在当前阅读位置的名字（`U-13`）：编号是身份，名字只是一条属性。
+
+    「名称」变更按事件顺序排；早于当前阅读位置的才算读到，取最后一条。
+    所以第 4 点读到的是旧名、第 6 点读到的才是新名，两个名字从不同时出现；
+    没有任何变更的节点回落到 `node.name`（建节点时的初始值）。
+    """
     nodes = _by_id(snapshot)
-    best: dict[str, tuple[tuple, dict]] = {}
-    from .temporal_state import projected_changes
-    for record in projected_changes(snapshot, records or []):
-        if record.get("state_kind") != "known":
+    reading = _reading_key(snapshot)
+    per_node: dict[str, list[tuple[tuple, dict]]] = {}
+    for row in records or []:
+        if row.get("kind", "property_change") != "property_change":
             continue
-        scene = nodes.get(str(record.get("node_id") or ""))
-        expected = {"big_event": STORYLINE_PROGRESS, "scene": "big_event_progress"}.get(str((scene or {}).get("node_type") or ""))
-        if scene is None or not expected or record.get("property_id") != expected:
+        if not property_vocabulary.is_name_property(row.get("property_id")):
             continue
-        event = nodes.get(str(record.get("event_id") or ""))
-        if event is None:
+        owner = str(row.get("node_id") or "")
+        event = nodes.get(str(row.get("event_id") or ""))
+        if owner not in nodes or event is None:
             continue
-        key = _reading_key(snapshot)(event)
-        if scene["id"] not in best or key > best[scene["id"]][0]:
-            best[scene["id"]] = (key, record)
-    return {scene_id: record for scene_id, (_key_, record) in best.items()}
+        key = reading(event)
+        if cut_key is not None and key > cut_key:
+            continue
+        per_node.setdefault(owner, []).append(((key, row.get("sequence") or 0), row))
+    names: dict[str, str] = {}
+    for owner, changes in per_node.items():
+        changes.sort(key=lambda item: item[0])
+        names[owner] = property_vocabulary.effective_name(
+            nodes[owner], [row for _order, row in changes])
+    return names
 
 
 def moment_tree(
@@ -181,9 +197,9 @@ def moment_tree(
     下面。没有归属的场景进「未归入大事件」这个桶，而不是混进第一列冒充大事件
     ——混在一起时，读者没法判断自己在选哪一级。
 
-    `cut_event_id` 仅过滤可见成员；大事件名称保持原名，start/end 始终依据完整快照计算。
-    `summary` 只取到当前阅读位置。`records` 是属性取值，场景对「大事件走到哪了」的那句话
-    就在里面（`STORYLINE_PROGRESS`）。
+    `cut_event_id` 只过滤可见成员；start/end 始终依据完整快照计算。
+    `name` 是**当前阅读位置生效的名字**（`U-13`：改名是一条新的「名称」变更，旧名失效）。
+    没有进展属性，`summary` 只剩形状、恒为空：大事件与主要故事的「进展」就是它此刻的名字。
     """
     from .storyline_ranges import analyze, reading_starts
     starts = reading_starts(snapshot)
@@ -231,13 +247,9 @@ def moment_tree(
             if child in nodes:
                 parent_of.setdefault(child, node["id"])
 
-    progress = _progress_by_member(snapshot, records)
     cut_key = _reading_key(snapshot)(nodes[cut_event_id]) if cut_event_id in nodes else None
-
-    def seen(scene_id: str) -> bool:
-        if cut_key is None:
-            return True
-        return _reading_key(snapshot)(anchor_event(snapshot, nodes[scene_id])) <= cut_key
+    # 名字随阅读位置变（`U-13`）：第 4 点读到旧名、第 6 点读到新名，旧名不并列。
+    names = _names_at(snapshot, records, cut_key)
 
     orders = _orders(snapshot)
     rows: list[tuple[tuple, dict]] = []
@@ -267,7 +279,7 @@ def moment_tree(
         row = {
             "id": node["id"],
             "label_id": label_id(node["id"], kind),
-            "name": node.get("name") or node["id"],
+            "name": names.get(node["id"]) or node.get("name") or node["id"],
             "level": kind,
             "kind_label": LABELS.get(kind, ""),
             "parent_id": parent,
@@ -280,19 +292,7 @@ def moment_tree(
                 orphans[ORPHAN_STORYLINE].append(row)
             row.update(start=ranges.get(node["id"], {}).get("start"),
                        end=ranges.get(node["id"], {}).get("end"))
-            # 大事件此刻的样子：它下面已经读过的场景里，最后那一句话。
-            done = [
-                child for child in node.get("events") or []
-                if child in nodes and nodes[child].get("node_type") == ("big_event" if kind == "storyline" else "scene")
-                and seen(child)
-            ]
-            done.sort(key=lambda scene_id: _reading_key(snapshot)(anchor_event(snapshot, nodes[scene_id])))
-            for scene_id in reversed(done):
-                if progress.get(scene_id):
-                    row["summary"] = str(progress[scene_id].get("value") or "")
-                    break
         elif kind == "scene":
-            row["summary"] = str((progress.get(node["id"]) or {}).get("value") or "")
             if parent == ORPHAN_BIG_EVENT:
                 orphans[ORPHAN_BIG_EVENT].append(row)
         elif kind == "event" and parent == ORPHAN_SCENE:
@@ -555,23 +555,26 @@ def browse_view(
     # 列表里什么类型都有，所以按披露位置排；编号只在自己那类里有意义。
     shown.sort(key=_reading_key(snapshot))
     # 编号带类型前缀（E1.2 / P7），一眼看出同类里的先后；存的主键不变。
+    # 名字是属性不是身份（`U-13`）：显示**当前生效的名字**，没有变更才用节点初始名。
+    names = _names_at(snapshot, records, None)
     shown = [
-        dict(node, label_id=label_id(node.get("id") or "", node.get("node_type")))
+        dict(node, label_id=label_id(node.get("id") or "", node.get("node_type")),
+             name=names.get(node["id"]) or node.get("name") or node["id"])
         for node in shown
     ]
     return {
         "granularity": granularity if granularity in GRANULARITIES else "scene",
         "revision": snapshot.get("revision"),
-        "steps": steps(snapshot, granularity),
+        "steps": steps(snapshot, granularity, records),
         # 时间点的层级：大事件 → 场景 → 事件。菜单按这个缩进展开，点哪一级就停在哪一级。
         "timeline": timeline_tree(snapshot),
         # 阅读位置菜单与资料卡的时间点选择器用**同一份**树：两套结构早晚
         # 会说出两种层级，而层级只有一个。
-        "moments": moment_tree(snapshot),
+        "moments": moment_tree(snapshot, cut_id, records),
         # Pickers that need an event (补录) get the full list whatever the
         # granularity is — the reading position is not the only use of events.
-        "events": steps(snapshot, "event"),
-        "anchor_steps": sorted(steps(snapshot, "event") + steps(snapshot, "action"),
+        "events": steps(snapshot, "event", records),
+        "anchor_steps": sorted(steps(snapshot, "event", records) + steps(snapshot, "action", records),
                                key=lambda row: _reading_key(snapshot)(_by_id(snapshot)[row["id"]])),
         "cut": cut,
         # The same position in both granularities, so switching the step list

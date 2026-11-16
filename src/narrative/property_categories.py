@@ -53,7 +53,9 @@ DEFAULT_CATEGORIES: dict[str, list[str]] = {
     # 场景是这一层唯一带属性的：它说的不是自己，而是「大事件走到这里的样子」。
     "scene": ["基本信息", "大事件", "内容", UNCLASSIFIED],
     # 大事件自己不写属性——界面上那一行是从场景借来的（见 node_properties）。
-    "storyline": ["主要故事", UNCLASSIFIED],
+    # 主要故事自己不写状态属性；它的属性来自白名单（「名称」「下属大事件」），
+    # 所以「基本信息」是它的第一个大类（`property_vocabulary`）。
+    "storyline": ["基本信息", "主要故事", UNCLASSIFIED],
     "big_event": ["基本信息", "主要故事", "内容", UNCLASSIFIED],
     "action": ["基本信息", "参与者", "过程与结果", UNCLASSIFIED],
     "other": ["基本信息", UNCLASSIFIED],

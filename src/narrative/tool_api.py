@@ -380,7 +380,13 @@ def _search(ops, params: dict) -> dict:
 
 
 def _property_categories(ops, _params: dict) -> dict:
-    return {"vocabulary": ops.property_categories()}
+    """分类词表与五层属性白名单一起给：模型要能读到白名单，不能靠提示词枚举（`U-12`）。"""
+    from . import property_vocabulary
+    vocabulary = ops.property_vocabulary()
+    return {"vocabulary": ops.property_categories(),
+            "property_vocabulary": property_vocabulary.vocabulary_snapshot(vocabulary),
+            "property_vocabulary_rules": "五层（T／B／S／E／A）的属性名从 property_vocabulary 里取，不自己造；"
+                                         "分类由这张表带出；人物／物品／地点／群体继续自由命名。"}
 
 
 def _source_id(ops, params: dict) -> str:
@@ -747,7 +753,8 @@ source_tools.register_list_sources(Tool, _register, error_type=ToolError, need=_
 
 _register(Tool(
     "property_categories",
-    "每个节点类型的大类表：显示用的分组，不是事实",
+    "每个节点类型的大类表（显示用的分组，不是事实）+ 五层（T／B／S／E／A）属性白名单："
+    "事件类节点的属性名从白名单里取，不自己造；分类由表带出",
     {},
     _property_categories,
 ))
@@ -1147,16 +1154,17 @@ def _assistant_access_configuration(name, params, writes=False, summary=None):
                    params, invoke, writes=writes, scope='configuration'))
 
 
-_assistant_access_configuration('read_assistant_access', {'chat_id': {'type': ['string', 'null']}})
+_assistant_access_configuration('read_assistant_access', {'chat_id': {'type': ['string', 'null'],
+                                                                     'description': '会话内部编号；对话任务省略即当前会话'}})
 _assistant_access_configuration('set_assistant_access', {
-    'chat_id': {'type': 'string', 'required': True},
+    'chat_id': {'type': ['string', 'null'], 'description': '会话内部编号；对话任务省略即当前会话'},
     'access_mode': {'type': 'string', 'enum': ['standard', 'full'], 'required': True},
     'reason': {'type': 'string'}}, writes=True)
 
 _assistant_access_configuration('import_chat_attachments', {
-    'chat_id': {'type': 'string', 'required': True},
+    'chat_id': {'type': ['string', 'null'], 'description': '会话内部编号；对话任务省略即当前会话'},
     'paths': {'type': 'array', 'items': {'type': 'string'}, 'minItems': 1, 'required': True},
-    'task_id': {'type': ['string', 'null']},
+    'task_id': {'type': ['string', 'null'], 'description': '对话任务由程序内部注入，模型省略'},
 }, writes=True, summary='显式导入用户选择的聊天附件，复制原件不覆盖；此操作不向助手模型开放任意外部文件导入')
 
 
@@ -1278,7 +1286,7 @@ def call(name: str, params: dict | None = None, *, project: str | Path | None = 
         raise ToolError("请提供 --project（.nproj 工程入口文件）")
     path = Path(project)
     if not path.exists():
-        raise ToolError(f"工程不存在：{path}")
+        raise ToolError(f"工程不存在：{path.name}")
     # Public tools accept the private entry file; database paths remain internal.
     ops = open_graph_project(path)
     try:
@@ -1294,7 +1302,9 @@ def call(name: str, params: dict | None = None, *, project: str | Path | None = 
             result = tool.handler(ops, resolved)
             return encode_tool_result(ops, result)
         except ValueError as exc:
-            raise ToolError(str(exc)) from exc
+            from .model_text import scrub
+
+            raise ToolError(scrub(str(exc))) from exc
     finally:
         close = getattr(ops, "close", None)
         if callable(close):

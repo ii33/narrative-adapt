@@ -19,7 +19,7 @@ RESULT_SCHEMA = {
             "properties": {
                 "name": {"type": "string"},
                 "type": {"type": "string", "enum": ["person", "group", "item", "location", "storyline", "big_event", "scene", "event", "action"],
-                    "description": "event是介于场景与动作之间、有自身推进与落点的完整情节单元；同场同总目标可有多个事件，不按章节或实施步骤机械拆分。action仅在明确请求动作提取时使用。"},
+                    "description": "event是一个事件里还分得出「怎么做的」若干步的粒度等级；拆不开、只有一步的属于动作层（action）。同场可有多个相邻事件，场景只含一个事件也成立，不按章节或实施步骤机械拆分。action仅在明确请求动作提取时使用。"},
                 "quotes": {"type": "array", "items": {"type": "string"},
                     "description": "仅event可填：原文证据。程序负责定位——先逐字，只有排版差异（全半角／空白／标点）时按归一化校正，存进证据的永远是原文截取文本；归一化后也找不到就丢弃这条引文、事件照常入库并回一条info。场景／大事件／主要故事由下级派生，其它节点与属性以参与的事件为出处，都不填quotes（多写的不入库，只回一条info说明已丢弃）"},
                 "anchor": {"type": "object", "required": ["start", "end"], "additionalProperties": False,

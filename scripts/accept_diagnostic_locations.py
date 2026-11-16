@@ -33,7 +33,9 @@ def original_draft():
         {'type': 'event', 'name': '宣布暂停发布名单并获同意', 'anchor': anchor('林岚在档案室向周宁宣布暂停发布名单'),
          'scene': '@4', 'participants': ['@1', '@2'], 'location': '@3'},
     ], 'properties': [
-        {'node': '@5', 'property': '发布状态', 'category': '未分类', 'op': 'set', 'value_type': 'string',
+        # 这一行是「缺 value」的样本。属性名取白名单里的「名称」（`U-12`）：修好之后
+        # 它就是一条正常的改名记录，不会再多出一条「表外属性名」的 info 让模型顺手改它。
+        {'node': '@5', 'property': '名称', 'category': '基本信息', 'op': 'set', 'value_type': 'string',
          'scope': 'world', 'at_event': '@5'},
     ]}
 

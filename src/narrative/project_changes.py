@@ -26,9 +26,13 @@ def apply(ops, graph_objects: list[dict], property_records: list[dict], expected
 
 
 def schema(ops) -> dict:
+    from . import property_vocabulary
     from .graph_models import GRAPH_OBJECTS
 
     return ops.graph_schema() | {"graph_json_schema": GRAPH_OBJECTS.json_schema(),
+        # 五层属性白名单随结构合同一起给（`U-12`）：事件类节点能写哪些属性名，
+        # 名字与分类都在这里，模型不必从提示词里猜。
+        "property_vocabulary": property_vocabulary.vocabulary_snapshot(ops.property_vocabulary()),
         "general_changes": {"preview": "preview_changes", "apply": "apply_changes",
             "rules": "提供expected_revision及reason；仅静态校验，合法批次原子入库。所有活动event须属于同语境scene，并在自身事件记录world地点：location引用、显式无或未知；缺失不等于未知。可同批修复旧遗漏，不自动补值。"}}
 

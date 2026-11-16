@@ -5,12 +5,32 @@ the container as well would state one fact at two levels, and both levels reduce
 on their own. The container write is dropped with an info notice, the rest of
 the batch is stored normally, and an undeterminable hierarchy is never guessed.
 """
+import pytest
 from agent_fixtures import project as project
 
+from narrative import property_vocabulary
 from narrative.container_evidence import descendant_events
 from narrative.property_core import container_property_duplicate
 
 TEXT = "甲进城。乙开门。甲离开。"
+
+
+@pytest.fixture(autouse=True)
+def _open_container_vocabulary(project):
+    """把测试用的属性名加进场景与事件两层的白名单。
+
+    默认五层白名单只管结构（`U-12`：T／B／S／E／A 只写名称与下属关系），容器判重
+    因此在该默认下没有可写的属性名。这里测的是判重规则本身，所以按工程配置把
+    「气氛／目的／判断／地点」加进这两层——白名单本来就是可改的工程配置。
+    """
+    config = property_vocabulary.default_vocabulary()
+    config["scene"] = [
+        {"name": "名称", "category": "基本信息"},
+        {"name": "下属事件", "category": "内容"},
+    ] + [{"name": name, "category": "未分类"} for name in ("气氛", "目的", "判断", "地点")]
+    config["event"] = config["event"] + [
+        {"name": name, "category": "未分类"} for name in ("气氛", "目的", "判断")]
+    project.set_property_vocabulary(config)
 
 
 def draft(container_properties):

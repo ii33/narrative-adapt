@@ -431,6 +431,16 @@ class GraphOperations(ChatAttachmentOperationsMixin, AssistantAccessOperationsMi
         """Display categories per node type; loose groupings, editable at will."""
         return self.properties.categories()
 
+    def property_vocabulary(self) -> dict[str, list[dict[str, str]]]:
+        """五层属性白名单（`U-12`）：事件类节点能写哪些属性名，存在工程配置里可改。"""
+        return self.properties.vocabulary()
+
+    def set_property_vocabulary(self, config: object) -> dict:
+        """Replace the five-layer whitelist; stored configurations keep working as before."""
+        from .content_errors import content_validation
+        with content_validation():
+            return {"vocabulary": self.properties.set_vocabulary(config)}
+
     def set_property_categories(self, config: object) -> dict:
         """Replace the vocabulary; renames migrate the records they renamed."""
         from .content_errors import content_validation

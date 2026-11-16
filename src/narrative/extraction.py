@@ -6,9 +6,9 @@ import json
 import unicodedata
 from typing import NamedTuple, cast
 
+from . import property_vocabulary
 from .order_ids import allocate, prefix_for
 from .property_core import container_property_duplicate
-from .property_labels import BIG_EVENT_PROGRESS, STORYLINE_PROGRESS
 from .source_location import ExactQuoteLookup
 
 NODE_TYPES = ("person", "group", "item", "location", "scene", "event", "action", "big_event", "storyline")
@@ -136,6 +136,9 @@ def _parse_properties(rows, text: str, names: set[str], rejected: list[dict], lo
             continue
         properties.append({
             "_draft_index": draft_index,
+            # 程序自己生成的行（事件地点快捷字段）要带着这个标记往下走：它不该被
+            # 「属性名从白名单里取」（`U-12`）与「属性不带引文」（`U-09`）两道闸拦掉。
+            **({"_draft_generated": True} if row.get("_draft_generated") else {}),
             "node": node_name,
             "property": property_id,
             **({"value": value} if op in {"set", "add", "remove"} else {}), "op": op,
@@ -344,6 +347,66 @@ class _QuoteNotes:
                 "message": _QUOTE_NOTE_MESSAGES[kind].format(count=group["count"])
                            + "；涉及条目见 indexes，其余内容照常入库",
             })
+        return rows
+
+
+class _VocabularyNotes:
+    """五层属性白名单的两类提醒：表外名字被丢弃、分类以表为准（`U-12`、`U-10`）。
+
+    不是错误：能理解的部分照常入库，只是这些行没有被写进去。按「层 + 类别」折叠，
+    一条消息里列出该层允许的属性名，模型看一行就知道该写什么。
+    """
+
+    def __init__(self, config=None, records=None):
+        self._config = config
+        self._records = records
+        self._groups: dict[tuple[str, str], dict] = {}
+        self._order: list[tuple[str, str]] = []
+
+    def _group(self, kind: str, node_type: str) -> dict:
+        key = (kind, node_type)
+        group = self._groups.get(key)
+        if group is None:
+            group = self._groups[key] = {"count": 0, "indexes": []}
+            self._order.append(key)
+        return group
+
+    def dropped(self, node_type: str, property_id: str, index: int | None):
+        group = self._group("vocabulary", node_type)
+        group["count"] += 1
+        if isinstance(index, int) and index not in group["indexes"]:
+            group["indexes"].append(index)
+
+    def recategorized(self, node_type: str, property_id: str, written: str, expected: str,
+                      index: int | None):
+        group = self._group("category", node_type)
+        group["count"] += 1
+        group.setdefault("examples", []).append({"属性": property_id, "模型写的": written, "实际": expected})
+        if isinstance(index, int) and index not in group["indexes"]:
+            group["indexes"].append(index)
+
+    def diagnostics(self) -> list[dict]:
+        rows = []
+        for kind, node_type in self._order:
+            group = self._groups[(kind, node_type)]
+            label = property_vocabulary.LAYER_LABELS.get(node_type, node_type)
+            allowed = "、".join(property_vocabulary.allowed_names(node_type, self._config))
+            if kind == "vocabulary":
+                message = (f"{label}只写这些属性：{allowed}；表外的 "
+                           f"{group['count']} 条属性名已丢弃（属性名从工具给出的白名单里取，不自己造）")
+            else:
+                message = (f"{label}的分类由白名单带出（{allowed}），模型写的 "
+                           f"{group['count']} 处分类已按表改正")
+            row = {
+                "severity": "info", "code": "EXTRACTION_INFO",
+                "path": ["properties"], "field": "property", "note": kind,
+                "node_type": node_type, "count": group["count"],
+                "indexes": group["indexes"][:12],
+                "message": message + "；涉及条目见 indexes，其余内容照常入库",
+            }
+            if group.get("examples"):
+                row["examples"] = group["examples"][:3]
+            rows.append(row)
         return rows
 
 
@@ -826,6 +889,10 @@ def build_extraction(ops, data: dict) -> dict:
     # Notices that never block the batch: the write is dropped, everything else
     # is still stored. They travel back with the preflight result.
     diagnostics: list[dict] = []
+    # 五层属性白名单（`U-12`）：事件类节点的属性名从表里取，表外的名字丢弃并回一条
+    # `info`；分类由表带出，模型写的与表不符以表为准。都不是错误，其余内容照常入库。
+    vocabulary = ops.property_vocabulary()
+    vocabulary_notes = _VocabularyNotes(vocabulary)
     snapshot_nodes = {node["id"]: node for node in snapshot["nodes"]}
     # Ids are disclosure positions, so a new mention needs to know where it sits
     # relative to the nodes that already exist.
@@ -1195,7 +1262,6 @@ def build_extraction(ops, data: dict) -> dict:
             batch_types[name] = prop["value_type"]
 
     current_nodes = snapshot_nodes | {row["id"]:row for row in objects if row.get("kind") == "node"}
-    progress_owners = {STORYLINE_PROGRESS:"big_event", BIG_EVENT_PROGRESS:"scene"}
     def last_leaf(identifier):
         seen, pending, leaves = set(), [identifier], []
         while pending:
@@ -1236,12 +1302,24 @@ def build_extraction(ops, data: dict) -> dict:
                 node_id = existing.get((kind, prop["node"]))
                 if node_id:
                     break
-        expected_owner = progress_owners.get(str(prop.get("property") or ""))
-        if expected_owner and current_nodes.get(node_id or "", {}).get("node_type") != expected_owner:
-            skipped.append({"name":prop["property"], "reason":f"该进展属性须直接记录在{expected_owner}，不自动迁移旧层级"})
-            continue
         if node_id is None:
             continue
+        node_type = str((current_nodes.get(node_id) or {}).get("node_type") or "")
+        if property_vocabulary.constrained(node_type) and not prop.get("_draft_generated"):
+            # 五层都是事件：这几层的属性名从白名单里取，不自己造（`U-12`）。表外的名字
+            # 按 `U-10` 丢弃该条并回一条折叠 `info`（消息里列出该层允许的名字），
+            # 不整批拒收。程序自己生成的地点属性行不过这道闸：它本来就用表内的名字，
+            # 工程已有的地点定义名可能是个别名。
+            entry = property_vocabulary.match(node_type, str(prop.get("property") or ""), vocabulary)
+            if entry is None:
+                vocabulary_notes.dropped(node_type, str(prop.get("property") or ""), prop.get("_draft_index"))
+                continue
+            written = str(prop.get("category") or "").strip()
+            if written and written != entry["category"]:
+                vocabulary_notes.recategorized(node_type, str(prop.get("property") or ""),
+                                               written, entry["category"], prop.get("_draft_index"))
+            # 分类由表带出（`名称` 归「基本信息」）：以表为准，不让模型另选一个。
+            prop = prop | {"category": entry["category"]}
         property_id = str(prop["property"])
         proposed_type = prop["value_type"]
         known_type = definitions.get(property_id)
@@ -1392,6 +1470,10 @@ def build_extraction(ops, data: dict) -> dict:
             property_origins.setdefault(record["id"], []).append(prop["_draft_index"])
         known_values[key] = record
         records.append(record)
+
+    # 白名单的两类提醒（表外名字被丢弃、分类以表为准）也随预检结果回去：它们是 `info`，
+    # 不改变 `valid`（`U-10`、`U-12`）。
+    diagnostics += vocabulary_notes.diagnostics()
 
     # A container states what its events state. When a descendant event already
     # carries the same property, the event record keeps the fact and the

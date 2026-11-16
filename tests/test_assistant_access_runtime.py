@@ -1,6 +1,7 @@
 """Task snapshots and per-provider tool visibility, with no real model requests."""
 import http.client
 import json
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
@@ -72,6 +73,30 @@ def test_full_snapshot_restricts_next_task_without_restart_or_nonce_leak(tmp_pat
             wrapper.close()
         close_project_runtime(ops)
     assert current_access_mode(ops) == 'standard'
+
+
+def test_dispatch_defaults_chat_and_task_to_the_running_task(tmp_path, monkeypatch):
+    # 会话与任务编号是内部细节：工具在任务里默认取当前，模型不必记 hash 形态的 id。
+    monkeypatch.setenv('NARRATIVE_PROVIDER_DB', str(tmp_path / 'providers.sqlite3'))
+    entry = tmp_path / 'defaults.nproj'
+    ops = Operations.create_graph_project(entry)
+    chat = ChatStore(ops.project_info().path).create()
+    settings = HarnessSettings(provider='custom', model='offline', base_url='http://127.0.0.1:1/v1')
+    all_tools = assistant.tool_catalog(access_mode='full')
+    wrapper = None
+    try:
+        wrapper, session = open_conversation_session(
+            ops, settings, 'offline-secret', ResidentStub, chat_id=chat['id'], task_id='task-7',
+            task_tools=all_tools, tool_handler=lambda name, args: tool_api.call(name, args, project=entry))
+        manager, nonce = wrapper.manager, wrapper.binding_nonce
+        attachments = manager._dispatch('list_chat_attachments', {}, session, nonce)
+        assert attachments['chat_id'] == chat['id'] == 'chat-1'
+        usage = manager._dispatch('read_usage_statistics', {}, session, nonce)
+        assert (usage['chat_id'], usage['task_id']) == ('chat-1', 'task-7')
+    finally:
+        if wrapper is not None:
+            wrapper.close()
+        close_project_runtime(ops)
 
 
 def test_gateway_filters_actual_forwarded_tool_schemas_without_rewriting_history():
@@ -231,7 +256,8 @@ def test_implicit_host_owner_does_not_reuse_identity_after_runtime_restarts(tmp_
     second, _ = open_conversation_session(ops, settings, 'offline', ResidentStub, access_mode='standard')
     try:
         assert second._host_task_id != owner
-        assert second._host_task_id.startswith('host-task-')
+        # 任务身份是工程内序数 task-N：可读、可复述，不是时间戳加哈希。
+        assert re.fullmatch(r'task-[1-9][0-9]*', second._host_task_id)
     finally:
         second.close()
         close_project_runtime(ops)

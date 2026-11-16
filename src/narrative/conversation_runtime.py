@@ -122,7 +122,10 @@ class ProjectConversation:
                     core = initial_tool_names([row["name"] for row in catalog if row["name"] in allowed])
                     visible = core + [name for name in self._visible_by_chat.get(chat_id, []) if name in allowed and name not in core]
                 self._visible_by_chat[chat_id] = visible
-                task_id = task_id or f"host-task-{datetime.now(UTC):%Y%m%dT%H%M%S%fZ}"
+                if not task_id:
+                    from .task_ids import next_task_id
+
+                    task_id = next_task_id(self.project_path)
                 self._binding = {"chat_id": chat_id, "session_id": session_id or chat_id,
                                  "nonce": secrets.token_hex(16), "cancelled": False, "interrupt_sent": False,
                                  "allowed": allowed, "visible": list(visible),
@@ -321,12 +324,14 @@ class ProjectConversation:
             binding["calls_settled"].clear()
         def authorized_dispatch():
             from .assistant_host import host_access_context
+            from .tool_execution_context import bind_tool_identity
             from .tool_loading import bind_tool_loader
             with host_access_context(binding["access_mode"], binding["task_id"], binding["cancel_event"], self.project_path,
                                      secrets_to_redact=binding["secrets_to_redact"]), bind_tool_loader(
                     lambda requested: self._load_tools(binding, requested),
                     visible_names=lambda: self._visible_tools(binding), allowed_names=binding["allowed"],
-                    access_mode=binding["access_mode"]):
+                    access_mode=binding["access_mode"]), bind_tool_identity(
+                    chat_id=binding["chat_id"], task_id=binding["task_id"]):
                 return dispatch(name, args)
         try:
             return context.run(authorized_dispatch)

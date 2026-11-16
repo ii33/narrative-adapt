@@ -95,6 +95,12 @@ class GraphPropertyFacade:
     def categories(self) -> dict[str, list[str]]:
         return self.properties.categories()
 
+    def vocabulary(self):
+        return self.properties.vocabulary()
+
+    def set_vocabulary(self, config: object):
+        return self.properties.set_vocabulary(config)
+
     def set_categories(self, config: object) -> dict:
         return self.properties.set_categories(config)
 

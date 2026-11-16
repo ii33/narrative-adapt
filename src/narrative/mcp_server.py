@@ -110,9 +110,13 @@ def handle(request: dict, *, default_project: str | None, access_mode="standard"
             else:
                 payload = tool_api.call(name, arguments, project=project)
         except tool_api.ToolError as exc:
-            return ok(_result(str(exc), error=True))
+            from .model_text import scrub
+
+            return ok(_result(scrub(str(exc)), error=True))
         except Exception as exc:  # surfaced to the caller instead of dying quietly
-            return ok(_result(f"{type(exc).__name__}: {exc}", error=True))
+            from .model_text import scrub
+
+            return ok(_result(scrub(f"{type(exc).__name__}: {exc}"), error=True))
         return ok(_result(payload))
     return fail(-32601, f"不支持的方法：{method}")
 
