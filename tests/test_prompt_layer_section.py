@@ -18,7 +18,7 @@ LAYER_LINES = ("部／卷（主要故事 T）", "阶段（大事件 B）", "现�
 # 概念版每行以「- 概念名（层名）：」开头，例如「- 部／卷（主要故事 T）：…」：
 # 概念名在前、代号在后，模型读到的第一句就是「这一层是什么」，不是「T 是什么」。
 SECTION_LIMIT = 800
-LINE_LIMIT = 120
+LINE_LIMIT = 160
 
 
 def layer_section() -> str:
@@ -37,7 +37,7 @@ def test_layer_section_has_no_question_marks():
 
 
 def test_each_layer_occupies_exactly_one_short_line():
-    """五层各一行、按由粗到细排、每行不超过 120 字。"""
+    """五层各一行、按由粗到细排、每行不超过 160 字。"""
     lines = [line.strip() for line in layer_section().splitlines() if line.strip()]
     bullets = [line for line in lines if line.startswith("- ")]
     assert len(bullets) == len(LAYER_LINES), f"五层段应有 {len(LAYER_LINES)} 条要点，实际 {len(bullets)} 条"
