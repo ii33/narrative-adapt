@@ -64,17 +64,19 @@ def test_bad_shortcut_stages_without_facts_and_can_be_locally_repaired(project, 
     assert fixed['status'] == 'accepted', fixed
 
 
-def test_omission_never_supplies_unknown_and_non_event_field_is_rejected(project):
+def test_omission_never_supplies_unknown_and_non_event_field_is_dropped_with_notice(project):
     ops, sid = project
     raw = draft()
     del raw['nodes'][1]['location']
     missing = ops.submit_extraction(sid, raw)
     assert missing['status'] == 'staged' and not ops.graph_snapshot()['nodes']
+    # 地点只属于事件：写在人物行上的 location 不整批拒收，丢弃并回一条 info（U-10）。
     raw = draft()
     raw['nodes'][0]['location'] = '未知'
-    invalid = ops.submit_extraction(sid, raw)
-    assert invalid['status'] == 'staged'
-    assert any('nodes[0]' in p['message'] for p in invalid['problems'])
+    dropped = ops.submit_extraction(sid, raw)
+    assert dropped['status'] == 'accepted', dropped
+    assert any('location' in str(p.get('message')) and '丢弃' in str(p.get('message'))
+               for p in dropped['problems'] + dropped.get('info', []))
 
 
 @pytest.mark.parametrize('property_id', ['地点', '发生地点', 'event_location'])

@@ -170,8 +170,9 @@ def _prune_node_row(row: dict, dropped: _DroppedParameters, index: int) -> dict:
     for key, value in row.items():
         if key not in _NODE_DRAFT_FIELDS:
             dropped.add('nodes', str(key), index)
-        elif key in ('quotes', 'anchor') and not is_event:
-            # 事件以外的节点没有自身位置：引文与锚点都归它挂靠的事件（`U-09`）。
+        elif key in ('quotes', 'anchor', 'location') and not is_event:
+            # 事件以外的节点没有自身位置：引文与锚点都归它挂靠的事件（`U-09`），
+            # 地点也只在事件上（场景不承担地点身份）——多写的丢掉并提示，不作废整批。
             dropped.add('nodes', key, index)
         else:
             kept[key] = value
@@ -435,6 +436,9 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
             generated['_anchor_span'] = anchor_spans[index]
         if location != '未知':
             generated['value'] = ([location] if location_definition and location_definition.get('cardinality') == 'many' else location)
+            if location in {'无', '未知'}:
+                # 「无」是字面值，不是地点节点名称：已有定义即使是 node 类型也不能当引用去解析。
+                generated['value_type'] = 'either'
         if location_definition:
             generated['cardinality'] = location_definition.get('cardinality', 'one')
         original['properties'].append(generated)

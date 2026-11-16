@@ -13,12 +13,12 @@ from narrative.prompt_defaults import DEFAULT_PROMPTS
 def stage_with_misplaced_field(project):
     """造一份有局部问题、可被 patch 修好的暂存稿。
 
-    `location` 只给事件用：人物行带上它是"看不懂"的一类（`U-10`），patch 删掉这个字段
-    就能过；未知字段不在此列——它在提交时就被丢弃了，不会留下待修稿。
+    用一条解析不了的引用制造可修补的问题：事件挂到本批不存在的场景上。多余字段不会
+    留下待修稿（`U-10` 提交时就丢弃并提示）。
     """
     sid = project.import_source('局部修补工具原文', TEXT)
     draft = draft_result(ended=False)
-    draft['nodes'][0]['location'] = '未知'
+    draft['nodes'][4]['scene'] = '查无此场景'
     entry = str(layout(project.project_info().path).entry)
     result = tool_api.call('submit_extraction', {'source_id': sid, 'result': draft}, project=entry)
     assert result['status'] == 'staged' and result['problems']
@@ -28,7 +28,7 @@ def stage_with_misplaced_field(project):
 
 def test_tool_feedback_can_be_patched_directly_via_cli_without_resubmitting(project, capsys):
     entry, staged = stage_with_misplaced_field(project)
-    patch = [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'location'}]
+    patch = [{'op': 'set', 'section': 'nodes', 'index': 4, 'field': 'scene', 'value': '甲约定并完成接乙'}]
     assert tool_cli.main(['extraction-patch', '--submission-id', staged['submission_id'],
         '--expected-revision', str(staged['submission_revision']), '--patches', json.dumps(patch),
         '--reason', '根据问题反馈直接删除非法字段', '--project', entry, '--json']) == 0
@@ -48,7 +48,7 @@ def test_mcp_reads_only_requested_slots_and_rejects_patch_of_committed_draft(pro
     read = json.loads(response['result']['content'][0]['text'])
     assert len(read['entries']) == 1 and read['entries'][0]['reference'] == '甲'
     fixed = tool_api.call('patch_extraction_submission', {'submission_id': staged['submission_id'],
-        'expected_revision': staged['submission_revision'], 'patches': [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'location'}],
+        'expected_revision': staged['submission_revision'], 'patches': [{'op': 'set', 'section': 'nodes', 'index': 4, 'field': 'scene', 'value': '甲约定并完成接乙'}],
         'reason': '局部修补'}, project=entry)
     assert fixed['status'] == 'accepted'
     repeated = mcp_server.handle({'id': 2, 'method': 'tools/call', 'params': {'name': 'patch_extraction_submission',
@@ -99,7 +99,7 @@ def test_pending_submissions_are_discoverable_without_draft_payload(project, cap
     assert listed['submissions'][0]['validation_status'] == 'invalid'
     assert all('entries' not in r and 'result' not in r for r in listed['submissions'])
     tool_api.call('patch_extraction_submission', {'submission_id': staged['submission_id'], 'expected_revision': 1,
-        'patches': [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'location'}], 'reason': '完成问题修补'}, project=entry)
+        'patches': [{'op': 'set', 'section': 'nodes', 'index': 4, 'field': 'scene', 'value': '甲约定并完成接乙'}], 'reason': '完成问题修补'}, project=entry)
     reopened = tool_api.call('list_extraction_submissions', {}, project=entry)
     assert reopened['submissions'] == []
 

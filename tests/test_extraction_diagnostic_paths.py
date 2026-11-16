@@ -132,7 +132,9 @@ def test_preview_preserves_related_paths_metadata(project):
 
 @pytest.mark.parametrize('section,index,field,value,expected', [
     ('nodes', 0, 'scene', '会议', ['nodes', 0, 'scene']),
-    ('nodes', 0, 'location', '未知', ['nodes', 0, 'location']),
+    # 地点只属于事件：写在人物行上是多余参数，提交时丢弃并提示（`U-10`），
+    # 所以这里换成真正"看不懂"的一种——空名称。
+    ('nodes', 0, 'name', '', ['nodes', 0, 'name']),
     ('properties', 0, 'op', {'value': 'set'}, ['properties', 0, 'op']),
 ])
 def test_schema_errors_report_the_original_field(project, section, index, field, value, expected):
@@ -147,6 +149,7 @@ def test_schema_errors_report_the_original_field(project, section, index, field,
 
 
 @pytest.mark.parametrize('section,index,field,value', [
+    ('nodes', 0, 'location', '未知'),
     ('nodes', 0, 'extra', 'x'),
     ('nodes', 0, 'closing_quote', '林岚'),
     ('properties', 0, 'sequence', 1),

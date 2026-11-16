@@ -105,17 +105,17 @@ def test_staging_not_loaded_into_canonical_validation_snapshot(project):
     assert project.read_extraction_submission(result['submission_id'])['problems']
 
 
-def test_schema_problem_can_be_repaired_by_remove_field_without_row_reordering(project):
+def test_schema_problem_can_be_repaired_by_changing_a_reference_without_row_reordering(project):
     sid = project.import_source('暂存', TEXT)
     draft = draft_result(ended=False)
-    # `location` 只给事件用：人物行带上它是"看不懂"，patch 删掉这个字段就能过，
-    # 行序与名称引用都不变。未知字段不在此列——它提交时就被丢弃了（`U-10`）。
-    draft['nodes'][0]['location'] = '未知'
+    # 制造一个「看不懂」的引用：事件挂到本批不存在的场景上。多余字段不会留下待修稿
+    # （`U-10` 直接丢弃并提示），只有解析不了的引用才需要 patch。
+    draft['nodes'][4]['scene'] = '查无此场景'
     staged = project.submit_extraction(sid, draft)
     problem = staged['problems'][0]
-    assert (problem['section'], problem['index'], problem['reference']) == ('nodes', 0, '甲')
+    assert (problem['section'], problem['index']) == ('nodes', 4)
     fixed = project.patch_extraction_submission(staged['submission_id'], 1,
-        [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'location'}], '移除错位的字段')
+        [{'op': 'set', 'section': 'nodes', 'index': 4, 'field': 'scene', 'value': '甲约定并完成接乙'}], '修正引用')
     assert fixed['status'] == 'accepted'
     assert fixed['node_ids']['甲'] in {n['id'] for n in project.graph_snapshot()['nodes']}
 
