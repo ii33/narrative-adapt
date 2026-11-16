@@ -921,6 +921,11 @@ Item {
 
     Connections {
         target: bridge
+        // 改编侧的失败要落在本页的提示行上：底部状态行太远，用户会以为「点了没反应」。
+        function onErrorOccurred(kind, message) {
+            if (page.adaptationMode && (kind === "adaptation" || kind === "adaptation_import_candidates"))
+                page.adaptationNotice = message
+        }
         function onResultReady(kind, payload) {
             if (page.adaptationMode && kind === "adaptation_import_candidates") {
                 page.importCandidates = payload.moments || payload.candidates || []

@@ -1216,7 +1216,11 @@ class NativeBridge(QObject):
 
     @Slot()
     def loadAdaptationImportCandidates(self) -> None:
-        self._project_task("adaptation_import_candidates", lambda ops: {"moments": ops.import_adaptation_candidates()})
+        # 带上改编修订号：导入是改编侧的写操作，界面若沿用提取图的修订号会直接被拒
+        # （『改编修订已变化，请刷新后重试』），用户看到的就是『点了没反应』。
+        self._project_task("adaptation_import_candidates",
+                           lambda ops: {"moments": ops.import_adaptation_candidates(),
+                                        "revision": ops.adaptation_snapshot().get("revision")})
 
     @Slot("QVariantList", int)
     def importAdaptation(self, moment_ids: list, revision: int) -> None:
