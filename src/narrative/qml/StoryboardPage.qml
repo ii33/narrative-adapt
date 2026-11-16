@@ -162,26 +162,14 @@ Item {
     function reload() {
         if (unitId && visible) request("read_storyboard", {unit_id:unitId})
     }
-    // 按正文批量建镜：一个正文块一个镜头，时长取默认 3 秒；标题取该段首句，保证能认。
-    function batchShots() {
-        if (busy || !ready) return
-        const blocks = ((scene && scene.unit && scene.unit.blocks) || []).filter(function (b) {
-            return (((b.payload || {}).text) || "").trim().length > 0
-        })
-        if (!blocks.length) return
-        const stops = "。！？!?
-"
-        const changes = blocks.map(function (block) {
-            const text = ((block.payload || {}).text || "").trim()
-            let cut = text.length
-            for (let i = 0; i < text.length; i++) {
-                if (stops.indexOf(text.charAt(i)) >= 0) { cut = i; break }
-            }
-            let title = text.slice(0, cut).trim() || text.slice(0, 24)
-            if (title.length > 24) title = title.slice(0, 24)
-            return {op: "create_shot", title: title, duration_ms: 3000, source_block_ids: [block.id]}
-        })
-        request("apply_storyboard_changes", {unit_id: unitId, revision: board.revision, changes: changes})
+    // 拆镜由模型判断，不由程序按段落切：把「按正文把这个场拆成镜头」交给协作者，
+    // 程序只负责把当前场次与要求说清楚。镜头怎么分、分几个、每镜多长，都由模型决定。
+    function askForShots() {
+        if (!ready || !unitId) return
+        const task = "请把这个场（unit_id=" + unitId + "）的正文拆成分镜镜头："
+            + "每镜给出标题、时长与对应正文块，用 apply_storyboard_changes 的 create_shot 一次提交。"
+            + "怎么分、分几个、每镜多长由你判断——不要按段落或句子机械切分。"
+        bridge.assistantTurnOnPage(task, "[]", "storyboard")
     }
     function resetView() {
         playing = false
@@ -390,7 +378,7 @@ Item {
             Item { Layout.fillWidth:true }
             CheckBox { objectName:"storyboardReadOnly"; text:"纯读稿"; visible:desk.deskMode===0; checked:desk.scriptReadOnly; onToggled:desk.scriptReadOnly=checked }
             Button { objectName:"storyboardExportScript"; text:"导出分镜稿"; enabled:desk.ready&&!desk.busy; onClicked:scriptExport.open() }
-            Button { objectName:"storyboardBatchShots"; text:"按正文批量建镜"; enabled:desk.ready&&!desk.busy&&(desk.scene?.unit.blocks||[]).some(b=>((b.payload||{}).text||"").trim().length>0); onClicked:desk.batchShots() }
+            Button { objectName:"storyboardAskShots"; text:"让助手按正文拆镜"; enabled:desk.ready&&!desk.busy&&!!desk.unitId; onClicked:desk.askForShots() }
         }
         RowLayout {
             visible:!desk.directorOnly&&desk.deskMode===0
