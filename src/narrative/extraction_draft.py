@@ -461,7 +461,8 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
     # 也记进同一个记账器，最后仍然按 (section, field) 折叠成一条 info（`U-10`）。
     # 引文定位的两种提醒（近似命中、找不到被丢弃）由 `parse_nodes` 自己折叠好带回来，
     # 同样是 info、同样不影响 valid（`U-11`）。
-    notices = dropped.diagnostics() + list(data.get("quote_notices") or []) + anchor_notices
+    notices = (dropped.diagnostics() + list(data.get("quote_notices") or [])
+               + list(data.get("reference_notices") or []) + anchor_notices)
     for key in ("uncertainties", "exclusions"):
         rows = result.get(key) or []
         if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
