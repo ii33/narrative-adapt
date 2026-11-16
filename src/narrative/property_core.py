@@ -177,7 +177,8 @@ def reduce_changes(changes, definition, nodes, *, event_order, cut=None):
                 state = {'kind': 'known', 'values': list(partners)} if partners else {'kind': 'absent'}
                 active = list(partners.values()) or [identifier]
             elif many:
-                values = value if isinstance(value, list) else []
+                # 单值与多值不由程序预设：多值属性收到标量就当成一条（等同 add 一个）。
+                values = value if isinstance(value, list) else [value]
                 if op == 'set':
                     known_members = {_freeze(v): v for v in values}
                     baseline = True
