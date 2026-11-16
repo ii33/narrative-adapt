@@ -990,6 +990,36 @@ def build_extraction(ops, data: dict) -> dict:
         ): item["id"]
         for item in snapshot["nodes"]
     }
+    # 实体不再自带引文（`U-09`），它们的 `start` 取不到值。若直接拿 0 去分配编号，
+    # 每个新实体都会被判成"排在最前面"，于是生出 0.1、0.1.0.1 这种段号。
+    # 这里先按"它最早出现在哪里"补出位置：参与的事件 → 属性（含认知/声称，含关系）。
+    event_starts: dict[str, int] = {}
+    for event in event_items:
+        start = event.get("start")
+        if isinstance(start, int):
+            event_starts.setdefault(event["name"], start)
+    mention_positions: dict[str, int] = {}
+    for event in event_items:
+        start = event_starts.get(event["name"])
+        if start is None:
+            continue
+        related = list(event.get("participants") or []) + [event.get("scene"), event.get("location"),
+                                                           event.get("big_event"), event.get("storyline")]
+        related += list(event.get("children") or [])
+        for name in related:
+            if isinstance(name, str) and name:
+                mention_positions[name] = min(mention_positions.get(name, start), start)
+    for row in data.get("properties") or []:
+        if not isinstance(row, dict):
+            continue
+        start = event_starts.get(str(row.get("at_event") or ""))
+        if start is None:
+            continue
+        for name in [row.get("node"), row.get("value") if row.get("value_type") in {"node", "either"} else None]:
+            if isinstance(name, str) and name:
+                mention_positions[name] = min(mention_positions.get(name, start), start)
+    last_position = max(mention_positions.values(), default=0)
+
     allocation_order = [item for item in nodes if item["type"] not in {"event", "action"}] + event_items + action_items
     for item in allocation_order:
         key = (item["type"], item["name"])
@@ -1036,8 +1066,11 @@ def build_extraction(ops, data: dict) -> dict:
             mention_ids[mention] = reused
             ids.setdefault(key, reused)
             continue
+        start = item.get("start")
+        if not isinstance(start, int):
+            start = mention_positions.get(item["name"])
         position = (orders.get(item.get("evidence_source_id", data["source_id"]), current_ordinal),
-                    item["start"] if isinstance(item["start"], int) else 0)
+                    start if isinstance(start, int) else last_position + 1)
         node_type = str(item["type"])
         node_id = allocate(
             positions.setdefault(node_type, []),
