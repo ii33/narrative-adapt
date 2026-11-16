@@ -37,11 +37,11 @@ def draft() -> dict:
         {"type": "location", "name": "档案室"},
         {"type": "item", "name": "铜钥匙"},
         {"type": "scene", "name": "档案室交接"},
-        {"type": "event", "name": FIRST, "scene": "@5", "participants": ["@1", "@2"],
-         "location": "@3", "anchor": {"start": 0, "end": len(TEXT)}},
+        {"type": "event", "name": FIRST, "scene": "档案室交接", "participants": ["林岚", "周宁"],
+         "location": "档案室", "anchor": {"start": 0, "end": len(TEXT)}},
     ], "properties": [
-        {"node": "@4", "property": "持有者", "category": "未分类", "value": "@1",
-         "value_type": "either", "scope": "world", "at_event": "@6", "op": "set"},
+        {"node": "铜钥匙", "property": "持有者", "category": "未分类", "value": "林岚",
+         "value_type": "either", "scope": "world", "at_event": FIRST, "op": "set"},
     ]}
 
 
@@ -135,11 +135,37 @@ def test_broken_required_parts_are_still_rejected(project, break_it):
         del raw["properties"][0]["value"]
         expected = ("properties", 0, "value")
     else:
-        raw["nodes"][5]["participants"] = ["@99"]
+        # 引用解析不到：写了一个本批和工程里都没有的名称，是"看不懂"，仍然拒收。
+        raw["nodes"][5]["participants"] = ["查无此人"]
         expected = ("nodes", 5, "participants", 0)
     result = ops.submit_extraction(source, raw)
     assert result["status"] == "staged"
     assert expected in paths(result)
+    assert not ops.graph_snapshot()["nodes"]
+
+
+def test_position_index_reference_is_rejected_with_the_readable_reason(project):
+    """`@n` 是数组位置，不是引用写法：拒收并说明改写方式，而不是当成"引用不存在"。"""
+    ops, source = project
+    raw = draft()
+    raw["nodes"][5]["participants"] = ["@1"]
+    result = ops.submit_extraction(source, raw)
+    assert result["status"] == "staged"
+    assert ("nodes", 5, "participants", 0) in paths(result)
+    messages = json.dumps(result.get("problems") or result.get("diagnostics") or [], ensure_ascii=False)
+    assert "不使用 @ 索引" in messages and "请写名称或正式 ID" in messages
+    assert not ops.graph_snapshot()["nodes"]
+
+
+def test_unknown_name_reference_says_what_could_not_be_found(project):
+    """名称写法解析不到时明说是哪个名字找不到，而不是笼统的"引用无效"。"""
+    ops, source = project
+    raw = draft()
+    raw["nodes"][5]["participants"] = ["查无此人"]
+    result = ops.submit_extraction(source, raw)
+    assert result["status"] == "staged"
+    messages = json.dumps(result.get("problems") or result.get("diagnostics") or [], ensure_ascii=False)
+    assert "找不到引用「查无此人」" in messages
     assert not ops.graph_snapshot()["nodes"]
 
 

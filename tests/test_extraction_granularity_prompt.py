@@ -55,11 +55,11 @@ def test_operations_accepts_event_location_reference_and_secondary_people(projec
         {"type": "person", "name": "无名侍者"},
         {"type": "location", "name": "客栈后院"},
         {"type": "scene", "name": "进入客栈后院"},
-        {"type": "event", "name": "跟随侍者进入后院", "scene": "@5",
-         "participants": ["@1", "@2", "@3"], "quotes": [text]},
+        {"type": "event", "name": "跟随侍者进入后院", "scene": "进入客栈后院",
+         "participants": ["旅客甲", "旅客乙", "无名侍者"], "quotes": [text]},
     ], "properties": [{
-        "node": "@6", "op": "set", "property": "地点", "category": "未分类"  , "value": "@4", "value_type": "node",
-        "scope": "world", "at_event": "@6",
+        "node": "跟随侍者进入后院", "op": "set", "property": "地点", "category": "未分类"  , "value": "客栈后院", "value_type": "node",
+        "scope": "world", "at_event": "跟随侍者进入后院",
     }]}
     accepted = project.submit_extraction(source_id, draft)
     assert accepted["status"] == "accepted", accepted
@@ -176,9 +176,9 @@ def test_default_remains_fine_and_independently_consequential_action_can_be_an_e
     result = project.submit_extraction(sid, {'nodes': [
         {'type': 'person', 'name': '甲'},
         {'type': 'scene', 'name': '计划中断'},
-        {'type': 'event', 'name': '销毁副本使计划中断', 'scene': '@2', 'participants': ['@1'], 'quotes': [text]},
-    ], 'properties': [{'node': '@3', 'property': '地点', "category": "未分类"  , 'value_type': 'either',
-        'scope': 'world', 'at_event': '@3', 'op': 'unknown'}]})
+        {'type': 'event', 'name': '销毁副本使计划中断', 'scene': '计划中断', 'participants': ['甲'], 'quotes': [text]},
+    ], 'properties': [{'node': '销毁副本使计划中断', 'property': '地点', "category": "未分类"  , 'value_type': 'either',
+        'scope': 'world', 'at_event': '销毁副本使计划中断', 'op': 'unknown'}]})
     assert result['status'] == 'accepted'
     assert [n['node_type'] for n in project.graph_snapshot()['nodes']].count('event') == 1
     assert not any(n['node_type'] == 'action' for n in project.graph_snapshot()['nodes'])

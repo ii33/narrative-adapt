@@ -6,17 +6,6 @@ def _entry(label: str, description: str, text: str, *, version: str = "1") -> di
     return {"label": label, "description": description, "version": version, "text": text}
 
 
-_EXTRACTION_REPAIR_GUIDE = """
-submit_extraction返回staged时，仅表示草稿已持久暂存，未写入正式事实。使用返回的submission_id、submission_revision和problems.targets定位问题；反馈已足够时直接用一次patch数组修多个问题，无需先read_extraction_submission，更不重发整批。仅缺少相关条目内容时才read_extraction_submission，并指定section/indices读取所需行；read不是修补前置，不重复读取整稿。
-修补时用patch_extraction_submission只修问题字段或追加确实缺少的项，expected_revision填当前submission_revision而非工程revision。set/remove只改字段，append追加对象；行号index从0起，那是「section里的第几行」，不是节点引用；节点引用写名称或正式ID，不写@位置编号。禁止删行、重排或splice，否则行号会漂移。每次patch程序自动重检，通过立即原子入库，不需要人工accept，也不要重发整批submit_extraction。新的独立事实批次仍可正常submit。
-重启或任务恢复后确需找回未解决暂存时，可用list_extraction_submissions只列摘要并按source_id筛选；不要把list或read变成每次提取的固定前置。暂存未解决不能声称已全部入库；仅accepted或unchanged且无error表示相应批次处理完成。工具参数JSON不合法属于当前任务的工具纠错，不执行该非法调用、不创建伪成功。"""
-
-
-_CONTENT_REPAIR_GUIDE = """
-所有业务内容保存共用暂存修补：返回staged表示尚未正式入库，按submission_id、submission_revision和problems指出的路径一次patch修多个问题，不重发整稿。通用patch_content_submission的path从原Operations绑定arguments开始，数组索引从0起；提取也可用对应专用修补工具。反馈已充分时直接patch，不先read/list；仅缺少局部内容或恢复旧暂存时使用read_content_submission/list_content_submissions，不例行读取整个草稿。
-修补只改内容字段或追加缺项，不能更换目标、权限、修订号、上下文依据或重排稳定索引；每次仍按当前任务权限和原有静态校验重检，通过自动入库，无人工accept。已过期的依据须重新读取并明确重新提交，不绕过并发或目标检查。删除、移动等即时命令、文件/外部服务执行和密钥配置不排队暂存，也不因修补自动执行。暂存未解决须如实说明，程序只汇总实际正式写入。"""
-
-
 DEFAULT_PROMPTS = {
     "system": _entry("协作者系统提示", "所有统一对话任务共用的默认工作原则。", """你是当前叙事工程的协作者。用户说明本次任务的目的、授权与输出要求；你按它工作，自主调用工程工具查证资料。
 

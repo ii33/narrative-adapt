@@ -26,9 +26,9 @@ def draft(name="甲进出屋"):
         {"type":"person","name":"甲"},
         {"type":"location","name":"屋"},
         {"type":"big_event","name":name},
-        {"type":"scene","name":"屋内行动","big_event":"@3"},
-        {"type":"event","name":"甲进屋","scene":"@4","participants":["@1"],"location":"@2","quotes":["甲进屋。"]},
-        {"type":"event","name":"甲离开","scene":"@4","participants":["@1"],"location":"@2","quotes":["甲离开。"]},
+        {"type":"scene","name":"屋内行动","big_event":name},
+        {"type":"event","name":"甲进屋","scene":"屋内行动","participants":["甲"],"location":"屋","quotes":["甲进屋。"]},
+        {"type":"event","name":"甲离开","scene":"屋内行动","participants":["甲"],"location":"屋","quotes":["甲离开。"]},
     ],"properties":[]}
 
 
@@ -90,7 +90,7 @@ def test_storyline_suffix_marker_is_diagnosed_instead_of_auto_trimmed(project,su
 def test_new_project_persists_only_one_unchanged_name_per_node(project):
     sid=project.import_source("屋内过程",TEXT)
     payload=draft()
-    payload['nodes'].append({'type': 'storyline', 'name': '甲进出屋的完整故事', 'children': ['@3']})
+    payload['nodes'].append({'type': 'storyline', 'name': '甲进出屋的完整故事', 'children': ['甲进出屋']})
     assert project.submit_extraction(sid,payload)["status"] == "accepted"
     nodes=project.graph_snapshot()["nodes"]
     assert next(row["name"] for row in nodes if row["node_type"] == "big_event") == "甲进出屋"

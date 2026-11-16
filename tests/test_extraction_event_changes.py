@@ -138,7 +138,7 @@ def test_false_zero_unknown_and_exact_schema_contract(project):
 def test_node_editor_anchor_steps_include_actions_at_their_event_position(project):
     """动作不填引文：它的披露位置就是直属事件的，所以与所属事件同点（已知缺口见交付报告）。"""
     ops, sid, _, draft = project
-    draft['nodes'].append({'type': 'action', 'name': '确认友谊', 'event': '@4'})
+    draft['nodes'].append({'type': 'action', 'name': '确认友谊', 'event': '结交'})
     assert ops.submit_extraction(sid, draft)['status'] == 'accepted'
     names = {n['name']: n['id'] for n in ops.graph_snapshot()['nodes']}
     editor = ops.node_editor(names['甲'])

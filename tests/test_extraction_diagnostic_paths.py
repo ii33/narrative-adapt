@@ -19,8 +19,8 @@ def draft(text):
         {'type': 'person', 'name': '林岚'},
         {'type': 'location', 'name': '会议室'},
         {'type': 'scene', 'name': '会议'},
-        {'type': 'event', 'name': '会议结束', 'scene': '@3', 'participants': ['@1'],
-         'location': '@2', 'quotes': [text]}], 'properties': []}
+        {'type': 'event', 'name': '会议结束', 'scene': '会议', 'participants': ['林岚'],
+         'location': '会议室', 'quotes': [text]}], 'properties': []}
 
 
 def test_missing_array_and_event_without_locator_are_reported_together(project):
@@ -43,7 +43,7 @@ def test_missing_event_locator_and_property_value_collected_together(project):
     ops, source, text = project
     raw = draft(text)
     del raw['nodes'][3]['quotes']
-    raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排' , "category": "未分类",
+    raw['properties'] = [{'node': '林岚', 'at_event': '会议结束', 'property': '安排' , "category": "未分类",
                           'op': 'set', 'value_type': 'string'}]
     result = ops.submit_extraction(source, raw)
     assert {tuple(row['path']) for row in result['diagnostics']} >= {
@@ -83,19 +83,20 @@ def test_quote_position_preserves_blank_raw_array_slot():
 def test_references_report_exact_participant_array_position(project):
     ops, source, text = project
     raw = draft(text)
-    raw['nodes'][3]['participants'] = ['@1', '@99']
+    raw['nodes'][3]['participants'] = ['林岚', '@99']
     result = ops.submit_extraction(source, raw)
     assert any(row.get('path') == ['nodes', 3, 'participants', 1]
-               and '@99' in row['message'] for row in result['diagnostics'])
+               and '@99' in row['message'] and '不使用 @ 索引' in row['message']
+               for row in result['diagnostics'])
 
 
-@pytest.mark.parametrize('kind,name,label', [('location', '会议室', '地点'), ('item', '钥匙', '物品')])
+@pytest.mark.parametrize('kind,name,label', [('location', '会议室门口', '地点'), ('item', '钥匙', '物品')])
 def test_non_subject_entities_are_rejected_as_participants_with_a_reason(project, kind, name, label):
     """参与者的语义是"参与事件的主体"：地点与物品各有自己的属性族，不能顶替。"""
     ops, source, text = project
     raw = draft(text)
     raw['nodes'].append({'type': kind, 'name': name})
-    raw['nodes'][3]['participants'] = ['@1', '@5']
+    raw['nodes'][3]['participants'] = ['林岚', name]
     result = ops.submit_extraction(source, raw)
     assert result['status'] == 'staged'
     problem = next(row for row in result['diagnostics']
@@ -110,7 +111,7 @@ def test_group_is_a_valid_event_participant(project):
     ops, source, text = project
     raw = draft(text)
     raw['nodes'].append({'type': 'group', 'name': '与会者'})
-    raw['nodes'][3]['participants'] = ['@1', '@5']
+    raw['nodes'][3]['participants'] = ['林岚', '与会者']
     result = ops.submit_extraction(source, raw)
     assert result['status'] == 'accepted', result
     nodes = {n['name']: n for n in ops.graph_snapshot()['nodes']}
@@ -122,22 +123,22 @@ def test_preview_preserves_related_paths_metadata(project):
     """快捷字段与显式地点属性双写：location 的问题要能指回那条属性行。"""
     ops, source, text = project
     raw = draft(text)
-    raw['properties'] = [{'node': '@4', 'property': '地点', "category": "基本信息", 'value': '@2',
-                          'value_type': 'either', 'scope': 'world', 'at_event': '@4', 'op': 'set'}]
+    raw['properties'] = [{'node': '会议结束', 'property': '地点', "category": "基本信息", 'value': '会议室',
+                          'value_type': 'either', 'scope': 'world', 'at_event': '会议结束', 'op': 'set'}]
     result = ops.preview_extraction(source, raw)
     assert not result['valid']
     assert any(row.get('path') == ['nodes', 3, 'location'] and row.get('related_paths') == [['properties', 0]]
                for row in result['diagnostics'])
 
 @pytest.mark.parametrize('section,index,field,value,expected', [
-    ('nodes', 0, 'scene', '@3', ['nodes', 0, 'scene']),
+    ('nodes', 0, 'scene', '会议', ['nodes', 0, 'scene']),
     ('nodes', 0, 'location', '未知', ['nodes', 0, 'location']),
     ('properties', 0, 'op', {'value': 'set'}, ['properties', 0, 'op']),
 ])
 def test_schema_errors_report_the_original_field(project, section, index, field, value, expected):
     ops, source, text = project
     raw = draft(text)
-    raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排' , "category": "未分类", 'value': '结束',
+    raw['properties'] = [{'node': '林岚', 'at_event': '会议结束', 'property': '安排' , "category": "未分类", 'value': '结束',
                           'op': 'set', 'value_type': 'string'}]
     raw[section][index][field] = value
     result = ops.submit_extraction(source, raw)
@@ -154,7 +155,7 @@ def test_dropped_fields_point_at_their_section_and_row(project, section, index, 
     """多余字段不再是 schema 错误（`U-10`）：折叠到 section 上，`field`/`indexes` 指出是哪一条。"""
     ops, source, text = project
     raw = draft(text)
-    raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排' , "category": "未分类", 'value': '结束',
+    raw['properties'] = [{'node': '林岚', 'at_event': '会议结束', 'property': '安排' , "category": "未分类", 'value': '结束',
                           'op': 'set', 'value_type': 'string'}]
     raw[section][index][field] = value
     result = ops.submit_extraction(source, raw)
@@ -179,7 +180,7 @@ def test_root_and_remarks_errors_are_independently_collected(project):
 def test_invalid_op_object_has_structured_error_instead_of_type_error(project):
     ops, source, text = project
     raw = draft(text)
-    raw['properties'] = [{'node': '@1', 'at_event': '@4', 'property': '安排' , "category": "未分类",
+    raw['properties'] = [{'node': '林岚', 'at_event': '会议结束', 'property': '安排' , "category": "未分类",
                           'op': {'value': 'set'}, 'value_type': 'string'}]
     result = ops.submit_extraction(source, raw)
     assert any(row.get('path') == ['properties', 0, 'op'] for row in result['diagnostics'])

@@ -13,10 +13,10 @@ def project(tmp_path, monkeypatch):
     quote = "甲在门外等候。"
     source = ops.import_source("合成场次", quote)
     accepted = ops.submit_extraction(source, {"nodes": [
-        {"type": "big_event", "name": "等待", "children": ["@2"]},
-        {"type": "scene", "name": "门外等候", "children": ["@3"]},
+        {"type": "big_event", "name": "等待", "children": ["门外等候"]},
+        {"type": "scene", "name": "门外等候", "children": ["甲等候"]},
         {"type": "event", "name": "甲等候", "quotes": [quote], "location": "未知",
-         "participants": ["@4"]},
+         "participants": ["甲"]},
         {"type": "person", "name": "甲"},
     ], "properties": []})
     assert accepted["status"] == "accepted", accepted

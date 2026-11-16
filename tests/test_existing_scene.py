@@ -163,7 +163,7 @@ def child_scene_payload(parent):
             {
                 "type": "event", "location": "未知",
                 "name": "甲向乙点头",
-                "scene": "@1",
+                "scene": "点头回应",
                 "participants": ["P1", "P2"],
                 "quotes": ["甲向乙点头。"],
             },

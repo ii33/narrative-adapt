@@ -16,8 +16,8 @@ def test_cross_chapter_batches_reuse_scene_and_event_preserving_evidence_and_mem
     first = ops.submit_extraction(source, {'nodes': [
         {'type': 'location', 'name': '会议室'},
         {'type': 'scene', 'name': '会议室交付条件核对与签约'},
-        {'type': 'event', 'name': '双方核对交付条件', 'scene': '@2',
-         'location': '@1', 'quotes': [beginning], 'participants': ['@4']},
+        {'type': 'event', 'name': '双方核对交付条件', 'scene': '会议室交付条件核对与签约',
+         'location': '会议室', 'quotes': [beginning], 'participants': ['双方']},
         {'type': 'group', 'name': '双方'},
     ], 'properties': []}, start=0, end=boundary)
     assert first['status'] == 'accepted', first
@@ -30,11 +30,11 @@ def test_cross_chapter_batches_reuse_scene_and_event_preserving_evidence_and_mem
 
     second = ops.submit_extraction(source, {'nodes': [
         {'type': 'scene', 'name': scene['name'], 'existing_id': scene['id'],
-         'children': ['@2', '@3']},
+         'children': ['双方核对交付条件', '双方签署交付协议']},
         {'type': 'event', "location": "未知", 'name': event['name'], 'existing_id': event['id'],
-         'scene': '@1', 'quotes': [continuation], 'participants': ['@4']},
-        {'type': 'event', 'name': '双方签署交付协议', 'scene': '@1',
-         'location': location['id'], 'quotes': [conclusion], 'participants': ['@4']},
+         'scene': scene['name'], 'quotes': [continuation], 'participants': ['双方']},
+        {'type': 'event', 'name': '双方签署交付协议', 'scene': scene['name'],
+         'location': location['id'], 'quotes': [conclusion], 'participants': ['双方']},
         {'type': 'group', 'name': '双方'},
     ], 'properties': []}, start=boundary, end=len(text))
     assert second['status'] == 'accepted', second

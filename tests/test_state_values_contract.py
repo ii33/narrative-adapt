@@ -18,11 +18,11 @@ def project(tmp_path, monkeypatch):
         {"type": "person", "name": "洪七公"},
         {"type": "person", "name": "哲别"},
         {"type": "scene", "name": "拜师"},
-        {"type": "event", "name": "拜江南七怪", "scene": "@5", "participants": ["@1", "@2"],
+        {"type": "event", "name": "拜江南七怪", "scene": "拜师", "participants": ["郭靖", "江南七怪"],
          "location": "未知", "quotes": [QUOTES[0]]},
-        {"type": "event", "name": "拜洪七公", "scene": "@5", "participants": ["@1", "@3"],
+        {"type": "event", "name": "拜洪七公", "scene": "拜师", "participants": ["郭靖", "洪七公"],
          "location": "未知", "quotes": [QUOTES[1]]},
-        {"type": "event", "name": "拜哲别", "scene": "@5", "participants": ["@1", "@4"],
+        {"type": "event", "name": "拜哲别", "scene": "拜师", "participants": ["郭靖", "哲别"],
          "location": "未知", "quotes": [QUOTES[2]]},
     ], "properties": []})
     assert accepted["status"] == "accepted", accepted

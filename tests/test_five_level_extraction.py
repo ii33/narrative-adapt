@@ -6,16 +6,16 @@ def test_finished_story_reuses_existing_phase_without_repeating_children(project
     text = "甲进屋。甲离开。全篇结束。"
     sid = project.import_source("闭合篇章", text)
     unfinished = {"nodes": [
-        {"type": "big_event", "name": "进屋离去"},
-        {"type": "scene", "name": "屋内", "big_event": "@1"},
-        {"type": "event", "location": "未知", "name": "进屋离去", "scene": "@2", "quotes": ["甲进屋。甲离开。"],
-         "participants": ["@4"]},
+        {"type": "big_event", "name": "屋内阶段"},
+        {"type": "scene", "name": "屋内", "big_event": "屋内阶段"},
+        {"type": "event", "location": "未知", "name": "进屋离去", "scene": "屋内", "quotes": ["甲进屋。甲离开。"],
+         "participants": ["甲"]},
         {"type": "person", "name": "甲"},
     ], "properties": []}
     first = project.submit_extraction(sid, unfinished)
     assert first["status"] == "accepted", first
     assert not any(n["node_type"] == "storyline" for n in project.graph_snapshot()["nodes"])
-    phase = first["node_ids"]["@1"]
+    phase = first["node_ids"]["屋内阶段"]
     summary = {"nodes": [{"type": "storyline", "name": "屋内篇章", "children": [phase]}], "properties": []}
     result = project.submit_extraction(sid, summary)
     assert result["status"] == "accepted", result
@@ -56,11 +56,11 @@ def test_same_parent_declared_from_both_sides_is_one_edge(project):
     text = "甲进屋。甲离开。全篇结束。"
     sid = project.import_source("双向归属声明", text)
     payload = {"nodes": [
-        {"type": "storyline", "name": "屋内篇章", "children": ["@2"]},
-        {"type": "big_event", "name": "进屋离去", "storyline": "@1", "children": ["@3"]},
-        {"type": "scene", "name": "屋内", "big_event": "@2", "children": ["@4"]},
-        {"type": "event", "location": "未知", "name": "进屋离去", "scene": "@3", "quotes": ["甲进屋。甲离开。"],
-         "participants": ["@5"]},
+        {"type": "storyline", "name": "屋内篇章", "children": ["屋内阶段"]},
+        {"type": "big_event", "name": "屋内阶段", "storyline": "屋内篇章", "children": ["屋内"]},
+        {"type": "scene", "name": "屋内", "big_event": "屋内阶段", "children": ["进屋离去"]},
+        {"type": "event", "location": "未知", "name": "进屋离去", "scene": "屋内", "quotes": ["甲进屋。甲离开。"],
+         "participants": ["甲"]},
         {"type": "person", "name": "甲"},
     ], "properties": []}
     original = deepcopy(payload)
@@ -69,7 +69,7 @@ def test_same_parent_declared_from_both_sides_is_one_edge(project):
     assert payload == original
     ids = outcome["node_ids"]
     nodes = {n["id"]: n for n in project.graph_snapshot()["nodes"]}
-    for parent, child in [("@1", "@2"), ("@2", "@3"), ("@3", "@4")]:
+    for parent, child in [("屋内篇章", "屋内阶段"), ("屋内阶段", "屋内"), ("屋内", "进屋离去")]:
         assert nodes[ids[parent]]["events"] == [ids[child]]
 
 
@@ -77,12 +77,12 @@ def test_conflicting_distinct_parents_are_not_deduplicated_away(project):
     text = "甲进屋。甲离开。全篇结束。"
     sid = project.import_source("冲突归属", text)
     payload = {"nodes": [
-        {"type": "storyline", "name": "篇章一", "children": ["@3"]},
-        {"type": "storyline", "name": "篇章二", "children": ["@3"]},
-        {"type": "big_event", "name": "进屋离去", "children": ["@4"]},
-        {"type": "scene", "name": "屋内", "big_event": "@3", "children": ["@5"]},
-        {"type": "event", "location": "未知", "name": "进屋", "scene": "@4", "quotes": ["甲进屋。"],
-         "participants": ["@6"]},
+        {"type": "storyline", "name": "篇章一", "children": ["进屋离去"]},
+        {"type": "storyline", "name": "篇章二", "children": ["进屋离去"]},
+        {"type": "big_event", "name": "进屋离去", "children": ["屋内"]},
+        {"type": "scene", "name": "屋内", "big_event": "进屋离去", "children": ["进屋"]},
+        {"type": "event", "location": "未知", "name": "进屋", "scene": "屋内", "quotes": ["甲进屋。"],
+         "participants": ["甲"]},
         {"type": "person", "name": "甲"},
     ], "properties": []}
     before = project.graph_snapshot()

@@ -37,10 +37,10 @@ def project(tmp_path, monkeypatch):
 
 
 def scene_draft(*events):
-    """地点 @1、场景 @2，事件从 @3 起依次挂到该场景与地点。"""
+    """地点「巷口」、场景「巷口一场」，事件依次挂到该场景与地点。"""
     nodes = [{"type": "location", "name": "巷口"}, {"type": "scene", "name": "巷口一场"}]
     for row in events:
-        nodes.append({"type": "event", "scene": "@2", "location": "@1", "participants": [], **row})
+        nodes.append({"type": "event", "scene": "巷口一场", "location": "巷口", "participants": [], **row})
     return nodes
 
 
@@ -225,7 +225,7 @@ def test_text_with_two_matches_rejects_and_points_at_anchor(project):
     result = submit(ops, other, [
         {"type": "location", "name": "巷口"},
         {"type": "scene", "name": "巷口一场"},
-        {"type": "event", "name": "走一次", "scene": "@2", "location": "@1",
+        {"type": "event", "name": "走一次", "scene": "巷口一场", "location": "巷口",
          "participants": [], "quotes": ["“走”"]}])
     assert result["status"] == "staged", result
     problem = next(row for row in result["diagnostics"]

@@ -36,4 +36,4 @@ def test_legacy_identity_maps_to_original_unsorted_slot():
     raw = {'nodes': [{'name': '后披露'}, {'name': '先披露'}]}
     problem, = _problems(raw, [{'object_id': '先披露', 'message': '缺少证据引文'}])
     assert problem['path'] == ['nodes', 1, 'quotes']
-    assert problem['reference'] == '@2'
+    assert problem['reference'] == '先披露'

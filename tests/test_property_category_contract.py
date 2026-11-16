@@ -135,7 +135,7 @@ def test_vocabulary_tail_is_unclassified_and_old_config_is_normalized():
         "基本信息", "未分类"]
 
 
-@pytest.mark.parametrize("location", ["@2", "未知"])
+@pytest.mark.parametrize("location", ["会议室", "未知"])
 def test_event_location_shortcut_generates_a_categorized_record(ops, location):
     """程序按 `event.location` 自动生成的地点行也必须带分类：地点的语义分类是「基本信息」。
 
@@ -147,8 +147,8 @@ def test_event_location_shortcut_generates_a_categorized_record(ops, location):
         {"type": "person", "name": "林岚"},
         {"type": "location", "name": "会议室"},
         {"type": "scene", "name": "会议"},
-        {"type": "event", "name": "会议结束", "scene": "@3", "quotes": [text],
-         "participants": ["@1"], "location": location},
+        {"type": "event", "name": "会议结束", "scene": "会议", "quotes": [text],
+         "participants": ["林岚"], "location": location},
     ], "properties": []})
     assert accepted["status"] == "accepted", accepted
     records = [row for row in ops.property_records() if row.get("kind") == "property_change"]

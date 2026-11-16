@@ -19,10 +19,10 @@ def source_script(tmp_path, monkeypatch):
         {'type': 'person', 'name': '乙'},
         {'type': 'location', 'name': '门口'},
         {'type': 'scene', 'name': '门口会合'},
-        {'type': 'event', 'name': '甲等候', 'scene': '@4', 'location': '@3',
-         'participants': ['@1'], 'quotes': ['甲在门口等候。']},
-        {'type': 'event', 'name': '乙到达', 'scene': '@4', 'location': '@3',
-         'participants': ['@2'], 'quotes': ['乙在门口到达。']},
+        {'type': 'event', 'name': '甲等候', 'scene': '门口会合', 'location': '门口',
+         'participants': ['甲'], 'quotes': ['甲在门口等候。']},
+        {'type': 'event', 'name': '乙到达', 'scene': '门口会合', 'location': '门口',
+         'participants': ['乙'], 'quotes': ['乙在门口到达。']},
     ], 'properties': []})
     assert accepted['status'] == 'accepted', accepted
     events = [n['id'] for n in ops.graph_snapshot()['nodes'] if n['node_type'] == 'event']

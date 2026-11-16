@@ -14,8 +14,8 @@ def prepare(ui):
     sid = ops.import_source("详情同步原文", TEXT)
     payload = draft_result()
     payload["nodes"] += [
-        {"type": "action", "name": "完成接人", "event": "@6"},
-        {"type": "storyline", "name": "接人篇章", "children": ["@3"]},
+        {"type": "action", "name": "完成接人", "event": "甲接到乙后离开"},
+        {"type": "storyline", "name": "接人篇章", "children": ["接人"]},
     ]
     assert ops.submit_extraction(sid, payload)["status"] == "accepted"
     ui.window.setProperty("assistantOpen", False)
@@ -112,8 +112,8 @@ def test_public_display_map_covers_every_schema_node_type(tmp_path):
     sid = ops.import_source("类型显示原文", TEXT)
     payload = draft_result()
     payload["nodes"] += [
-        {"type": "action", "name": "完成接人", "event": "@6"},
-        {"type": "storyline", "name": "接人篇章", "children": ["@3"]},
+        {"type": "action", "name": "完成接人", "event": "甲接到乙后离开"},
+        {"type": "storyline", "name": "接人篇章", "children": ["接人"]},
     ]
     assert ops.submit_extraction(sid, payload)["status"] == "accepted"
     existing_types = {node["node_type"] for node in ops.graph_snapshot()["nodes"]}

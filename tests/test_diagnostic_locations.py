@@ -12,7 +12,7 @@ from narrative.diagnostic_locations import normalize_problem
 
 def test_preserves_exact_tokens_and_related_metadata_without_mutating_producer():
     raw = {'message': '引用的节点缺少引文', 'path': ['nodes', 4, 'location'],
-        'related_paths': [['nodes', 2, 'quotes']], 'fields': ['location'], 'object_id': '@5'}
+        'related_paths': [['nodes', 2, 'quotes']], 'fields': ['location'], 'object_id': '宣布延期'}
     before = copy.deepcopy(raw)
     row = normalize_problem(raw, operation='submit_extraction', target={'source_id': 'SRC1'})
     assert row['path'] == ['nodes', 4, 'location']
@@ -103,8 +103,8 @@ def test_property_checks_report_public_argument_not_generated_record_path(projec
         {'type': 'person', 'name': '林岚'},
         {'type': 'location', 'name': '会议室'},
         {'type': 'scene', 'name': '会议延期'},
-        {'type': 'event', 'name': '宣布延期', 'scene': '@3', 'location': '@2', 'quotes': [text],
-         'participants': ['@1']},
+        {'type': 'event', 'name': '宣布延期', 'scene': '会议延期', 'location': '会议室', 'quotes': [text],
+         'participants': ['林岚']},
     ], 'properties': []})
     assert result['status'] == 'accepted'
     nodes = {n['name']: n['id'] for n in project.graph_snapshot()['nodes']}

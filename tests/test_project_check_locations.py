@@ -15,8 +15,8 @@ def project(tmp_path, monkeypatch):
     accepted = ops.submit_extraction(source, {"nodes": [
         {"type": "person", "name": "甲"},
         {"type": "scene", "name": "屋外"},
-        {"type": "event", "name": "等候", "scene": "@2", "quotes": [TEXT],
-         "participants": ["@1"], "location": "未知"},
+        {"type": "event", "name": "等候", "scene": "屋外", "quotes": [TEXT],
+         "participants": ["甲"], "location": "未知"},
     ], "properties": []})
     assert accepted["status"] == "accepted", accepted
     return ops, source

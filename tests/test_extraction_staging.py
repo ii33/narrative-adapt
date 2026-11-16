@@ -31,7 +31,7 @@ def test_invalid_submit_persists_only_draft_patch_auto_commits_and_reopen_reads(
     summary = project.read_extraction_submission(identifier)
     assert 'entries' not in summary
     partial = project.read_extraction_submission(identifier, section='nodes', indices=[BAD_INDEX])
-    assert partial['entries'][0]['reference'] == '@5'
+    assert partial['entries'][0]['reference'] == '甲约好接乙'
     assert partial['entries'][0]['item']['quotes'] == ['甲']
     fixed = project.patch_extraction_submission(identifier, 1,
         [{'op': 'set', 'section': 'nodes', 'index': BAD_INDEX, 'field': 'quotes', 'value': ['甲约好接乙。']}], '更正证据')
@@ -109,26 +109,26 @@ def test_schema_problem_can_be_repaired_by_remove_field_without_row_reordering(p
     sid = project.import_source('暂存', TEXT)
     draft = draft_result(ended=False)
     # `location` 只给事件用：人物行带上它是"看不懂"，patch 删掉这个字段就能过，
-    # 行序与 @ 引用都不变。未知字段不在此列——它提交时就被丢弃了（`U-10`）。
+    # 行序与名称引用都不变。未知字段不在此列——它提交时就被丢弃了（`U-10`）。
     draft['nodes'][0]['location'] = '未知'
     staged = project.submit_extraction(sid, draft)
     problem = staged['problems'][0]
-    assert (problem['section'], problem['index'], problem['reference']) == ('nodes', 0, '@1')
+    assert (problem['section'], problem['index'], problem['reference']) == ('nodes', 0, '甲')
     fixed = project.patch_extraction_submission(staged['submission_id'], 1,
         [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'location'}], '移除错位的字段')
     assert fixed['status'] == 'accepted'
-    assert fixed['node_ids']['@1'] in {n['id'] for n in project.graph_snapshot()['nodes']}
+    assert fixed['node_ids']['甲'] in {n['id'] for n in project.graph_snapshot()['nodes']}
 
 
-def test_append_preserves_prior_at_reference_indices(project):
+def test_append_preserves_prior_name_references(project):
     sid = project.import_source('暂存', TEXT)
     draft = draft_result(ended=False)
-    draft['properties'][0]['holder'] = '@7'
+    draft['properties'][0]['holder'] = '额外称谓'
     staged = project.submit_extraction(sid, draft)
     fixed = project.patch_extraction_submission(staged['submission_id'], 1,
         [{'op': 'append', 'section': 'nodes', 'value': {'type': 'person', 'name': '额外称谓'}}], '补齐明确引用')
     assert fixed['status'] == 'accepted'
-    assert set(fixed['node_ids']) >= {'@1', '@7'}
+    assert set(fixed['node_ids']) >= {'甲', '额外称谓'}
 
 
 def test_conflicting_formal_revision_retains_draft_without_committing(project, monkeypatch):

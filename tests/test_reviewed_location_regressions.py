@@ -22,13 +22,13 @@ def test_adaptation_initial_location_preserves_definition_cardinality(project, c
     sid = project.import_source("地点", text)
     result = project.submit_extraction(sid, {"nodes": [
         {"type": "scene", "name": "会议"},
-        {"type": "event", "name": "结束会议", "scene": "@1", "quotes": [text],
-         "participants": ["@4"]},
+        {"type": "event", "name": "结束会议", "scene": "会议", "quotes": [text],
+         "participants": ["甲"]},
         {"type": "location", "name": "大厅"},
         {"type": "person", "name": "甲"},
-    ], "properties": [{"node": "@2", "property": "地点"  , "category": "未分类", "at_event": "@2", "op": "set",
+    ], "properties": [{"node": "结束会议", "property": "地点"  , "category": "未分类", "at_event": "结束会议", "op": "set",
         "value_type": "node", "cardinality": cardinality,
-        "value": ["@3"] if cardinality == "many" else "@3"}]})
+        "value": ["大厅"] if cardinality == "many" else "大厅"}]})
     assert result["status"] == "accepted", result
     state = project.sync_adaptation()
     event = next(row for row in state["nodes"] if row["node_type"] == "event")
@@ -54,13 +54,13 @@ def test_slice_disambiguates_repeated_property_evidence(project, occurrence, sho
     text = "😀" + quote + "\n次日。\n" + quote
     start = text.index(quote) if occurrence == 0 else text.rindex(quote)
     sid = project.import_source("重复引文", text)
-    event = {"type": "event", "name": "催促出发", "scene": "@1", "quotes": [quote],
-        "participants": ["@3"]}
+    event = {"type": "event", "name": "催促出发", "scene": "出发", "quotes": [quote],
+        "participants": ["甲"]}
     properties = []
     if shortcut:
         event["location"] = "未知"
     else:
-        properties.append({"node": "@2", "property": "地点", "category": "未分类", "at_event": "@2",
+        properties.append({"node": "催促出发", "property": "地点", "category": "未分类", "at_event": "催促出发",
             "op": "unknown", "value_type": "either"})
     raw = {"nodes": [{"type": "scene", "name": "出发"}, event,
         {"type": "person", "name": "甲"}], "properties": properties}
@@ -80,8 +80,8 @@ def test_repeated_event_quote_without_slice_is_still_rejected(project):
     sid = project.import_source("未消歧", quote + "\n" + quote)
     result = project.submit_extraction(sid, {"nodes": [
         {"type": "scene", "name": "出发"},
-        {"type": "event", "name": "出发", "scene": "@1", "location": "未知", "quotes": [quote],
-         "participants": ["@3"]},
+        {"type": "event", "name": "出发", "scene": "出发", "location": "未知", "quotes": [quote],
+         "participants": ["甲"]},
         {"type": "person", "name": "甲"},
     ], "properties": []})
     assert result["status"] == "staged", result
@@ -121,8 +121,8 @@ def test_malformed_property_id_stages_instead_of_crashing(project, malformed):
     sid = project.import_source("地点", "甲结束会议。")
     saved = project.submit_extraction(sid, {"nodes": [
         {"type": "scene", "name": "会议"},
-        {"type": "event", "name": "结束", "scene": "@1", "location": "未知", "quotes": ["甲结束会议。"],
-         "participants": ["@3"]},
+        {"type": "event", "name": "结束", "scene": "会议", "location": "未知", "quotes": ["甲结束会议。"],
+         "participants": ["甲"]},
         {"type": "person", "name": "甲"},
     ], "properties": []})
     assert saved["status"] == "accepted", saved

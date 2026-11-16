@@ -33,11 +33,11 @@ def anchored_draft() -> dict:
         {"type": "location", "name": "档案室"},
         {"type": "item", "name": "铜钥匙"},
         {"type": "scene", "name": "交接"},
-        {"type": "event", "name": "交出钥匙", "scene": "@5", "participants": ["@1", "@2"],
-         "location": "@3", "anchor": {"start": 0, "end": len(TEXT)}},
+        {"type": "event", "name": "交出钥匙", "scene": "交接", "participants": ["林岚", "周宁"],
+         "location": "档案室", "anchor": {"start": 0, "end": len(TEXT)}},
     ], "properties": [
-        {"node": "@4", "property": "持有者", "category": "未分类", "value": "@2",
-         "value_type": "either", "scope": "world", "at_event": "@6", "op": "set"},
+        {"node": "铜钥匙", "property": "持有者", "category": "未分类", "value": "周宁",
+         "value_type": "either", "scope": "world", "at_event": "交出钥匙", "op": "set"},
     ]}
 
 
@@ -67,12 +67,12 @@ def test_property_reference_alone_counts_as_an_anchor(project):
         "nodes": [
             {"type": "person", "name": "旁听者"},
             {"type": "scene", "name": "宣布现场"},
-            {"type": "event", "name": "宣布", "scene": "@2", "participants": ["@1"], "location": "未知",
+            {"type": "event", "name": "宣布", "scene": "宣布现场", "participants": ["旁听者"], "location": "未知",
              "anchor": {"start": 0, "end": len(TEXT)}},
         ],
         "properties": [
-            {"node": "@3", "property": "在场者", "category": "未分类", "value": "@1",
-             "value_type": "node", "scope": "world", "at_event": "@3", "op": "set"},
+            {"node": "宣布", "property": "在场者", "category": "未分类", "value": "旁听者",
+             "value_type": "node", "scope": "world", "at_event": "宣布", "op": "set"},
         ]})
     assert result["status"] == "accepted", result
     assert not [item for item in codes(ops) if item[0] == "entity_unanchored"]

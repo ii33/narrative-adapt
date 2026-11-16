@@ -72,7 +72,7 @@ def test_schema_publishes_catalog_and_exact_same_repair_tool_schemas(project):
 def test_material_tool_envelope_never_turns_staged_receipt_into_accepted(project):
     source = project.import_source('资料卡输入', TEXT)
     accepted = project.submit_extraction(source, draft_result(ended=False))
-    person = accepted['node_ids']['@1']
+    person = accepted['node_ids']['甲']
     entry = str(layout(project.project_info().path).entry)
     staged = tool_api.call('add_material_card', {'node_id': person, 'title': ''}, project=entry)
     assert staged['status'] == 'staged' and staged['operation'] == 'material_add_card'

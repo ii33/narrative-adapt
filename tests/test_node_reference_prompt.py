@@ -1,4 +1,4 @@
-"""The task prompt prefers compact typed IDs and stable batch-local references."""
+"""The task prompt prefers formal typed IDs and batch-local names, never position indexes."""
 import json
 import re
 from pathlib import Path
@@ -15,14 +15,17 @@ def test_reference_prompt_is_concise_and_does_not_require_repeating_existing_nod
         project.save_project_settings(project.load_project_settings() | {'extraction_granularity': detail})
         initial=assistant._first_prompt("请补充已知人物的属性。", extraction_granularity=detail)
         prompt='\n'.join(row['text'] for row in tool_guidance(project, ['submit_extraction'])['guides'])
-        assert "@1" in prompt and "@2" in prompt and "nodes数组从1开始" in prompt
-        assert "P1" in prompt and "E2" in prompt and "已有正式ID" in prompt
+        assert "@1" not in prompt and "@2" not in prompt and "nodes数组从1开始" not in prompt
+        assert "已有节点用正式ID（P1、E2）" in prompt and "本批刚建的用它的名称" in prompt
+        # 行号还有，但它只说明「第几行」，不再兼任引用写法。
+        assert "行号只是第几行，不是节点引用" in prompt
+        assert "P1" in prompt and "E2" in prompt
         assert "已有节点不必重列nodes或引文" in prompt
         assert "nodes:[]" in prompt and "properties直接引用P1/E2" in prompt
-        assert "唯一名称可用" in prompt and "同名必须明确ID" in prompt
-        assert "不取首个匹配" in prompt
+        assert "同名说明还没分清" in prompt
+        assert "程序不取首个匹配" in prompt
         assert "用户说：请补充已知人物的属性。" in initial
-    assert "@1" in tool_api.TOOLS["submit_extraction"].params["result"]["description"]
+    assert "不写@位置索引" in tool_api.TOOLS["submit_extraction"].params["result"]["description"]
 
 
 def test_documented_reference_example_uses_only_current_draft_fields():
@@ -33,16 +36,18 @@ def test_documented_reference_example_uses_only_current_draft_fields():
     allowed_properties=RESULT_SCHEMA["properties"]["properties"]["items"]["properties"]
     assert all(set(row) <= set(allowed_nodes) for row in draft["nodes"])
     assert all(set(row) <= set(allowed_properties) for row in draft["properties"])
-    indexed = {row["type"]: (f"@{index}", row) for index, row in enumerate(draft["nodes"], 1)}
-    person_ref, _person = indexed["person"]
-    phase_ref, _phase = indexed["big_event"]
-    scene_ref, scene = indexed["scene"]
-    event_ref, event = indexed["event"]
-    assert scene["big_event"] == phase_ref
-    assert event["scene"] == scene_ref
-    assert event["participants"] == [person_ref, "P2"]
-    assert draft["properties"][0]["node"] == person_ref
-    assert draft["properties"][0]["at_event"] == event_ref
+    by_type = {row["type"]: row for row in draft["nodes"]}
+    person, phase, scene, event = (by_type["person"], by_type["big_event"],
+                                  by_type["scene"], by_type["event"])
+    # 示例只用两种写法：本批节点的名称、工程已有的正式 ID；不再出现 @ 位置编号。
+    assert scene["big_event"] == phase["name"]
+    assert event["scene"] == scene["name"]
+    assert event["participants"] == [person["name"], "P2"]
+    assert draft["properties"][0]["node"] == person["name"]
+    assert draft["properties"][0]["at_event"] == event["name"]
+    for row in draft["nodes"] + draft["properties"]:
+        for value in row.values():
+            assert not (isinstance(value, str) and value.startswith("@")), row
 
     existing=next(value for value in examples if value.get("nodes") == [])
     assert existing["properties"][0]["node"] == "P1"

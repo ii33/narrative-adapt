@@ -32,10 +32,10 @@ def _build_sources(root):
         {'type': 'person', 'name': '甲'},
         {'type': 'location', 'name': '车站'},
         {'type': 'scene', 'name': '车站沟通'},
-        {'type': 'event', 'name': '收到通知', 'scene': '@3', 'location': '@2',
-         'participants': ['@1'], 'quotes': ['甲在车站收到通知。']},
-        {'type': 'event', 'name': '确认安排', 'scene': '@3', 'location': '@2',
-         'participants': ['@1'], 'quotes': ['甲在车站确认新安排。']},
+        {'type': 'event', 'name': '收到通知', 'scene': '车站沟通', 'location': '车站',
+         'participants': ['甲'], 'quotes': ['甲在车站收到通知。']},
+        {'type': 'event', 'name': '确认安排', 'scene': '车站沟通', 'location': '车站',
+         'participants': ['甲'], 'quotes': ['甲在车站确认新安排。']},
     ], 'properties': []})
     assert result['status'] == 'accepted', result
     events = [n['id'] for n in ops.graph_snapshot()['nodes'] if n['node_type'] == 'event']

@@ -22,15 +22,15 @@ def install(ops):
     nodes += [{"type": "location", "name": name} for index, name in enumerate(["院门", "茶馆", "后院"])]
     nodes += [
         {"type": "big_event", "name": "会合经过"},
-        {"type": "scene", "name": "门前与茶馆", "big_event": "@7"},
-        {"type": "scene", "name": "后院", "big_event": "@7"},
-        {"type": "event", "name": "门前停步", "scene": "@8", "participants": ["@1"], "quotes": [QUOTES[0]]},
-        {"type": "event", "name": "茶馆等候", "scene": "@8", "participants": ["@3"], "quotes": [QUOTES[1]]},
-        {"type": "event", "name": "走入后院", "scene": "@9", "participants": ["@1"], "quotes": [QUOTES[2]]},
-        {"type": "action", "name": "同行停下", "event": "@10", "participants": ["@2"]},
-        {"type": "storyline", "name": "会合篇章", "children": ["@7"]},
+        {"type": "scene", "name": "门前与茶馆", "big_event": "会合经过"},
+        {"type": "scene", "name": "后院场景", "big_event": "会合经过"},
+        {"type": "event", "name": "门前停步", "scene": "门前与茶馆", "participants": ["甲"], "quotes": [QUOTES[0]]},
+        {"type": "event", "name": "茶馆等候", "scene": "门前与茶馆", "participants": ["丙"], "quotes": [QUOTES[1]]},
+        {"type": "event", "name": "走入后院", "scene": "后院场景", "participants": ["甲"], "quotes": [QUOTES[2]]},
+        {"type": "action", "name": "同行停下", "event": "门前停步", "participants": ["乙"]},
+        {"type": "storyline", "name": "会合篇章", "children": ["会合经过"]},
     ]
-    props = [{"node": f"@{10+i}", "property": "地点", "category": "未分类", "op": "set", "value": f"@{4+i}", "value_type": "node", "scope": "world", "at_event": f"@{10+i}"} for i, quote in enumerate(QUOTES)]
+    props = [{"node": event, "property": "地点", "category": "未分类", "op": "set", "value": place, "value_type": "node", "scope": "world", "at_event": event} for event, place in [("门前停步", "院门"), ("茶馆等候", "茶馆"), ("走入后院", "后院")]]
     payload = {"nodes": nodes, "properties": props}
     result = ops.submit_extraction(sid, payload)
     assert result["status"] == "accepted", result
@@ -44,48 +44,48 @@ def ids(summary, key):
 def test_all_five_levels_aggregate_explicit_people_and_event_locations_without_writing(project):
     _sid, mapping = install(project)
     before = project.graph_snapshot(), project.property_records()
-    for parent in ["@7", "@14"]:
+    for parent in ["会合经过", "会合篇章"]:
         data = project.property_node_summary(mapping[parent])
-        assert ids(data, "people") == {mapping[x] for x in ["@1", "@2", "@3"]}
-        assert ids(data, "locations") == {mapping[x] for x in ["@4", "@5", "@6"]}
-        person = next(row for row in data["involvement"]["people"] if row["id"] == mapping["@1"])
-        assert person["event_ids"] == [mapping["@10"], mapping["@12"]]
-    scene = project.property_node_summary(mapping["@8"])
-    assert ids(scene, "locations") == {mapping["@4"], mapping["@5"]}
-    event = project.property_node_summary(mapping["@10"])
-    assert ids(event, "people") == {mapping["@1"], mapping["@2"]}  # parent event + child action
-    assert ids(event, "locations") == {mapping["@4"]}
-    action = project.property_node_summary(mapping["@13"])
-    assert ids(action, "people") == {mapping["@2"]} and not ids(action, "locations")
+        assert ids(data, "people") == {mapping[x] for x in ["甲", "乙", "丙"]}
+        assert ids(data, "locations") == {mapping[x] for x in ["院门", "茶馆", "后院"]}
+        person = next(row for row in data["involvement"]["people"] if row["id"] == mapping["甲"])
+        assert person["event_ids"] == [mapping["门前停步"], mapping["走入后院"]]
+    scene = project.property_node_summary(mapping["门前与茶馆"])
+    assert ids(scene, "locations") == {mapping["院门"], mapping["茶馆"]}
+    event = project.property_node_summary(mapping["门前停步"])
+    assert ids(event, "people") == {mapping["甲"], mapping["乙"]}  # parent event + child action
+    assert ids(event, "locations") == {mapping["院门"]}
+    action = project.property_node_summary(mapping["同行停下"])
+    assert ids(action, "people") == {mapping["乙"]} and not ids(action, "locations")
     assert not any(issue["code"] == "property_on_event" for issue in audit_properties(before[1], before[0]["nodes"])["issues"])
     assert (project.graph_snapshot(), project.property_records()) == before
 
 
 def test_cut_event_change_context_and_subjective_or_literal_references_do_not_leak(project):
     sid, mapping = install(project)
-    early = project.property_node_summary(mapping["@7"], cut=mapping["@10"])
-    assert ids(early, "people") == {mapping["@1"], mapping["@2"]}
-    assert ids(early, "locations") == {mapping["@4"]}
+    early = project.property_node_summary(mapping["会合经过"], cut=mapping["门前停步"])
+    assert ids(early, "people") == {mapping["甲"], mapping["乙"]}
+    assert ids(early, "locations") == {mapping["院门"]}
     snapshot, records = project.graph_snapshot(), project.property_records()
-    record = next(row for row in records if row.get("node_id") == mapping["@10"])
+    record = next(row for row in records if row.get("node_id") == mapping["门前停步"])
     altered = deepcopy(records)
-    clear = dict(record, id="clear-location", op="clear", event_id=mapping["@11"], sequence=TEXT.index(QUOTES[1]),
+    clear = dict(record, id="clear-location", op="clear", event_id=mapping["茶馆等候"], sequence=TEXT.index(QUOTES[1]),
                  disclosure={"source_id": sid, "start": TEXT.index(QUOTES[1])})
     clear.pop("value")
     altered.append(clear)
-    assert not involvement(snapshot, altered, mapping["@10"])["locations"]
-    assert involvement(snapshot, altered, mapping["@10"], mapping["@10"])["locations"]
+    assert not involvement(snapshot, altered, mapping["门前停步"])["locations"]
+    assert involvement(snapshot, altered, mapping["门前停步"], mapping["门前停步"])["locations"]
     # Read projection must not turn a subjective location or a literal ID into occurrence membership.
-    subjective = [dict(row, scope="cognition", holder_id=mapping["@1"]) if row.get("id") == record["id"] else row for row in records]
-    assert not involvement(snapshot, subjective, mapping["@10"])["locations"]
+    subjective = [dict(row, scope="cognition", holder_id=mapping["甲"]) if row.get("id") == record["id"] else row for row in records]
+    assert not involvement(snapshot, subjective, mapping["门前停步"])["locations"]
     literal = [dict(row, value_type="string") if row.get("kind") == "property_definition" and row["id"] == "地点" else row for row in records]
-    assert not involvement(snapshot, literal, mapping["@10"])["locations"]
+    assert not involvement(snapshot, literal, mapping["门前停步"])["locations"]
     cross = deepcopy(snapshot)
-    next(node for node in cross["nodes"] if node["id"] == mapping["@4"])["context_id"] = "other-context"
-    assert not involvement(cross, records, mapping["@10"])["locations"]
-    related = set(related_nodes(snapshot, mapping["@10"], records))
-    assert {mapping["@1"], mapping["@2"], mapping["@4"]} <= related
-    assert mapping["@5"] not in related and mapping["@3"] not in related
+    next(node for node in cross["nodes"] if node["id"] == mapping["院门"])["context_id"] = "other-context"
+    assert not involvement(cross, records, mapping["门前停步"])["locations"]
+    related = set(related_nodes(snapshot, mapping["门前停步"], records))
+    assert {mapping["甲"], mapping["乙"], mapping["院门"]} <= related
+    assert mapping["茶馆"] not in related and mapping["丙"] not in related
 
 
 @pytest.mark.slow
@@ -99,7 +99,7 @@ def test_actual_browse_container_membership_links_jump_to_referenced_node(tmp_pa
         page.load()
         ui.wait(lambda: not ui.window.property("busy"))
         ui.settle()
-        choose(ui, mapping["@7"])
+        choose(ui, mapping["会合经过"])
         ui.wait(lambda: len(plain(page.property("involvement"))["locations"]) == 3)
         ui.wait(lambda: not ui.window.property("busy"))
         group = visual_find(ui.window.contentItem(), "browseInvolvementlocations")
@@ -111,24 +111,24 @@ def test_actual_browse_container_membership_links_jump_to_referenced_node(tmp_pa
         content = scroll.property("contentItem")
         content.setProperty("contentY", max(0, group.y()-40))
         ui.settle()
-        target = next(link for link in links if mapping["@5"] in link.property("text"))
+        target = next(link for link in links if mapping["茶馆"] in link.property("text"))
         click(ui, target)
-        ui.wait(lambda: page.property("selectedId") == mapping["@5"])
-        ui.wait(lambda: plain(page.property("detail")).get("node", {}).get("id") == mapping["@5"])
+        ui.wait(lambda: page.property("selectedId") == mapping["茶馆"])
+        ui.wait(lambda: plain(page.property("detail")).get("node", {}).get("id") == mapping["茶馆"])
 
 
 def test_future_member_does_not_leak_an_already_known_participant_or_location(project):
     _sid, mapping = install(project)
     snapshot, records = deepcopy(project.graph_snapshot()), project.property_records()
-    for identifier in [mapping["@3"], mapping["@5"]]:
+    for identifier in [mapping["丙"], mapping["茶馆"]]:
         next(row for row in snapshot["nodes"] if row["id"] == identifier)["disclosure"]["start"] = 0
     from narrative.browse_view import cut_for
-    boundary = cut_for(snapshot, mapping["@10"])
-    related = set(related_nodes(snapshot, mapping["@7"], records, cut=boundary))
-    assert mapping["@3"] not in related and mapping["@5"] not in related
-    aggregate = involvement(snapshot, records, mapping["@7"], boundary)
-    assert mapping["@3"] not in {row["id"] for row in aggregate["people"]}
-    assert mapping["@5"] not in {row["id"] for row in aggregate["locations"]}
+    boundary = cut_for(snapshot, mapping["门前停步"])
+    related = set(related_nodes(snapshot, mapping["会合经过"], records, cut=boundary))
+    assert mapping["丙"] not in related and mapping["茶馆"] not in related
+    aggregate = involvement(snapshot, records, mapping["会合经过"], boundary)
+    assert mapping["丙"] not in {row["id"] for row in aggregate["people"]}
+    assert mapping["茶馆"] not in {row["id"] for row in aggregate["locations"]}
 
 
 def test_related_view_keeps_item_holder_one_hop_but_never_follows_person_dossier(project):

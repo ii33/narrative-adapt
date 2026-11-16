@@ -36,11 +36,11 @@ def draft() -> dict:
         {"type": "location", "name": "档案室"},
         {"type": "item", "name": "铜钥匙"},
         {"type": "scene", "name": "档案室交接"},
-        {"type": "event", "name": FIRST, "scene": "@5", "participants": ["@1", "@2"],
-         "location": "@3", "anchor": {"start": 0, "end": len(TEXT)}},
+        {"type": "event", "name": FIRST, "scene": "档案室交接", "participants": ["林岚", "周宁"],
+         "location": "档案室", "anchor": {"start": 0, "end": len(TEXT)}},
     ], "properties": [
-        {"node": "@4", "property": "持有者", "category": "未分类", "value": "@1",
-         "value_type": "either", "scope": "world", "at_event": "@6", "op": "set"},
+        {"node": "铜钥匙", "property": "持有者", "category": "未分类", "value": "林岚",
+         "value_type": "either", "scope": "world", "at_event": FIRST, "op": "set"},
     ]}
 
 
@@ -79,7 +79,7 @@ def test_later_participation_does_not_move_the_earliest_anchor(project):
     nodes = nodes_by(ops)
     second = {"nodes": [
         {"type": "scene", "name": "离开"},
-        {"type": "event", "name": SECOND, "scene": "@1", "participants": [nodes["person周宁"]["id"]],
+        {"type": "event", "name": SECOND, "scene": "离开", "participants": [nodes["person周宁"]["id"]],
          "location": nodes["location档案室"]["id"], "anchor": {"start": 10, "end": 18}},
     ], "properties": []}
     assert ops.submit_extraction(source, second)["status"] == "accepted", second
@@ -176,10 +176,10 @@ def test_quoted_event_that_cannot_be_located_is_dropped_with_one_info(project):
         {"type": "person", "name": "林岚"},
         {"type": "location", "name": "档案室"},
         {"type": "scene", "name": "档案室交接"},
-        {"type": "event", "name": FIRST, "scene": "@3", "participants": ["@1"], "location": "@2",
+        {"type": "event", "name": FIRST, "scene": "档案室交接", "participants": ["林岚"], "location": "档案室",
          "quotes": ["原文里没有这句话"]},
         # 同场景还有个能定位的事件：容器证据照样能派生，所以只有丢引文这件事需要提醒。
-        {"type": "event", "name": SECOND, "scene": "@3", "participants": ["@1"], "location": "@2",
+        {"type": "event", "name": SECOND, "scene": "档案室交接", "participants": ["林岚"], "location": "档案室",
          "quotes": ["周宁收下钥匙离开档案室"]},
     ], "properties": []}
     # 本批从原文第 10 个字符开始：近似位置必须是**本批范围起点**，不是原文开头。
@@ -198,12 +198,12 @@ def test_property_without_quotes_is_ordered_by_its_event_and_submission_order(pr
     raw = draft()
     # 显式写地点属性（不给快捷字段），三条都没有引文。
     raw["properties"] = [
-        {"node": "@6", "property": "地点", "category": "基本信息", "value": "@3",
-         "value_type": "either", "scope": "world", "at_event": "@6", "op": "set"},
-        {"node": "@4", "property": "持有者", "category": "未分类", "value": "@1",
-         "value_type": "either", "scope": "world", "at_event": "@6", "op": "set"},
-        {"node": "@1", "property": "所在位置", "category": "未分类", "value": "档案室",
-         "value_type": "string", "scope": "world", "at_event": "@6", "op": "set"},
+        {"node": FIRST, "property": "地点", "category": "基本信息", "value": "档案室",
+         "value_type": "either", "scope": "world", "at_event": FIRST, "op": "set"},
+        {"node": "铜钥匙", "property": "持有者", "category": "未分类", "value": "林岚",
+         "value_type": "either", "scope": "world", "at_event": FIRST, "op": "set"},
+        {"node": "林岚", "property": "所在位置", "category": "未分类", "value": "档案室",
+         "value_type": "string", "scope": "world", "at_event": FIRST, "op": "set"},
     ]
     raw["nodes"][5].pop("location")
     result = ops.submit_extraction(source, raw)

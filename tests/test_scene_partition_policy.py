@@ -23,12 +23,12 @@ def context(tmp_path, monkeypatch):
         {'type': 'location', 'name': '城门'},
         {'type': 'location', 'name': '密室'},
         {'type': 'big_event', 'name': '等候'},
-        {'type': 'scene', 'name': '相隔两地的等候', 'big_event': '@5'},
-        {'type': 'event', 'name': '入城', 'scene': '@6', 'participants': ['@1'], 'location': '@3', 'quotes': [first]},
-        {'type': 'event', 'name': '焚图', 'scene': '@6', 'participants': ['@2'], 'location': '@4', 'quotes': [HIDDEN]},
-        {'type': 'event', 'name': '继续等候', 'scene': '@6', 'participants': ['@1'], 'location': '@3', 'quotes': [last]},
-    ], 'properties': [{'node': '@1', 'property': '身份', "category": "未分类"  , 'value': '来客', 'value_type': 'string',
-        'scope': 'world', 'at_event': '@7', 'op': 'set'}]})
+        {'type': 'scene', 'name': '相隔两地的等候', 'big_event': '等候'},
+        {'type': 'event', 'name': '入城', 'scene': '相隔两地的等候', 'participants': ['甲'], 'location': '城门', 'quotes': [first]},
+        {'type': 'event', 'name': '焚图', 'scene': '相隔两地的等候', 'participants': ['乙'], 'location': '密室', 'quotes': [HIDDEN]},
+        {'type': 'event', 'name': '继续等候', 'scene': '相隔两地的等候', 'participants': ['甲'], 'location': '城门', 'quotes': [last]},
+    ], 'properties': [{'node': '甲', 'property': '身份', "category": "未分类"  , 'value': '来客', 'value_type': 'string',
+        'scope': 'world', 'at_event': '入城', 'op': 'set'}]})
     assert accepted['status'] == 'accepted', accepted
     ids = {n['name']: n['id'] for n in ops.graph_snapshot()['nodes']}
     adaptation = ops.import_adaptation([ids['等候']], 0, '隔离改编')

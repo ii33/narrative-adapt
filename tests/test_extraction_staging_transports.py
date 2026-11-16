@@ -34,7 +34,7 @@ def test_tool_feedback_can_be_patched_directly_via_cli_without_resubmitting(proj
         '--reason', '根据问题反馈直接删除非法字段', '--project', entry, '--json']) == 0
     result = json.loads(capsys.readouterr().out)
     assert result['status'] == 'accepted' and result['submission_status'] == 'committed'
-    assert result['node_ids']['@1'] in {n['id'] for n in project.graph_snapshot()['nodes']}
+    assert result['node_ids']['甲'] in {n['id'] for n in project.graph_snapshot()['nodes']}
     assert tool_cli.main(['extraction-submission', '--submission-id', staged['submission_id'], '--project', entry, '--json']) == 0
     read = json.loads(capsys.readouterr().out)
     assert read['submission_status'] == 'committed' and 'entries' not in read and 'result' not in read
@@ -46,7 +46,7 @@ def test_mcp_reads_only_requested_slots_and_rejects_patch_of_committed_draft(pro
         'arguments': {'submission_id': staged['submission_id'], 'section': 'nodes', 'indices': [0]}}}, default_project=entry)
     assert not response['result']['isError']
     read = json.loads(response['result']['content'][0]['text'])
-    assert len(read['entries']) == 1 and read['entries'][0]['reference'] == '@1'
+    assert len(read['entries']) == 1 and read['entries'][0]['reference'] == '甲'
     fixed = tool_api.call('patch_extraction_submission', {'submission_id': staged['submission_id'],
         'expected_revision': staged['submission_revision'], 'patches': [{'op': 'remove', 'section': 'nodes', 'index': 0, 'field': 'location'}],
         'reason': '局部修补'}, project=entry)
@@ -81,7 +81,9 @@ def test_guidance_uses_feedback_direct_patch_and_never_claims_staged_as_committe
     assert 'staged' in flow and '未写入正式事实' in flow
     assert '无需先read_extraction_submission' in flow and '一次patch数组' in flow
     assert '不重发整批' in flow and 'submission_revision' in flow
-    assert 'index从0起' in flow and '从1起' in flow
+    # 行号只是「section 里的第几行」，节点引用写名称或正式 ID（`I-29`）。
+    assert 'index从0起' in flow and '不是节点引用' in flow
+    assert '正式ID' in flow and '本批刚建的用它的名称' in flow
     for name in ['source_extraction', 'review', 'action_extraction']:
         text = DEFAULT_PROMPTS[name]['text']
         assert 'staged' in text

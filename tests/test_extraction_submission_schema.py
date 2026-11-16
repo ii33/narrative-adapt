@@ -63,21 +63,21 @@ def test_semantic_batches_reuse_previous_nodes_and_close_later_interval(project)
         {"type": "person", "name": "乙"},
         {"type": "location", "name": "门口"},
         {"type": "scene", "name": "门口等候与汇合"},
-        {"type": "event", "name": "等候", "scene": "@4", "participants": ["@1"],
-         "location": "@3", "quotes": [first]}],
-        "properties": [{"node": "@1", "property": "等候对象"  , "category": "未分类", "value": "@2", "value_type": "node", "op": "set", "at_event": "@5"}]},
+        {"type": "event", "name": "等候", "scene": "门口等候与汇合", "participants": ["甲"],
+         "location": "门口", "quotes": [first]}],
+        "properties": [{"node": "甲", "property": "等候对象"  , "category": "未分类", "value": "乙", "value_type": "node", "op": "set", "at_event": "等候"}]},
         start=0, end=len(first))
     assert result["status"] == "accepted"
     ids = result["node_ids"]
     record = next(row for row in project.property_records()
                   if row.get("kind") == "property_change" and row.get('property_id') == '等候对象')
     result = project.submit_extraction(sid, {"nodes": [
-        {"type": "event", "name": "汇合离开", "scene": ids["@4"],
-         "location": ids['@3'], "participants": [ids["@1"], ids["@2"]], "quotes": [second]}],
-        "properties": [{"node": ids["@1"], "property": "等候对象"  , "category": "未分类", "op": "clear", "at_event": "@1"}]},
+        {"type": "event", "name": "汇合离开", "scene": ids["门口等候与汇合"],
+         "location": ids['门口'], "participants": [ids["甲"], ids["乙"]], "quotes": [second]}],
+        "properties": [{"node": ids["甲"], "property": "等候对象"  , "category": "未分类", "op": "clear", "at_event": "汇合离开"}]},
         start=len(first), end=len(first + second))
     assert result["status"] == "accepted"
     nodes = project.graph_snapshot()["nodes"]
-    assert len(nodes) == 6 and {node["id"] for node in nodes if node["node_type"] == "person"} == {ids["@1"], ids["@2"]}
-    assert project.property_state(ids["@1"], "等候对象")["state"] == {"kind": "absent"}
+    assert len(nodes) == 6 and {node["id"] for node in nodes if node["node_type"] == "person"} == {ids["甲"], ids["乙"]}
+    assert project.property_state(ids["甲"], "等候对象")["state"] == {"kind": "absent"}
     assert next(row for row in project.property_records() if row["id"] == record["id"])["op"] == "set"
