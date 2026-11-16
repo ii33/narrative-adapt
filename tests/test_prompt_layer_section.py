@@ -14,7 +14,9 @@ from narrative.prompt_defaults import DEFAULT_PROMPTS
 
 LAYER_HEAD = "五层结构："
 SECTION_END = "六条原则"
-LAYER_LINES = ("主要故事 T", "大事件 B", "场景 S", "事件 E", "动作 A")
+LAYER_LINES = ("部／卷（主要故事 T）", "阶段（大事件 B）", "现场（场景 S）", "事件（事件 E）", "动作（动作 A）")
+# 概念版每行以「- 概念名（层名）：」开头，例如「- 部／卷（主要故事 T）：…」：
+# 概念名在前、代号在后，模型读到的第一句就是「这一层是什么」，不是「T 是什么」。
 SECTION_LIMIT = 800
 LINE_LIMIT = 120
 
@@ -55,10 +57,10 @@ def test_the_layer_statement_is_said_once():
 
 
 def test_scene_sentences_that_must_stay():
-    """场景两条：只装一个事件也成立；地点不记在场景上（`U-09` 的挂靠口径）。"""
+    """场景两条：只装一个事件也算一个现场；地点记在事件上、不记在场景上（`U-09` 的挂靠口径）。"""
     section = layer_section()
-    assert "只含一个也成立" in section
-    assert "地点不记在场景上" in section
+    assert "只装一个事件也算" in section
+    assert "地点记在事件上，不记在场景上" in section
 
 
 def test_layer_section_stays_short():

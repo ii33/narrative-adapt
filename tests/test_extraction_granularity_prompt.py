@@ -20,7 +20,7 @@ def test_standard_and_fine_are_distinct_but_both_leave_actions_opt_in(project):
     assert "当前工程提取粒度：standard" in _first_prompt('提取', extraction_granularity='standard')
     assert "当前工程提取粒度：fine" in _first_prompt('提取', extraction_granularity='fine')
     # 精细档要查全的是实体与证据，不是"场景内部的进展步骤"——后者会把单次交涉切成事件。
-    assert "出场实体与它们各自的证据查全" in fine
+    assert "把这次会用到的每个出场者都认出来" in fine
     assert "进展步骤" not in fine
     assert "次要人物、无名人物与具体地点" in fine
     assert "无法区分的泛称、同一对象的重复提及不拆新实体" in fine
@@ -29,8 +29,9 @@ def test_standard_and_fine_are_distinct_but_both_leave_actions_opt_in(project):
     # 容器不填定位依据、只判边界与直属关系（`U-09`：五层段压成两句）。
     assert "程序从已验证的下级证据逐层汇集" in standard
     assert "模型只判边界、名称与直属关系" in standard
-    assert "默认不提取，用户显式要求才提取" in standard
-    assert all("动作默认不提取" in text for text in (standard, fine))
+    # 动作留成用户点单这件事两档都要讲；旧句「用户显式要求才提取」已换成概念版说法。
+    assert all("动作默认不提取；确需时由用户明确要求" in text for text in (standard, fine))
+    assert "用户显式要求才提取" not in standard
     assert DRAFT_VERSION == "conversation-draft/21"
     property_fields = RESULT_SCHEMA["properties"]["properties"]["items"]["properties"]
     node_fields = RESULT_SCHEMA["properties"]["nodes"]["items"]["properties"]
@@ -95,19 +96,21 @@ def test_both_modes_balance_events_between_scenes_and_actions(project):
     guides = {mode: loaded_extraction_guide(project, mode) for mode in ('standard', 'fine')}
     for prompt in guides.values():
         # 五层定义与边界原则必须讲清楚，细则不该取代它。
-        assert '事件不是动作' in prompt
-        assert '粒度差' in prompt and '粒度等级' in prompt
-        assert '空间、时间接近' in prompt
-        assert '地点不记在场景上，只记在事件上' in prompt
-        assert '一个具体行为动作，直属一个事件' in prompt
+        assert '粒度差' in prompt
+        assert '同一地方、同一段时间' in prompt
+        assert '地点记在事件上，不记在场景上' in prompt
+        assert '同一个事件是怎么做成的，是事件内部的手脚' in prompt
         # 场景只装一条事件也合法，这条不许在改写中丢掉。
-        assert '只含一个也成立' in prompt
+        assert '只含一个事件也成立' in prompt
         assert '边界' in prompt and '语义' in prompt
         # 旧判据（能否独立概括／起因、推进、落点）已整批替换，一处残留就是漂移种子。
         assert '可独立概括' not in prompt and '起因、推进' not in prompt and '判断三问' not in prompt
         # 两档都不自动产出动作，也不把动作改标成事件。
         assert '动作默认不提取' in prompt
-        assert '不以固定事件数' not in prompt or True
+        assert '不以固定事件数' not in prompt
+    # 「事件不是动作」与「粒度等级」两档各写各的说法，不再强求同一句同时落在两档里。
+    assert '事件不是动作' in guides['standard'] and '粒度等级' in guides['standard']
+    assert '它不是一个单独的动作' in guides['fine'] and '它不改事件的颗粒度' in guides['fine']
     # 两档的粒度要求本身必须不同，否则档位没有意义。
     assert guides['standard'] != guides['fine']
     assert '进展步骤' not in DEFAULT_PROMPTS['granularity_fine']['text']
@@ -122,17 +125,23 @@ def test_both_modes_balance_events_between_scenes_and_actions(project):
 
 
 def test_event_criterion_is_scale_difference_and_events_are_not_actions():
-    """事件判据只有两句：事件不是动作；层级之间是粒度差（五层都是「事件」，只是粒度等级不同）。"""
+    """事件判据只有两句：五层都是「事件」、层级之间只是颗粒度差；事件不是动作（动作是事件内部的手脚）。"""
     from narrative.prompt_defaults import DEFAULT_PROMPTS
     extraction = DEFAULT_PROMPTS['extraction']['text']
     assert '五层都是「事件」' in extraction
-    assert '事件粒度等级起的代称，由粗到细' in extraction
-    assert '粒度粗于动作，不是一个具体的动作' in extraction
+    assert '同一种东西的五个颗粒度' in extraction or '从大到小的五个颗粒度' in extraction
+    # 旧判据「粒度粗于动作，不是一个具体的动作」已换成概念版说法。
+    assert '粒度粗于动作' not in extraction and '不是一个具体的动作' not in extraction
+    assert '同一个事件是怎么做成的，是事件内部的手脚，通常不单独列出来' in extraction
     # 场景只装一条事件也成立：这是合法形态，不是缺数据。
-    assert '只含一个也成立' in extraction
-    for mode in ('standard', 'fine'):
+    assert '只装一个事件也算一个现场' in extraction and '只含一个事件也成立' in extraction
+    # 「事件不是动作」两档各说各的：标准档一句结论，精细档讲「撑不起一个事件」。
+    assert '事件不是动作' in DEFAULT_PROMPTS['granularity_standard']['text']
+    assert '它不是一个单独的动作' in DEFAULT_PROMPTS['granularity_fine']['text']
+    scale_sentence = {'standard': '层级之间是粒度差', 'fine': '它不改事件的颗粒度'}
+    for mode, sentence in scale_sentence.items():
         text = DEFAULT_PROMPTS[f'granularity_{mode}']['text']
-        assert '事件不是动作' in text and '粒度差' in text
+        assert sentence in text, f'{mode} 档没讲清层级之间只是颗粒度差别：{sentence}'
         assert '可独立概括' not in text and '起因、推进' not in text
 
 
@@ -188,8 +197,10 @@ def test_containers_derive_evidence_instead_of_requesting_model_quotes(project):
 
 def test_storyline_is_created_while_in_progress_and_completion_is_derived(project):
     prompt = loaded_extraction_guide(project, 'fine')
-    assert '该部未完结也可创建并持续修订' in prompt
-    assert '一部一条，需要时拆卷' in prompt
+    assert '未完结也可以先建' in prompt
+    # 旧的「一部一条，需要时拆卷」已整批替换：部／卷讲的是覆盖范围与边写边定。
+    assert '一部一条，需要时拆卷' not in prompt
+    assert '这一段故事覆盖的范围' in prompt and '用 children 归并已有大事件' in prompt
     # completion 由程序从下级证据派生；提示词不再教模型填 closing_quote。
     assert 'closing_quote' not in prompt or '不要求模型提供closing_quote' not in prompt
     assert 'closing_quote提供闭合证据' not in prompt
