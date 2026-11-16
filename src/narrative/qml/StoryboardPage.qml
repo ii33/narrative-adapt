@@ -162,6 +162,27 @@ Item {
     function reload() {
         if (unitId && visible) request("read_storyboard", {unit_id:unitId})
     }
+    // 按正文批量建镜：一个正文块一个镜头，时长取默认 3 秒；标题取该段首句，保证能认。
+    function batchShots() {
+        if (busy || !ready) return
+        const blocks = ((scene && scene.unit && scene.unit.blocks) || []).filter(function (b) {
+            return (((b.payload || {}).text) || "").trim().length > 0
+        })
+        if (!blocks.length) return
+        const stops = "。！？!?
+"
+        const changes = blocks.map(function (block) {
+            const text = ((block.payload || {}).text || "").trim()
+            let cut = text.length
+            for (let i = 0; i < text.length; i++) {
+                if (stops.indexOf(text.charAt(i)) >= 0) { cut = i; break }
+            }
+            let title = text.slice(0, cut).trim() || text.slice(0, 24)
+            if (title.length > 24) title = title.slice(0, 24)
+            return {op: "create_shot", title: title, duration_ms: 3000, source_block_ids: [block.id]}
+        })
+        request("apply_storyboard_changes", {unit_id: unitId, revision: board.revision, changes: changes})
+    }
     function resetView() {
         playing = false
         timelineEditDrags=0
@@ -369,6 +390,7 @@ Item {
             Item { Layout.fillWidth:true }
             CheckBox { objectName:"storyboardReadOnly"; text:"纯读稿"; visible:desk.deskMode===0; checked:desk.scriptReadOnly; onToggled:desk.scriptReadOnly=checked }
             Button { objectName:"storyboardExportScript"; text:"导出分镜稿"; enabled:desk.ready&&!desk.busy; onClicked:scriptExport.open() }
+            Button { objectName:"storyboardBatchShots"; text:"按正文批量建镜"; enabled:desk.ready&&!desk.busy&&(desk.scene?.unit.blocks||[]).some(b=>((b.payload||{}).text||"").trim().length>0); onClicked:desk.batchShots() }
         }
         RowLayout {
             visible:!desk.directorOnly&&desk.deskMode===0
@@ -682,7 +704,12 @@ Item {
                     onToggled:editor.selectedBlocks=checked ? editor.selectedBlocks.concat([modelData.id]) : editor.selectedBlocks.filter(id=>id!==modelData.id)
                 }
             }
-            Button { objectName:"storyboardSaveShot";text:editor.pending?"保存中…":"保存镜头";enabled:!!titleField.text.trim()&&editor.resolved&&!editor.pending&&!desk.busy;onClicked:editor.submitShot() }
+            Label { objectName:"storyboardSaveHint";visible:!saveShotButton.enabled;Layout.fillWidth:true;wrapMode:Text.Wrap;color:desk.t.muted
+                text: !titleField.text.trim() ? "填写镜头标题后才能保存"
+                    : editor.pending ? "正在保存…"
+                    : desk.busy ? "本场正在处理另一项操作，稍候再保存"
+                    : "有 " + editor.conflicts.length + " 个关键帧超出时长，先为它们选择移动或删除" }
+            Button { id:saveShotButton;objectName:"storyboardSaveShot";text:editor.pending?"保存中…":"保存镜头";enabled:!!titleField.text.trim()&&editor.resolved&&!editor.pending&&!desk.busy;onClicked:editor.submitShot() }
 
         }
     }
