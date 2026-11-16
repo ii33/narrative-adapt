@@ -40,18 +40,16 @@ CHAPTER_TEXT_SHA256 = "2e68b28d06f1d86ce169cb28b9e07d9be1a1c442d24975682ed201dfe
 
 # main() 会把 qa.TEXT 落成 input.txt；这里只放说明，原文不进验收目录。
 TEXT_NOTE = "外部版权原文按路径读取，未复制；范围、字数与摘要见 fixture.json 的 target_* 字段。"
-TASK_TEMPLATE = """请在当前空工程中处理《飘邈之旅》第 {first} 到第 {last} 章的完整原文（源文本字符区间 {start} 到 {end}，共 {chars} 字），按工程 fine 精细粒度逐章完整读取并提取。不缩短章节、不只做开头示例、不处理第 {next_chapter} 章。
-请只用两三次读取确认标题，然后**立刻提交第一批**，不要先通读全章；逐章完整读取并提取，按内容分批提交，**每批范围不得与已接受批次重叠**（只补未覆盖的段落），每批使用对应的实际原文范围与逐字证据。覆盖有叙事作用的主要及次要/无名人物、具体地点、关系（含互逆关系的正反两条）、心理认知、物品与持有者、事件及所属场景，不只列名词或梗概。核对人物身份与代词、叙事时空、关系方向、物品持有者及换手区间，事件归属场景。默认不提取动作，不为章节尚未结束的较大篇章创建临时主要故事。
-正常提取流程自主完成；报告各章实际完成范围、入库结果与存疑。若未完成不能声称这几章全部完成。只处理指定的这几章，不修改其他业务对象，不另开任务或重试服务。"""
+TASK_TEMPLATE = """切片并提取第 {first} 到第 {last} 章（源文本 {start} 到 {end}，共 {chars} 字）。"""
+
 OBSERVER = LiveObserver()
 
 
 def task_text() -> str:
     """按本次选定的章数生成任务描述（默认 1 章，几分钟一轮）。"""
     last = START_CHAPTER + SELECTED_CHAPTERS - 1
-    return TASK_TEMPLATE.format(first=START_CHAPTER, last=last, count=SELECTED_CHAPTERS,
-                                start=TASK_START, end=TASK_END, chars=CHAPTER_CHARS,
-                                next_chapter=last + 1 if last < 3 else 3)
+    return TASK_TEMPLATE.format(first=START_CHAPTER, last=last,
+                                start=TASK_START, end=TASK_END, chars=CHAPTER_CHARS)
 
 
 # 基准用的模型运行参数。这里踩过一次反直觉的坑，记下来：
