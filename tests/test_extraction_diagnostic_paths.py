@@ -119,16 +119,16 @@ def test_group_is_a_valid_event_participant(project):
     assert set(event['participants']) == {nodes['林岚']['id'], nodes['与会者']['id']}
 
 
-def test_preview_preserves_related_paths_metadata(project):
-    """快捷字段与显式地点属性双写：location 的问题要能指回那条属性行。"""
+def test_preview_reports_the_dropped_shortcut_with_its_reason(project):
+    """快捷字段与显式地点属性双写：保留属性行、丢弃快捷行，并说明丢弃的是哪一条（U-10）。"""
     ops, source, text = project
     raw = draft(text)
     raw['properties'] = [{'node': '会议结束', 'property': '地点', "category": "基本信息", 'value': '会议室',
                           'value_type': 'either', 'scope': 'world', 'at_event': '会议结束', 'op': 'set'}]
     result = ops.preview_extraction(source, raw)
-    assert not result['valid']
-    assert any(row.get('path') == ['nodes', 3, 'location'] and row.get('related_paths') == [['properties', 0]]
-               for row in result['diagnostics'])
+    assert result['valid']
+    assert any('快捷字段' in str(row.get('message')) for row in (result.get('info') or [])), result.get('info')
+
 
 @pytest.mark.parametrize('section,index,field,value,expected', [
     ('nodes', 0, 'scene', '会议', ['nodes', 0, 'scene']),
