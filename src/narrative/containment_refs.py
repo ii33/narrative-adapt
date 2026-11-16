@@ -3,9 +3,15 @@
 
 def resolve_parent(reference: str, kind: str, context: str, snapshot: dict,
                    declared: list[dict], mention_ids: dict, issues: list[dict], owner: str) -> str | None:
+    """声明式归属：按类型、语境与身份解析，不按数组位置或邻近顺序猜。
+
+    ``reference`` 到这里已经是引用解析的结果——正式 ID 或本批槽位标签；报错时说人话：
+    用节点的**名称**（``display_name``）而不是槽位标签。
+    """
     if not reference:
         return None
     current = {node["id"]: node for node in snapshot["nodes"]}
+    labels = {row.get("name"): row.get("display_name") for row in declared if row.get("display_name")}
     if reference in current:
         candidates = [current[reference]]
     else:
@@ -17,9 +23,12 @@ def resolve_parent(reference: str, kind: str, context: str, snapshot: dict,
     valid = [node for node in candidates if node.get("node_type") == kind
              and node.get("context_id", "canon") == context and not node.get("retracted")]
     if len(valid) != 1:
-        issues.append({"name": owner, "reference": reference, "parent_type": kind,
+        candidates_note = [labels.get(node.get("name")) or node["id"] for node in candidates]
+        issues.append({"name": owner, "reference": labels.get(reference) or reference, "parent_type": kind,
                        "candidate_ids": [node["id"] for node in candidates],
-                       "reason": "声明的父级引用缺失、歧义、已撤回或类型/语境不匹配；请查证并使用明确父级ID"})
+                       "candidates": candidates_note,
+                       "reason": "声明的父级引用缺失、歧义、已撤回或类型/语境不匹配；"
+                                 "请写该层级节点的名称或正式 ID"})
         return None
     return valid[0]["id"]
 

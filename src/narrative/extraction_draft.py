@@ -10,7 +10,7 @@ INFO_PREVIEW_LIMIT = 5
 
 RESULT_SCHEMA = {
     "type": "object", "required": ["nodes", "properties"],
-    "description": "引用优先已有正式节点ID或@1起原始nodes完整数组索引；名称仅在唯一时可解析，同名须ID/@。",
+    "description": "节点引用写有语义的标识：优先本工程已有正式ID（P1、E2），否则写本批节点的名称；同名跨类型时按字段要求的类型区分，不写@位置索引。",
     "properties": {
         "nodes": {"type": "array", "items": {"type": "object", "required": ["name", "type"],
             "allOf": [{"if": {"properties": {"type": {"const": "event"}}},
@@ -26,30 +26,30 @@ RESULT_SCHEMA = {
                     "description": "仅event：原文Unicode位置锚点{start,end}（左闭右开），程序按它截取逐字原文作为本事件证据，推荐用它代替回抄引文；与quotes同时给出时以anchor为准",
                     "properties": {"start": {"type": "integer", "description": "原文Unicode起点，含"},
                                    "end": {"type": "integer", "description": "原文Unicode终点，不含"}}},
-                "location": {"type": "string", "description": "仅event：明确地点location节点ID/@引用，或无/未知；程序复用本事件的定位依据（anchor 截取的文本，或 quotes）生成自身world地点变更，不与显式地点properties双写；省略不自动补未知"},
+                "location": {"type": "string", "description": "仅event：明确地点的location节点名称或正式ID，或无/未知；程序复用本事件的定位依据（anchor 截取的文本，或 quotes）生成自身world地点变更，不与显式地点properties双写；省略不自动补未知"},
                 "aliases": {"type": "array", "items": {"type": "string"}},
                 "existing_id": {"type": "string", "description": "查证后引用本工程已有节点；不新建同一事件"},
                 "new_occurrence": {"type": "boolean", "description": "同名但原文明确是另一次发生时声明"},
                 "context_id": {"type": "string"},
                 "participants": {"type": "array", "items": {"type": "string"},
-                    "description": "事件的参与者必填：人物或群体节点引用（正式 ID 或本批 @索引），含次要、无名人物；地点用事件自身的地点属性、物品用持有者属性，不写进参与者；确无参与者或原文未交代时给空数组"},
-                "children": {"type": "array", "items": {"type": "string"}, "description": "容器直接子项ID/@，可归入已有子项而不重列原文；按T→B→S→E→A校验"},
-                "scene": {"type": "string", "description": "同语境场景的正式ID或本批@序号；唯一名亦可"},
-                "event": {"type": "string", "description": "action直属事件正式ID或本批@序号；唯一名亦可，仅按需动作提取使用"},
-                "big_event": {"type": "string", "description": "scene所属阶段性大事件的B编号或本批@序号"},
-                "storyline": {"type": "string", "description": "big_event所属已结束主要故事的T编号或本批@序号；未总结篇章可省略"},
+                    "description": "事件的参与者必填：人物或群体的名称（或本工程正式ID），含次要、无名人物；地点用事件自身的地点属性、物品用持有者属性，不写进参与者；确无参与者或原文未交代时给空数组"},
+                "children": {"type": "array", "items": {"type": "string"}, "description": "容器直接子项的名称或正式ID，可归入已有子项而不重列原文；按T→B→S→E→A校验"},
+                "scene": {"type": "string", "description": "同语境场景的名称或正式ID"},
+                "event": {"type": "string", "description": "action直属事件的名称或正式ID，仅按需动作提取使用"},
+                "big_event": {"type": "string", "description": "scene所属阶段性大事件的名称或正式ID（B编号）"},
+                "storyline": {"type": "string", "description": "big_event所属主要故事的名称或正式ID（T编号）；未总结篇章可省略"},
             }, "additionalProperties": False}},
         "properties": {"type": "array", "items": {"type": "object", "required": ["node", "property", "category", "at_event", "op"],
             "properties": {
-                "node": {"type": "string", "description": "属性主体；身份、关系或作用角色中为参照方A"}, "property": {"type": "string", "description": "关系描述对方相对node的身份、关系或作用中的角色；node=A,property=父亲,value=B表示B是A的父亲；事件地点使用属性名‘地点’并引用地点节点"},
+                "node": {"type": "string", "description": "属性主体的名称或正式ID；身份、关系或作用角色中为参照方A"}, "property": {"type": "string", "description": "关系描述对方相对node的身份、关系或作用中的角色；node=A,property=父亲,value=B表示B是A的父亲；事件地点使用属性名‘地点’并引用地点节点"},
                 "op": {"type": "string", "enum": ["set", "add", "remove", "clear", "unknown"], "description": "在at_event处建立/设置、增添、移除、明确清空或变为未知；不填写有效期"},
-                "value": {"description": "node/either节点引用表示被指向的对方ID；普通string/any值保持字面内容；每个event必须有自身world地点，value引用location节点或显式‘无’‘未知’，也可op=unknown不携value"}, "value_type": {"type": "string", "enum": ["string", "number", "boolean", "node", "either", "any"], "description": "节点引用用node/either；事件地点建议either以支持location引用及‘无’‘未知’，已有node定义可引用location；string/any即使内容像P编号也是字面值"},
+                "value": {"description": "node/either节点引用表示被指向的对方的名称或正式ID；普通string/any值保持字面内容；每个event必须有自身world地点，value引用location节点或显式‘无’‘未知’，也可op=unknown不携value"}, "value_type": {"type": "string", "enum": ["string", "number", "boolean", "node", "either", "any"], "description": "节点引用用node/either；事件地点建议either以支持location引用及‘无’‘未知’，已有node定义可引用location；string/any即使内容像P编号也是字面值"},
                 "cardinality": {"type": "string", "enum": ["one", "many"], "description": "新定义默认one；多值状态显式many且value为数组。已有定义省略沿用，显式冲突拒绝，须显式修改定义"},
                 "symmetric": {"type": "boolean", "description": "该关系性质对称时显式true；单向false，不按名称猜测"},
                 "category": {"type": "string", "description": "必填：填该节点类型分类表里的一个大类；原文看不出归类时显式填「未分类」，程序不会按属性名或取值猜分类"}, "scope": {"type": "string", "enum": ["world", "cognition", "claim"], "description": "world为原文支持的客观事实；事件地点为world；cognition为某人物所知所信/主观判断，claim为人物言说主张，二者须给holder；对白可有客观事实依据，不机械全记claim"},
-                "holder": {"type": ["string", "null"], "description": "cognition的认知者或claim的说话人ID/@引用；node仍是被认知/被谈论的主体，可与holder不同；例如甲以为乙是教师：node乙、scope=cognition、holder甲；world不填"}, "source": {"type": "string"},
+                "holder": {"type": ["string", "null"], "description": "cognition的认知者或claim的说话人名称（或正式ID）；node仍是被认知/被谈论的主体，可与holder不同；例如甲以为乙是教师：node乙、scope=cognition、holder甲；world不填"}, "source": {"type": "string"},
                 "related_nodes": {"type": "array", "items": {"type": "string"}},
-                "at_event": {"type": "string", "description": "必须给本次建立/变更/失效所在事件ID或@引用；程序按事件顺序推状态，sequence由已定位引文或事件位置与提交顺序生成"},
+                "at_event": {"type": "string", "description": "必须给本次建立/变更/失效所在事件的名称或正式ID；程序按事件顺序推状态，sequence由已定位引文或事件位置与提交顺序生成"},
             }, "additionalProperties": False}},
         "uncertainties": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
         "exclusions": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
@@ -414,11 +414,16 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
         if 'location' not in row:
             continue
         location = row['location'].strip()
-        generated = {'node': f'@{index+1}', 'property': property_id, 'at_event': f'@{index+1}',
+        event_name = str(row.get('name') or '').strip() if isinstance(row, dict) else ''
+        if not event_name:
+            # 没有名称的事件本身就会被拒收（`name必须是非空字符串`）：这里不再造一条
+            # 引用不到主体的地点记录，免得多报一条看不懂的错。
+            continue
+        generated = {'node': event_name, 'property': property_id, 'at_event': event_name,
             'scope': 'world', 'op': 'unknown' if location == '未知' else 'set',
             'quotes': list(row.get('quotes') or []),
             # 程序自己生成的行：它的引文来自已经核对过的事件定位依据，不是模型多写的，
-            # 所以不能被「属性不带 quotes」的丢弃规则吃掉。
+            # 所以不能被「属性不带引文」的丢弃规则吃掉。
             '_draft_generated': True,
             # 程序生成的行也要满足「分类必填」：地点的语义分类就是「基本信息」，
             # 与模型自己写地点属性时一致；不能用「未分类」敷衍。
@@ -461,12 +466,15 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
     data = bind(data, current_graph, current_records)
     for index in shortcut_indices:
         reference = f'@{index+1}'
-        owner = next((row['name'] for row in data['nodes'] if row['reference'] == reference), reference)
+        # `reference` 只是这一行的槽位标签（内部定位用）；报错要说人话，用事件名称。
+        node_row = next((row for row in data['nodes'] if row['reference'] == reference), {})
+        owner = node_row.get('name', reference)
+        display = node_row.get('display_name') or owner
         generated_index = explicit_count + shortcut_indices.index(index)
         generated = next((row for row in data['properties'] if row.get('_draft_index') == generated_index), None)
         if generated is None:
             message = f'nodes[{index}].location无法定位事件地点证据，请核对本事件的anchor或quotes'
-            data['rejected'].append({'name': owner, 'path': ['nodes', index, 'location'], 'message': message, 'reason': message,
+            data['rejected'].append({'name': display, 'path': ['nodes', index, 'location'], 'message': message, 'reason': message,
                                      'related_paths': [['nodes', index, 'anchor' if index in anchor_spans else 'quotes']]})
             continue
         if generated.get('op') != 'unknown':
@@ -475,10 +483,10 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
             if any(value not in ('无', '未知') and data['reference_types'].get(value) != 'location' for value in values):
                 path = ['nodes', index, 'location']
                 causes = [item for item in data['rejected'] if item.get('path') == ['properties', generated_index, 'value']]
-                message = f'nodes[{index}].location必须引用通过校验的location节点，或填写无/未知'
+                message = f'nodes[{index}].location必须引用通过校验的location节点（写地点名称或正式 ID），或填写无/未知'
                 if causes:
                     message += '；' + '；'.join(item.get('message') or item.get('reason', '') for item in causes)
-                data['rejected'].append({'name': owner, 'path': path, 'message': message, 'reason': message,
+                data['rejected'].append({'name': display, 'path': path, 'message': message, 'reason': message,
                     'related_paths': [related for item in causes for related in item.get('related_paths', [])]})
         explicit_locations = [row for row in data['properties'] if row.get('_draft_index', explicit_count) < explicit_count
             and row.get('node') == owner and row.get('at_event') == owner
@@ -486,7 +494,7 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
             and (row.get('property') in LOCATION_PROPERTIES or definitions.get(row.get('property'), {}).get('semantic') in tuple(LOCATION_SEMANTICS))]
         if explicit_locations:
             message = f'nodes[{index}].location与本事件显式地点properties双写；保留一种明确表达后修补，不自动选择'
-            data['rejected'].append({'name': owner, 'path': ['nodes', index, 'location'], 'message': message, 'reason': message,
+            data['rejected'].append({'name': display, 'path': ['nodes', index, 'location'], 'message': message, 'reason': message,
                 'related_paths': [['properties', row['_draft_index']] for row in explicit_locations]})
     shortcut_paths = {explicit_count + order: ['nodes', index, 'location'] for order, index in enumerate(shortcut_indices)}
     for item in data.get('rejected', []):

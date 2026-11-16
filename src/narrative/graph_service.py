@@ -167,7 +167,7 @@ class GraphService:
                 "read_staged": "Operations.read_extraction_submission(submission_id, section=None, indices=None)",
                 "patch_staged": "Operations.patch_extraction_submission(submission_id, expected_revision, patches, reason)",
                 "staging_revision": "submission_revision只约束暂存稿；patch.expected_revision使用此值，不是正式工程revision。已committed不可再patch。",
-                "patch_indices": "section为nodes/properties/uncertainties/exclusions；index0基，nodes.reference仍为原1基@n；只set/remove字段或append对象，不删除整行或重排。",
+                "patch_indices": "section为nodes/properties/uncertainties/exclusions；index是section内的0基行号，不是引用；节点引用写名称或正式ID，不写@位置索引；只set/remove字段或append对象，不删除整行或重排。",
                 "repair_tools": {name: TOOLS[name].schema() for name in ('list_extraction_submissions', 'read_extraction_submission', 'patch_extraction_submission')},
                 "records": list(PROPERTY_RECORD_KINDS),
             },

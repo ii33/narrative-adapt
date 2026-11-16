@@ -8,7 +8,7 @@ def _entry(label: str, description: str, text: str, *, version: str = "1") -> di
 
 _EXTRACTION_REPAIR_GUIDE = """
 submit_extraction返回staged时，仅表示草稿已持久暂存，未写入正式事实。使用返回的submission_id、submission_revision和problems.targets定位问题；反馈已足够时直接用一次patch数组修多个问题，无需先read_extraction_submission，更不重发整批。仅缺少相关条目内容时才read_extraction_submission，并指定section/indices读取所需行；read不是修补前置，不重复读取整稿。
-修补时用patch_extraction_submission只修问题字段或追加确实缺少的项，expected_revision填当前submission_revision而非工程revision。set/remove只改字段，append追加对象；行号index从0起，节点引用@n仍从1起，禁止删行、重排或splice破坏已有引用。每次patch程序自动重检，通过立即原子入库，不需要人工accept，也不要重发整批submit_extraction。新的独立事实批次仍可正常submit。
+修补时用patch_extraction_submission只修问题字段或追加确实缺少的项，expected_revision填当前submission_revision而非工程revision。set/remove只改字段，append追加对象；行号index从0起，那是「section里的第几行」，不是节点引用；节点引用写名称或正式ID，不写@位置编号。禁止删行、重排或splice，否则行号会漂移。每次patch程序自动重检，通过立即原子入库，不需要人工accept，也不要重发整批submit_extraction。新的独立事实批次仍可正常submit。
 重启或任务恢复后确需找回未解决暂存时，可用list_extraction_submissions只列摘要并按source_id筛选；不要把list或read变成每次提取的固定前置。暂存未解决不能声称已全部入库；仅accepted或unchanged且无error表示相应批次处理完成。工具参数JSON不合法属于当前任务的工具纠错，不执行该非法调用、不创建伪成功。"""
 
 
@@ -78,7 +78,7 @@ DEFAULT_PROMPTS = {
 
 2 边界：不以段落、章节、句子数或动作数判断；层级之间是粒度差——动作是事件里的一步，事件里分得出若干这样的步，场景装得下相邻的事件（只含一个事件也成立），往上依次是阶段级与部／卷级；放进上一层或下一层都说得通，说明它还没被定层。
 
-3 复用：原文里同一个人物、地点、物品、事件就是同一个，用已有 ID（P1/E2）或本批 @1、@2，不另造同义节点。
+3 复用：原文里同一个人物、地点、物品、事件就是同一个，已有节点用它的正式 ID（P1/E2），本批刚建的就用它的名称引用，不另造同义节点。
 
 4 状态：属性只在事件处记录建立、变化、失效，之后的状态由程序按事件顺序推导；不写有效期，不删真实历史。录入错误用correct_property或delete_property_records更正，不伪装成故事里的失效。
 
@@ -103,7 +103,7 @@ DEFAULT_PROMPTS = {
 - 属性变更：set/add/remove 带 value，clear/unknown 不带；at_event 指向该事件自身。
 
 - 编号、坐标、去重、静态预检由程序完成：不手算 sequence、不填 identity_note 等存储字段。
-- 引用优先用已有正式ID（P1、E2）或本批nodes数组从1开始的@1、@2；已有节点不必重列nodes或引文，补属性可用nodes:[]并在properties直接引用P1/E2；唯一名称可用，同名必须明确ID，不取首个匹配。
+- 引用写有语义的标识：已有节点用正式ID（P1、E2），本批刚建的用它的名称——名称就是那个对象的身份，同名说明还没分清，改名称或直接用正式ID，程序不取首个匹配。已有节点不必重列nodes或引文，补属性可用nodes:[]并在properties直接引用P1/E2。
 
 
 
@@ -123,7 +123,7 @@ DEFAULT_PROMPTS = {
 
 流程（三步，不是检查清单）：
 
-读足够上下文，随读取整理本批事实及时提交一批语义完整的事实（submit_extraction） → 返回 staged 时只是暂存、未写入正式事实：反馈够时一次patch数组修多个问题，无需先read_extraction_submission，也不重发整批；expected_revision 用 submission_revision，行号index从0起（@n从1起）；重检通过自动入库再继续下一批。字符串匹配由程序负责：不必代替程序逐引文搜索比对，locate_source 只在需要坐标、消歧或提交报定位错误时使用；但语义证据核对不能省略，也不先用 preview 走一遍。accepted 且无error 即该批完成，info 与建议不要求清零；不能将省略入库账目理解为省略公开说明，仍需给出语义判断、存疑理由与用户需要的解释。
+读足够上下文，随读取整理本批事实及时提交一批语义完整的事实（submit_extraction） → 返回 staged 时只是暂存、未写入正式事实：反馈够时一次patch数组修多个问题，无需先read_extraction_submission，也不重发整批；expected_revision 用 submission_revision，行号index从0起（行号只是第几行，不是节点引用）；重检通过自动入库再继续下一批。字符串匹配由程序负责：不必代替程序逐引文搜索比对，locate_source 只在需要坐标、消歧或提交报定位错误时使用；但语义证据核对不能省略，也不先用 preview 走一遍。accepted 且无error 即该批完成，info 与建议不要求清零；不能将省略入库账目理解为省略公开说明，仍需给出语义判断、存疑理由与用户需要的解释。
 
 
 
@@ -147,7 +147,7 @@ DEFAULT_PROMPTS = {
 
 
 
-提交前自检五问：边界过粗还是过细（放进上一层或下一层是不是也说得通）？每个事件都有定位依据（锚点或逐字引文）？同一对象有没有重复节点？每个事件都有场景和地点？staged 的问题是否已 patch 或如实说明？""", version="36"),
+提交前自检五问：边界过粗还是过细（放进上一层或下一层是不是也说得通）？每个事件都有定位依据（锚点或逐字引文）？同一对象有没有重复节点？每个事件都有场景和地点？staged 的问题是否已 patch 或如实说明？""", version="37"),
     "granularity_standard": _entry("标准提取粒度", "标准档的阅读梳理要求。", """标准档是阅读梳理，只回答切多细：事实怎么取见「提取通用要求」。
 
 五层本质上都是「事件」——原文里连绵不断发生的事，T／B／S／E／A 只是本项目给不同粒度等级起的代称：粗的一级装得下细的一级的若干条（装一条也成立），层级之间是粒度差。事件不是动作：一个事件里还分得出「怎么做的」那几步——分得出的是事件，拆不开、只有一步的（一句话、一个动作）属于动作层，不单独立为事件。
@@ -213,10 +213,10 @@ DEFAULT_PROMPTS = {
 
 原则：只写原文明示的行为，解释、心理推断与作者概述不算动作；每条动作直属恰好一个事件，不挂场景或其他容器，也不含子项；已有动作先用 existing_id 查证复用，不另造同义动作；只做指定的事件，不扩到相邻事件或其他层级。
 
-硬约定：草稿节点 type: action，用 event 引用直属事件（正式 ID、本批 @n 从1起、或唯一名称），被引用事件须同语境；动作不给引文，它的出处就是那个直属事件的位置；提交用 submit_extraction。locate_source 只在确需坐标、消歧或明确定位错误时使用，不逐引文预查，也不先用 preview_extraction 走一遍。返回 staged 时用一次 patch_extraction_submission 数组修问题，expected_revision 填 submission_revision，只改问题字段、不重发整批；accepted 且无error 才算该批完成。
+硬约定：草稿节点 type: action，用 event 引用直属事件的名称或正式 ID，被引用事件须同语境；动作不给引文，它的出处就是那个直属事件的位置；提交用 submit_extraction。locate_source 只在确需坐标、消歧或明确定位错误时使用，不逐引文预查，也不先用 preview_extraction 走一遍。返回 staged 时用一次 patch_extraction_submission 数组修问题，expected_revision 填 submission_revision，只改问题字段、不重发整批；accepted 且无error 才算该批完成。
 
 常见误判：把事件改写成动作清单；按动词逐个建动作；重复创建已有动作；顺手扩到别的事件；把 info 或建议当错误去补数据。
-自检：这条行为指认得出来吗？它其实还分得出「怎么做的」若干步吗（分得出就属事件）？event 引用的是同一语境那个事件吗？动作能指回该事件的位置吗？""", version="9"),
+自检：这条行为指认得出来吗？它其实还分得出「怎么做的」若干步吗（分得出就属事件）？event 引用的是同一语境那个事件吗？动作能指回该事件的位置吗？""", version="10"),
     "scene_table": _entry("场表任务指导", "拆场及修改场表时的默认创作与保存要求。", """以本剧本独立事件线当前保留、且在选定范围内的剧情为依据，编写或修改本段场级场表。项目风格决定表达取向；源改编、原文、旧场表与正文可查阅参考，但参考不覆盖本剧本的删改。
 
 场（unit）是场表的一行，身份 unit_id，新建场可只给顺序；kind 取 scene 或 screen_segment，enabled 决定是否纳入输出。plan 的字段形状见 submit_scene_table 的 inputSchema；启用场至少要有非空 summary。plan.source_event_ids 记录本场实际采用的有效事件 ID，可多对多，也可不填。

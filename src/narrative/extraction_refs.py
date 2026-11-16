@@ -1,4 +1,15 @@
-"""Revision-local typed references; @indices never become persisted aliases."""
+"""Draft references resolve by semantic identity: formal ID or node name, never ``@n``.
+
+草稿里的引用字段写**有语义的标识**，不写按数组位置编号的定位：位置是提交的排版，
+不是身份——丢一行、换个顺序就整体错位，模型也记不住（`I-29`，见
+``docs/extraction/SPEC.md``）。
+
+解析顺序：正式 ID（指向工程已有节点）→ 本批唯一名称 → 名称本身跨类型时按字段要求
+的类型筛（`allowed`）。`@n` 一律拒收，报错必须给出候选与可用写法，让模型一轮改对。
+
+本模块内部仍用草稿行的原始槽位 ``@n`` 做**行标签**（`path` 定位、去重归并都要它），
+那与 patch 的整数 index 同性质：说明「第几行」，不是引用。
+"""
 from __future__ import annotations
 
 import json
@@ -9,9 +20,26 @@ from copy import deepcopy
 # 事件参与者只能是"参与事件的主体"：人和群体。地点有事件自身的地点属性，
 # 物品有持有者，二者混进参与者等于把同一条事实写两遍。
 PARTICIPANT_TYPES = {'person', 'group'}
-KIND_LABELS = {'person': '人物', 'group': '群体', 'item': '物品', 'location': '地点'}
+KIND_LABELS = {'person': '人物', 'group': '群体', 'item': '物品', 'location': '地点',
+               'scene': '场景', 'big_event': '大事件', 'storyline': '主要故事',
+               'event': '事件', 'action': '动作'}
 MOMENT_TYPES = {'event', 'action'}
 ID_PATTERN = re.compile(r'[PGILEASTBN][0-9]+(?:\.[0-9]+)*\Z')
+AT_INDEX = re.compile(r'@[0-9]+\Z')
+
+
+def _labels(kinds, *, unique: bool = True) -> str:
+    """候选的类型标签。
+
+    歧义报错要保留重复（``场景、场景`` 正是「同名同类」的证据），所以 ``unique=False``；
+    讲「这里需要哪种类型」时去掉重复。
+    """
+    labels = [KIND_LABELS.get(str(kind), str(kind)) for kind in kinds]
+    return '、'.join(dict.fromkeys(labels) if unique else labels)
+
+
+def _kinds(candidates) -> list:
+    return [row.get('type') if local else row.get('node_type') for _ref, row, local in candidates]
 
 
 class References:
@@ -35,28 +63,34 @@ class References:
 
     def resolve(self, value, *, allowed=None, context=None, optional=False, literal=False,
                 allowed_note=None):
+        """Resolve one draft reference to the identity it names.
+
+        认得三种写法，按这个顺序：**正式 ID**（本工程已有节点，任何时候都成立）、
+        **本批唯一名称**、**名称 + 字段类型**（同名跨类型时用 ``allowed`` 筛）。
+        ``@n`` 不再接受：它是数组位置，不是身份；报错要写清候选与实际可用的写法。
+        """
         if value is None or value == '':
             if optional:
                 return ''
-            raise ValueError('必须提供节点引用')
+            raise ValueError('必须提供节点引用：写本工程正式 ID 或节点名称')
         if not isinstance(value, str):
-            raise ValueError('节点引用必须是正式ID或@索引字符串')
+            raise ValueError('节点引用必须是字符串：本工程正式 ID 或节点名称')
         if literal and value in {'无', '未知'}:
             return value
         if value.startswith('@'):
-            if not re.fullmatch(r'@[1-9][0-9]*', value) or value not in self.local:
-                raise ValueError(f'局部引用{value}无效，索引按原始nodes完整数组从1起，拒绝项不重编号')
-            canonical = self.aliases[value]
-            candidates = [(canonical, self.local[canonical], True)]
-        elif value in self.current:
+            raise ValueError(f'引用「{value}」无效：不使用 @ 索引，请写名称或正式 ID')
+        if value in self.current:
             candidates = [(value, self.current[value], False)]
         elif ID_PATTERN.fullmatch(value):
-            raise ValueError(f'正式节点ID不存在：{value}；若这是新节点名称请用@索引')
+            raise ValueError(f'正式节点ID不存在：{value}；若这是本批新建的节点，请写它的名称')
         else:
-            candidates = self.names.get(value, [])
+            candidates = list(self.names.get(value, []))
             if not candidates and literal:
                 return value
+            if not candidates:
+                raise ValueError(f'找不到引用「{value}」：本批与工程里都没有这个名称；请写名称或正式 ID')
         valid = []
+        valid_kinds = []
         rejected_kinds = []
         for ref, row, local in candidates:
             kind = row.get('type') if local else row.get('node_type')
@@ -70,21 +104,33 @@ class References:
             canonical = self.aliases.get(ref, ref)
             identity = row.get('existing_id') if local else ref
             valid.append((identity or canonical, canonical, local))
-        if not value.startswith('@') and value not in self.current:
+            valid_kinds.append(kind)
+        if value not in self.current:
+            # 名称形式先认本批：同一批里刚声明的节点就是模型正在说的那个，
+            # 工程里的同名节点只在没写进本批时才作为候选。
             local_matches = [item for item in valid if item[2]]
             if local_matches:
                 valid = local_matches
         unique = {}
         for identity, ref, _local in valid:
             unique.setdefault(identity, ref)
-        if len(unique) != 1:
-            # 引用确实指向一个节点、只是类型不对时，说清是哪种类型不对，
-            # 而不是让它看起来像"引用不存在"。
-            if allowed_note and rejected_kinds and not valid:
-                kinds = '、'.join(dict.fromkeys(KIND_LABELS.get(kind, str(kind)) for kind in rejected_kinds))
-                raise ValueError(f'引用{value}是{kinds}节点：{allowed_note}')
-            raise ValueError(f'引用{value}不存在、歧义或类型/语境不符；请使用正式ID或明确@索引')
-        return next(iter(unique.values()))
+        if len(unique) == 1:
+            return next(iter(unique.values()))
+        if valid:
+            where = '本批' if valid[0][2] else '工程'
+            raise ValueError(f'{where}有 {len(unique)} 个「{value}」：'
+                             f'{_labels(valid_kinds, unique=False)}；请改名区分或使用正式 ID')
+        # 引用确实指向节点、只是类型或语境不对时，说清是哪种类型不对，而不是让它
+        # 看起来像「引用不存在」；候选与可用的写法一并列出，模型不用再猜是哪一个。
+        if rejected_kinds:
+            parts = [f'引用「{value}」的候选项是{_labels(_kinds(candidates), unique=False)}']
+            if allowed:
+                parts.append(f'这里需要{_labels(allowed)}')
+            if allowed_note:
+                parts.append(allowed_note)
+            parts.append('请写名称或正式 ID')
+            raise ValueError('；'.join(parts))
+        raise ValueError(f'引用「{value}」指向的节点已撤回或语境不符；请写名称或正式 ID')
 
 
 def bind(data: dict, snapshot: dict, records: list[dict]) -> dict:
@@ -96,18 +142,15 @@ def bind(data: dict, snapshot: dict, records: list[dict]) -> dict:
         try:
             return resolver.resolve(value, **options)
         except ValueError as exc:
-            causes = []
-            if isinstance(value, str) and re.fullmatch(r'@[1-9][0-9]*', value):
-                target = ['nodes', int(value[1:]) - 1]
-                causes = [issue for issue in issues if issue.get('path', [])[:2] == target]
             message = str(exc)
-            if causes:
-                message += '；引用目标未通过校验：' + '；'.join(dict.fromkeys(str(c.get('message') or c.get('reason')) for c in causes))
             issues.append({'name': owner, 'reference': value, 'path': path, 'reason': message,
-                           'message': message, **({'related_paths': [c['path'] for c in causes]} if causes else {})})
+                           'message': message})
             return ''
     for row in result['nodes']:
         name = row['name']
+        # `reference` 是草稿行的原始槽位（`@第几行`），只用来定位这一行：报错 path、
+        # 去重归并、暂存索引都用它。它不是引用写法，也不进模型可见字段——模型看见的
+        # 是 `display_name`。
         path = ['nodes', int(row['reference'][1:]) - 1]
         row['display_name'] = name
         row['name'] = resolver.aliases[row['reference']]

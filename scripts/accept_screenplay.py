@@ -126,14 +126,14 @@ def seed(ops):
         {"type": "location", "name": "东仓"},
         {"type": "item", "name": "铜钥匙"},
         {"type": "scene", "name": "交接钥匙后接近东仓"},
-        {"type": "event", "name": "林岚来到旧车站门口", "scene": "@6", "participants": ["@1"], "anchor": anchor(TEXT, first)},
-        {"type": "event", "name": "周川把铜钥匙交给林岚", "scene": "@6", "participants": ["@1", "@2"], "anchor": anchor(TEXT, second)},
-        {"type": "event", "name": "林岚到东仓听见脚步", "scene": "@6", "participants": ["@1"], "anchor": anchor(TEXT, third)},
+        {"type": "event", "name": "林岚来到旧车站门口", "scene": "交接钥匙后接近东仓", "participants": ["林岚"], "anchor": anchor(TEXT, first)},
+        {"type": "event", "name": "周川把铜钥匙交给林岚", "scene": "交接钥匙后接近东仓", "participants": ["林岚", "周川"], "anchor": anchor(TEXT, second)},
+        {"type": "event", "name": "林岚到东仓听见脚步", "scene": "交接钥匙后接近东仓", "participants": ["林岚"], "anchor": anchor(TEXT, third)},
     ], "properties": [
-        {"node": "@7", "property": "地点", "category": "未分类", "op": "set", "value": "@3", "value_type": "node", "scope": "world", "at_event": "@7"},
-        {"node": "@8", "property": "地点", "category": "未分类", "op": "unknown", "value_type": "node", "scope": "world", "at_event": "@8"},
-        {"node": "@9", "property": "地点", "category": "未分类", "op": "set", "value": "@4", "value_type": "node", "scope": "world", "at_event": "@9"},
-        {"node": "@5", "property": "持有者", "category": "未分类", "op": "set", "value": "@1", "value_type": "either", "scope": "world", "at_event": "@8"},
+        {"node": "林岚来到旧车站门口", "property": "地点", "category": "未分类", "op": "set", "value": "旧车站门口", "value_type": "node", "scope": "world", "at_event": "林岚来到旧车站门口"},
+        {"node": "周川把铜钥匙交给林岚", "property": "地点", "category": "未分类", "op": "unknown", "value_type": "node", "scope": "world", "at_event": "周川把铜钥匙交给林岚"},
+        {"node": "林岚到东仓听见脚步", "property": "地点", "category": "未分类", "op": "set", "value": "东仓", "value_type": "node", "scope": "world", "at_event": "林岚到东仓听见脚步"},
+        {"node": "铜钥匙", "property": "持有者", "category": "未分类", "op": "set", "value": "林岚", "value_type": "either", "scope": "world", "at_event": "周川把铜钥匙交给林岚"},
     ]}
     result = ops.submit_extraction(sid, draft)
     if result["status"] != "accepted":

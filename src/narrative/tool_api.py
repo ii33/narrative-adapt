@@ -1003,13 +1003,13 @@ _EXTRACTION_PATCH_ITEM = {'oneOf': [
 _register(Tool('read_extraction_submission', '仅缺少局部内容时读取暂存状态/问题/指定行，非patch前置；反馈已足够则直接patch，默认不回传整稿。', {
     'submission_id': {'type': 'string', 'required': True, 'description': 'submit_extraction返回的暂存编号'},
     'section': {'type': 'string', 'enum': _SUBMISSION_SECTIONS, 'description': '默认只返回状态和问题；指定才读取该部分'},
-    'indices': {'type': 'array', 'items': {'type': 'integer', 'minimum': 0}, 'description': 'section内0基行号；node reference仍为原1基@n'},
+    'indices': {'type': 'array', 'items': {'type': 'integer', 'minimum': 0}, 'description': 'section内0基行号；返回的reference是节点名称（引用写法），不是行号'},
 }, _read_extraction_submission))
-_register(Tool('patch_extraction_submission', '反馈足够时直接一次patch数组修多个问题，无需先read；只改字段或追加项，保留索引和@n引用，自动重检入库，不重发整批。', {
+_register(Tool('patch_extraction_submission', '反馈足够时直接一次patch数组修多个问题，无需先read；只改字段或追加项，按行号定位，自动重检入库，不重发整批。', {
     'submission_id': {'type': 'string', 'required': True},
     'expected_revision': {'type': 'integer', 'required': True, 'minimum': 1, 'description': '刚读取的submission_revision，不是正式工程revision'},
     'patches': {'type': 'array', 'required': True, 'minItems': 1, 'items': _EXTRACTION_PATCH_ITEM,
-                'description': 'set/remove改index行的field；append追加对象；remove配单元素path仅删除result未知顶层字段。禁止删整行、重排或splice；index0基，不修改外层source_id/start/end。'},
+                'description': 'set/remove改index行的field；append追加对象；remove配单元素path仅删除result未知顶层字段。index是section内的0基行号，不是节点引用：节点引用写名称或正式ID。禁止删整行、重排或splice；不修改外层source_id/start/end。'},
     'reason': {'type': 'string', 'required': True, 'description': '局部修补依据'},
 }, _patch_extraction_submission, writes=True))
 

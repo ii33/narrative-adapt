@@ -49,7 +49,12 @@ def read(ops, submission_id, *, section=None, indices=None):
         if any(i >= len(entries) for i in selected):
             raise ValueError('暂存索引越界')
         result['section'] = section
-        result['entries'] = [dict(index=i, item=deepcopy(entries[i]), **({'reference': f'@{i+1}'} if section == 'nodes' else {})) for i in selected]
+        # 节点的 `reference` 用草稿里的**名称**：那是引用写法，模型读回来能直接接上；
+        # 行定位另有 `index`（0 基），两者不是一回事。
+        result['entries'] = [dict(index=i, item=deepcopy(entries[i]),
+                                  **({'reference': str(entries[i].get('name') or '')}
+                                     if section == 'nodes' and isinstance(entries[i], dict) else {}))
+                             for i in selected]
     return result
 
 
@@ -115,9 +120,9 @@ def _problems(raw, diagnostics, built=None):
             for index, item in enumerate(raw.get('nodes') or []):
                 if not isinstance(item, dict):
                     continue
-                reference = f'@{index+1}'
-                if identity and identity in {item.get('name'), reference, item.get('existing_id'), node_ids.get(reference)}:
-                    targets.append({'section': 'nodes', 'index': index, 'reference': reference})
+                label = str(item.get('name') or '')
+                if identity and identity in {label, item.get('existing_id'), node_ids.get(label)}:
+                    targets.append({'section': 'nodes', 'index': index, 'reference': label})
             for index, item in enumerate(raw.get('properties') or []):
                 if not isinstance(item, dict):
                     continue
@@ -139,7 +144,9 @@ def _problems(raw, diagnostics, built=None):
                 if len(fields) == 1:
                     target['field'] = fields[0]
             if target['section'] == 'nodes' and 'index' in target:
-                target['reference'] = f"@{target['index']+1}"
+                rows = raw.get('nodes') or []
+                row = rows[target['index']] if 0 <= target['index'] < len(rows) else None
+                target.setdefault('reference', str((row or {}).get('name') or '') if isinstance(row, dict) else '')
         problem = {**deepcopy(diagnostic), 'severity': diagnostic.get('severity', 'error'), 'code': diagnostic.get('code', 'DRAFT_SCHEMA'),
                    'message': message, 'targets': targets}
         if not isinstance(path, list):

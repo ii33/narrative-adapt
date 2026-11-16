@@ -7,6 +7,7 @@ import unicodedata
 from typing import NamedTuple, cast
 
 from . import property_vocabulary
+from .extraction_refs import KIND_LABELS
 from .order_ids import allocate, prefix_for
 from .property_core import container_property_duplicate
 from .source_location import ExactQuoteLookup
@@ -38,15 +39,13 @@ def _diagnostic(issues: list[dict], path: list, name: str, reason: str, **detail
 def _batch_participant_kind(value: str, rows: list, declared: dict[str, str]) -> str:
     """Best-effort type of a participant reference *inside this draft*.
 
-    Only the batch is visible here: ``@N`` points at the original nodes array and
-    a name is usable when this batch declares it. Anything else (a formal ID or a
-    name that only exists in the graph) is left to reference resolution, which
-    sees the stored graph.
+    Only the batch is visible here: a name is usable when this batch declares it
+    exactly once (同名出现多次时 ``declared`` 记空串，交给引用解析按歧义处理)。
+    Anything else (a formal ID or a name that only exists in the graph) is left to
+    reference resolution, which sees the stored graph.
     """
-    if value.startswith("@") and value[1:].isdigit():
-        index = int(value[1:])
-        if 1 <= index <= len(rows) and isinstance(rows[index - 1], dict):
-            return str(rows[index - 1].get("type") or "").strip()
+    if value.startswith("@"):
+        # `@n` 已经不是引用写法，由引用解析统一拒收，这里不再按位置猜类型。
         return ""
     return declared.get(value, "")
 
@@ -502,20 +501,20 @@ def parse_nodes(payload: dict, text: str, *, node_spans: dict[int, tuple[int, in
                 value = row.get(field)
                 invalid = (value is not None and not isinstance(value, str)) if field not in ('participants', 'children') else (not isinstance(value if value is not None else [], list) or any(not isinstance(item, str) for item in (value or [])))
                 if invalid:
-                    _diagnostic(rejected, path + [field], name, '父级、参与者和子项须为正式ID或@索引字符串；数组字段须为字符串数组')
+                    _diagnostic(rejected, path + [field], name, '父级、参与者和子项须为字符串引用：写本工程正式ID或节点名称；数组字段须为字符串数组')
             continue
         if node_type == 'event' and 'participants' not in row:
             _diagnostic(rejected, path + ['participants'], name,
-                        '事件必须给出参与者：人物引用或本批 @索引；确无参与者或原文未交代时给空数组')
+                        '事件必须给出参与者：写人物或群体的名称（或正式ID）；确无参与者或原文未交代时给空数组')
             continue
         if node_type == 'event':
             offender = _participant_domain_error(row.get('participants') or [], raw_rows, declared_types)
             if offender is not None:
                 index, reference, kind = offender
                 _diagnostic(rejected, path + ['participants', index], name,
-                            f'事件参与者只能是人物或群体：{reference} 是本批的'
+                            f'事件参与者只能是人物或群体：本批「{reference}」是'
                             f'{PARTICIPANT_TYPE_LABELS.get(kind, kind)}节点；地点请用事件自身的地点属性，'
-                            f'物品请用持有者属性')
+                            f'物品请用持有者属性。请写人物或群体的名称或正式 ID')
                 continue
         is_container = node_type in {'scene', 'big_event', 'storyline'}
         quote_entries = [(index, str(item)) for index, item in enumerate(row.get('quotes') or []) if str(item).strip()]
@@ -583,6 +582,8 @@ def parse_nodes(payload: dict, text: str, *, node_spans: dict[int, tuple[int, in
         ]
         nodes.append({
             "name": name,
+            # 槽位标签：这是「提交里的第几行」，不是引用写法。模型写的是名称或正式 ID
+            # （引用解析在 `narrative.extraction_refs`），这里只保留行位置给诊断与去重用。
             "reference": f"@{original_index}",
             "type": node_type,
             # 没有定位依据的节点不冒称一个原文坐标：start 为 None，交由批次起点定序。
@@ -937,7 +938,8 @@ def build_extraction(ops, data: dict) -> dict:
             identity_fields = ("existing_id", "new_occurrence", "context_id", "scene", "event")
             if (any(item.get(field) != merged.get(field) for field in identity_fields)
                     or set(item.get("participants") or []) != set(merged.get("participants") or [])):
-                skipped.append({"name": item["name"], "reason": "同一首引文的节点声明了不同身份或参与结构，请先消除歧义"})
+                skipped.append({"name": item.get("display_name", item["name"]),
+                                 "reason": "同一首引文的节点声明了不同身份或参与结构，请先消除歧义或改名区分"})
             for extra in item["quotes"]:
                 if extra not in merged["quotes"]:
                     merged["quotes"].append(extra)
@@ -956,7 +958,7 @@ def build_extraction(ops, data: dict) -> dict:
                          or target.get("node_type") != item["type"]
                          or target.get("context_id", "canon") != item.get("context_id", "canon")
                          or item.get("new_occurrence")):
-            skipped.append({"name": item["name"], "existing_id": explicit,
+            skipped.append({"name": item.get("display_name", item["name"]), "existing_id": explicit,
                             "reason": "existing_id须指向本工程存在且类型、语境一致的节点，不能同时声明new_occurrence"})
             continue
         nodes.append(item)
@@ -1004,18 +1006,18 @@ def build_extraction(ops, data: dict) -> dict:
             parent_kind = "event" if item["type"] == "action" else "scene"
             item["resolved_" + parent_kind + "_id"] = resolve_parent(
                 item.get(parent_kind) or "", parent_kind, item.get("context_id", "canon"),
-                snapshot, nodes, mention_ids, skipped, item["name"],
+                snapshot, nodes, mention_ids, skipped, item.get("display_name", item["name"]),
             )
             named, proven = _event_reuse_candidates(item, snapshot, data["source_id"], by_name, ids, existing)
             if proven and item.get("new_occurrence"):
-                skipped.append({"name": item["name"], "existing_ids": [node["id"] for node in proven],
+                skipped.append({"name": item.get("display_name", item["name"]), "existing_ids": [node["id"] for node in proven],
                                 "reason": "new_occurrence与同一位置的事件证据冲突；请查证后引用existing_id或提供另一次发生的证据"})
             elif len(proven) == 1:
                 mention_ids[mention] = proven[0]["id"]
                 ids.setdefault(key, mention_ids[mention])
                 continue
             if len(proven) > 1 or (named and not item.get("new_occurrence")):
-                skipped.append({"name": item["name"], "existing_ids": [node["id"] for node in named],
+                skipped.append({"name": item.get("display_name", item["name"]), "existing_ids": [node["id"] for node in named],
                                 "reason": "同名事件身份不能唯一确认；查证后用existing_id引用已有事件，或用new_occurrence声明原文中的另一次发生"})
         if item["type"] not in {"event", "action"} and record_key in known_by_quote:
             mention_ids[mention] = known_by_quote[record_key]
@@ -1056,7 +1058,7 @@ def build_extraction(ops, data: dict) -> dict:
         if "resolved_scene_id" not in event:
             event["resolved_scene_id"] = resolve_parent(
                 event.get("scene") or "", "scene", event.get("context_id", "canon"),
-                snapshot, nodes, mention_ids, skipped, event["name"],
+                snapshot, nodes, mention_ids, skipped, event.get("display_name", event["name"]),
             )
         parent = event.get("resolved_scene_id")
         if parent:
@@ -1066,7 +1068,7 @@ def build_extraction(ops, data: dict) -> dict:
         parent = action.get("resolved_event_id")
         if not parent:
             parent = resolve_parent(action.get("event") or "", "event", action.get("context_id", "canon"),
-                                    snapshot, nodes, mention_ids, skipped, action["name"])
+                                    snapshot, nodes, mention_ids, skipped, action.get("display_name", action["name"]))
         if parent:
             action_children.setdefault(parent, []).append(mention_ids[_mention_key(action)])
     big_event_children: dict[str, list[str]] = {}
@@ -1077,7 +1079,7 @@ def build_extraction(ops, data: dict) -> dict:
             if child["type"] != child_type:
                 continue
             parent = resolve_parent(child.get(parent_type) or "", parent_type, child.get("context_id", "canon"),
-                                    snapshot, nodes, mention_ids, skipped, child["name"])
+                                    snapshot, nodes, mention_ids, skipped, child.get("display_name", child["name"]))
             if parent:
                 children.setdefault(parent, []).append(mention_ids[_mention_key(child)])
     children_by_type = {"scene": scene_children, "big_event": big_event_children,
@@ -1085,9 +1087,12 @@ def build_extraction(ops, data: dict) -> dict:
     direct_kind = {"storyline":"big_event", "big_event":"scene", "scene":"event", "event":"action"}
     for item in nodes:
         parent_kind = item["type"]
+        # `children` 已经在引用解析里换成正式 ID 或本批的槽位标签：这里只按类型判断
+        # 是不是「场景套场景」，槽位标签对得上本批行的 name 就算本批声明过。
         for reference in item.get("children") or []:
             if parent_kind not in direct_kind:
-                skipped.append({"name": item["name"], "reason": "只有五层容器节点可声明children"})
+                skipped.append({"name": item.get("display_name", item["name"]),
+                                "reason": "只有五层容器节点可声明children"})
                 continue
             child_kind = direct_kind[parent_kind]
             if parent_kind == "scene" and snapshot_nodes.get(reference, {}).get("node_type") == "scene":
@@ -1095,7 +1100,7 @@ def build_extraction(ops, data: dict) -> dict:
             if parent_kind == "scene" and any(row.get("name") == reference and row.get("type") == "scene" for row in nodes):
                 child_kind = "scene"
             child_id = resolve_parent(reference, child_kind, item.get("context_id", "canon"),
-                                      snapshot, nodes, mention_ids, skipped, item["name"])
+                                      snapshot, nodes, mention_ids, skipped, item.get("display_name", item["name"]))
             if child_id:
                 parent_id = mention_ids[_mention_key(item)]
                 children_by_type[parent_kind].setdefault(parent_id, []).append(child_id)
@@ -1506,8 +1511,17 @@ def build_extraction(ops, data: dict) -> dict:
         orders, current_ordinal)
 
     revision = ops.graph_project_info()["revision"]
-    node_ids = {item['reference']: ids[(item['type'], item['name'])] for item in data['nodes']
-                if 'reference' in item and (item['type'], item['name']) in ids}
+    # 返回给模型的映射用**名称**做键：草稿里的引用本来就写名称或正式 ID，模型读到
+    # `{"酒店大厅": "S2"}` 能直接接着用；`reference` 只是内部槽位标签，不进结果。
+    # 同名跨类型时补类型标签（`大厅（场景）` / `大厅（地点）`），仍不含位置编号。
+    pending_ids = [(item.get("display_name") or item["name"], item["type"], ids[(item["type"], item["name"])])
+                   for item in data["nodes"] if "reference" in item and (item["type"], item["name"]) in ids]
+    collided = {label for label, _type, _id in pending_ids
+                if len({value for other, _t, value in pending_ids if other == label}) > 1}
+    node_ids: dict[str, str] = {}
+    for label, node_type, identifier in pending_ids:
+        suffix = f"（{KIND_LABELS.get(node_type, node_type)}）" if label in collided else ""
+        node_ids.setdefault(label + suffix, identifier)
     if not objects and not records:
         return {
             "objects": [], "property_records": [], "diagnostics": diagnostics, "errors": [],

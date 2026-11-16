@@ -10,7 +10,7 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 
 事件地点的必填与取值判据在[提取规范](../extraction/SPEC.md) §5 `I-01`–`I-04`，本页只记工具形态：写 `property="地点"`、`value_type="either"`，`value` 为地点节点引用或“无”“未知”，`op="unknown"` 时省略 `value`，`node` 与 `at_event` 都引用该事件；缺少地点的提交进入待修暂存、按原问题路径局部修补，程序不推测地点也不自动补值。改编和剧本新建事件可在同一次内容提交的 `changes.initial_location` 指定地点引用或这两个显式值。
 
-草稿合同17增加 `event.location` 快捷输入：地点节点ID/`@n`引用、“无”或“未知”。程序复用该事件引文，生成world地点记录的主体、自事件锚点、ID与序号；原始模型草稿仍完整保存。此字段和同事件的显式地点 `properties` 不可双写，冲突暂存反馈，不自动选择；省略也不自动补值。
+草稿合同17增加 `event.location` 快捷输入：地点节点名称或正式ID引用、“无”或“未知”。程序复用该事件引文，生成world地点记录的主体、自事件锚点、ID与序号；原始模型草稿仍完整保存。此字段和同事件的显式地点 `properties` 不可双写，冲突暂存反馈，不自动选择；省略也不自动补值。
 
 草稿合同21规定：事件必须给定位依据——原文位置锚点 `anchor{"start","end"}`（推荐，程序按 Unicode 偏移截取逐字原文）或一条代表性 `quotes`，二者至少一个；同时给出时以 `anchor` 为准并回一条 info。其它节点与属性不填引文：多写的按 `U-10` 丢弃并回一条折叠后的 info（不采纳成证据、也不整批拒收）；人物、群体、地点、物品、动作的阅读位置由它最早挂靠的事件派生，形状与逐字引文一致。判据与反例见[提取规范](../extraction/SPEC.md) §0.1 `U-09`／`U-10`、§3 `E-09`、§4 `M-13`。
 
@@ -57,16 +57,16 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 
 重启或任务恢复后，仅在需要找回未解决暂存时调用 `list_extraction_submissions(source_id=None, limit=20, after=0)`；只返回pending摘要和 `next_after`，不是每次提取的固定前置。
 
-失败反馈包含 `submission_id`、`submission_revision`、`validation_status`、`problems`。`validation_status` 为 `pending/invalid/valid`，检查尚未完成时即使暂时没有error也不能声称通过。每个问题携带 `code/message/severity` 和 `targets`（`section/index/reference?/fields?`），能确定位置才标出，不伪造定位。反馈内容已足够时，直接用一次patch数组修多个问题，无需先read，也不再submit整批；只有缺少相关条目内容才局部read，不建立固定read→patch流程。`read_extraction_submission(submission_id)` 默认不重复返回整稿；必要时指定 `section="nodes"`、`indices=[2]` 读取原第三个节点。条目含 `index`、节点的原 `reference="@3"` 及 `item`。
+失败反馈包含 `submission_id`、`submission_revision`、`validation_status`、`problems`。`validation_status` 为 `pending/invalid/valid`，检查尚未完成时即使暂时没有error也不能声称通过。每个问题携带 `code/message/severity` 和 `targets`（`section/index/reference?/fields?`），能确定位置才标出，不伪造定位。反馈内容已足够时，直接用一次patch数组修多个问题，无需先read，也不再submit整批；只有缺少相关条目内容才局部read，不建立固定read→patch流程。`read_extraction_submission(submission_id)` 默认不重复返回整稿；必要时指定 `section="nodes"`、`indices=[2]` 读取原第三个节点。条目含 `index`、节点的原引用（名称或正式 ID）及 `item`。
 
 `patch_extraction_submission(submission_id, expected_revision, patches, reason)` 的 `expected_revision` 必须是刚返回的 **暂存** `submission_revision`，不是工程 `revision`。`patches` 支持：
 
 - `{"op":"set","section":"nodes","index":2,"field":"anchor","value":{"start":12,"end":24}}`：替换该问题字段（事件的定位依据）。
 - `{"op":"remove","section":"nodes","index":2,"field":"错误字段"}`：删除该字段。
 - `{"op":"remove","path":["result_note"]}`：仅删除 `result` 内未知的顶层字段；不能删除 `nodes/properties/uncertainties/exclusions`，不能替换整稿或改变外层目标。
-- `{"op":"append","section":"nodes","value":{"type":"event","name":"原文事件","anchor":{"start":12,"end":24},"participants":["@1"],"scene":"@2"}}`：在末尾追加缺失项。
+- `{"op":"append","section":"nodes","value":{"type":"event","name":"原文事件","anchor":{"start":12,"end":24},"participants":["甲"],"scene":"会面"}}`：在末尾追加缺失项。
 
-`section` 为 `nodes/properties/uncertainties/exclusions`，补丁 `index` 从0起，节点引用 `@n` 仍从1起。禁止删除整行、splice或重排，保证原批引用不漂移；不能借补丁修改原 `source_id/start/end`。每次局部修补自动完整重检，仍有问题继续 `staged` 并返回新修订和问题，通过即 `accepted/unchanged`、`submission_status=committed`，无需人工接受，也不要重新发送整批。已提交的暂存稿不可再patch；新的独立事实批次照常使用submit。工具参数JSON不合法时，入口拒绝该非法调用，继续按原工具纠错规则处理。
+`section` 为 `nodes/properties/uncertainties/exclusions`，补丁 `index` 从0起（那是「第几行」，不是身份），节点引用写名称或正式 ID。禁止删除整行、splice或重排；不能借补丁修改原 `source_id/start/end`。每次局部修补自动完整重检，仍有问题继续 `staged` 并返回新修订和问题，通过即 `accepted/unchanged`、`submission_status=committed`，无需人工接受，也不要重新发送整批。已提交的暂存稿不可再patch；新的独立事实批次照常使用submit。工具参数JSON不合法时，入口拒绝该非法调用，继续按原工具纠错规则处理。
 
 产品中没有独立的提取、属性、入库记录工作台，也没有对应的分轮提取、复核后提交或兼容转发接口。属性数据模型、阅读位置投影和自动入库所需的内部审计继续服务统一对话与数据浏览。
 
@@ -102,15 +102,15 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 
 已有节点优先使用实际正式 ID；程序分配的短 ID 带类型语义，例如 `P1` 为人物、`I1` 为物品、`E2` 为事件、`A1` 为动作、`S1` 为场景、`B1` 为大事件、`T1` 为主要故事。名称用于搜索和展示，不需要在每处引用中重抄。类型前缀不是父子关系或跨类型时间刻度，归属和先后仍由结构及原文披露位置表达。
 
-同批新节点按完整 `result.nodes` 数组的位置使用从 **1** 开始的 `@1`、`@2` 等引用，允许前向引用。它们只在本次草稿内有效，程序解析后保存为正式 ID；不能拿上次草稿的 `@1` 当作工程 ID。节点声明只写一次名字，参与者、父级和属性等节点引用位置优先写 ID 或 `@序号`。
+同批新节点用**本批唯一的名称**引用（允许前向引用：先引用、后声明都可以），已有节点用**正式 ID**。名称只在本次草稿内解析，程序解析后保存为正式 ID；不能拿上次草稿的名字当工程 ID。节点声明只写一次名字，参与者、父级和属性等引用位置写正式 ID 或名称。
 
-成功提交（`accepted` 或 `unchanged`）返回紧凑的 `node_ids`，例如 `{"@1":"P1","@2":"S1"}`，可供后续调用直接使用，不必再次查询编号；同身份重复槽可指向同一正式 ID。`preview` 不返回可供后续调用的正式编号，`nodes:[]` 不返回空映射。
+成功提交（`accepted` 或 `unchanged`）返回紧凑的 `node_ids`，以草稿里的引用写法为键，例如 `{"甲":"P1","会面":"S1"}`，可供后续调用直接使用，不必再次查询编号；同身份重复槽可指向同一正式 ID。`preview` 不返回可供后续调用的正式编号，`nodes:[]` 不返回空映射。
 
-已有节点不必重新列入 `nodes`、复制名称或重复提供旧引文；只新增属性时可直接引用其正式 ID。唯一名称仍可作便利输入，显式正式 ID 和 `@序号` 优先；名称匹配有多个候选时必须报歧义诊断，不能选择第一个匹配。
+已有节点不必重新列入 `nodes`、复制名称或重复提供旧引文；只新增属性时可直接引用其正式 ID。名称与正式 ID 同等有效，指同一对象时都能解析；名称匹配有多个候选时必须报歧义诊断，不能选择第一个匹配。
 
-这些引用用于 `nodes.participants/scene/event/big_event/storyline/children`、`properties.node/holder/related_nodes/at_event`，以及 `value_type=node/either` 的节点值。`either` 的“无”“未知”保留字面值。属性变更中的节点选择、节点值及 `at_event` 使用同一规则；`existing_id` 必须是已存在的正式节点 ID，`context_id` 必须是现有语境 ID，不能写 `@序号`。
+这些引用用于 `nodes.participants/scene/event/big_event/storyline/children`、`properties.node/holder/related_nodes/at_event`，以及 `value_type=node/either` 的节点值。`either` 的“无”“未知”保留字面值。属性变更中的节点选择、节点值及 `at_event` 使用同一规则；`existing_id` 必须是已存在的正式节点 ID，`context_id` 必须是现有语境 ID，不能写名称。
 
-`name`、事件的 `quotes`／`anchor`、来源信息与 `string/any` 属性值是普通内容，不因字面上像 `@1` 或 `P1` 就改写。越界序号、引用缺失及类型或语境不符均返回诊断；解析前后排序、过滤不会改变 `@序号` 指向的原数组位置。
+`name`、事件的 `quotes`／`anchor`、来源信息与 `string/any` 属性值是普通内容，不因字面上像 `P1` 这类正式 ID 就改写。名称解析不到、同名歧义、类型或语境不符均返回诊断，并列出候选。
 
 
 例如，假设工程已有乙 `P2`，以下草稿仅声明甲、大事件、场景和事件一次（原文“甲与乙握手。”）：
@@ -120,11 +120,11 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
   "nodes": [
     {"type":"person","name":"甲"},
     {"type":"big_event","name":"双方会面"},
-    {"type":"scene","name":"会面","big_event":"@2"},
-    {"type":"event","name":"握手","scene":"@3","participants":["@1","P2"],"anchor":{"start":0,"end":6}}
+    {"type":"scene","name":"会面","big_event":"双方会面"},
+    {"type":"event","name":"握手","scene":"会面","participants":["甲","P2"],"anchor":{"start":0,"end":6}}
   ],
   "properties": [
-    {"node":"@1","property":"经历","category":"未分类","op":"set","value":"与乙握手","at_event":"@4"}
+    {"node":"甲","property":"经历","category":"未分类","op":"set","value":"与乙握手","at_event":"握手"}
   ]
 }
 ```
@@ -146,7 +146,7 @@ Qt 界面、CLI、MCP 和模型工具都通过 `Operations` 访问工程能力�
 
 事件引文在本次提交范围内出现多次时，必须先通过更完整的上下文或明确范围消歧；程序不能任取第一次出现的位置作为身份依据。
 
-事件声明 `scene`、场景声明 `big_event`、大事件可声明 `storyline` 时，父节点引用可使用本批的 `@序号` 或当前工程正式 ID，无需为补充子事件重新提交父节点及其引文。已声明的包含关系必须解析并保存，现有父节点的子项保留后追加；缺失、歧义、类型或语境不符须返回诊断，不能静默丢掉关联。每个活动事件必须属于一个活动场景，哪怕该场景只有一个事件；可经事件包含路径归属场景。程序不按位置猜测或自动补造场景。
+事件声明 `scene`、场景声明 `big_event`、大事件可声明 `storyline` 时，父节点引用可写本批名称或当前工程正式 ID，无需为补充子事件重新提交父节点及其引文。已声明的包含关系必须解析并保存，现有父节点的子项保留后追加；缺失、歧义、类型或语境不符须返回诊断，不能静默丢掉关联。每个活动事件必须属于一个活动场景，哪怕该场景只有一个事件；可经事件包含路径归属场景。程序不按位置猜测或自动补造场景。
 
 旧节点仍可凭原主证据精确命中复用。完整草稿哈希只解决相同提交的幂等，不能替代事件身份判断。程序不读取历史响应来偷偷补写旧证据。
 
@@ -231,7 +231,7 @@ result = tool_api.call("event_state", {"event_id": "E1"}, project="C:/projects/e
 
 事件的 `participants`、事件地点与粒度档的判据见[提取规范](../extraction/SPEC.md) §5 `I-01`、`I-25` 与 §3 `E-17`、`E-19`、`E-20`；本页只记草稿里怎么写：参与者写人物／群体节点引用，地点用属性 `地点` 引用 `location` 节点（`value_type=node`、`scope=world`、`at_event` 指向该事件，原文证据由该事件自己的定位依据——`anchor` 或一条引文——提供），地点不可证时不猜。上层容器通过成员派生，无需重复抄写。
 
-标准、精细都默认不创建动作。明确请求动作提取时，草稿可使用 `type: action`，以 `event` 优先引用直属事件的正式 ID 或本批 `@序号`（唯一名称可作便利输入），并给出逐字原文引文。动作必须有且只有一个同语境父事件，不能直接归属场景或含子项。已有动作经查证后用 `existing_id` 复用。节点编辑器的“动作提取”按钮将明确父事件 ID 发送到当前统一对话，不另起专用进程。
+标准、精细都默认不创建动作。明确请求动作提取时，草稿可使用 `type: action`，以 `event` 引用直属事件的正式 ID 或本批名称，并给出逐字原文引文。动作必须有且只有一个同语境父事件，不能直接归属场景或含子项。已有动作经查证后用 `existing_id` 复用。节点编辑器的“动作提取”按钮将明确父事件 ID 发送到当前统一对话，不另起专用进程。
 
 四级阅读位置为故事线、场景、事件、动作；节点编号 A/E 仅表达各类身份，跨类型顺序按原文来源与披露坐标计算。
 
@@ -277,7 +277,7 @@ CLI 对应 `record-property-change`、`correct-property`、`delete-property-reco
 - `read_content_submission(submission_id,paths=None)`：默认只读状态和问题；显式 paths 仅读取指定局部内容。
 - `patch_content_submission(submission_id,expected_revision,patches,reason)`：修订号为暂存修订；每项为 `{op:set|remove|append,path:[字段名或0基索引,...],value?}`。remove不带value，set/append带value。
 
-路径从原 Operations 已绑定参数开始；提取保持原数组索引和 `@n` 引用。不得删除数组行或任意重排，不得替换操作、目标、权限、业务修订号或上下文依据。修补始终按当前权限与依赖重检，通过即自动入库；过期依据须重新读取后明确新提交，不能由程序自动刷新修订掩盖冲突。
+路径从原 Operations 已绑定参数开始；提取保持原数组索引；引用按名称解析。不得删除数组行或任意重排，不得替换操作、目标、权限、业务修订号或上下文依据。修补始终按当前权限与依赖重检，通过即自动入库；过期依据须重新读取后明确新提交，不能由程序自动刷新修订掩盖冲突。
 
 CLI 别名为 `content-submissions`、`content-submission`、`content-patch`，也可使用通用 `tool call`。提交错误时 UI 保留输入并显示待修位置，同表单再次保存修补同一暂存；仅成功才关闭或继续后续动作。不增加审批工作台或人工 accept。
 
