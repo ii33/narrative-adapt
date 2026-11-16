@@ -52,12 +52,14 @@ def test_empty_authored_title_reaches_same_staging_through_tools(project):
 def test_generic_api_repairs_existing_extraction_without_second_draft(project):
     source = project.import_source('提取适配', TEXT)
     draft = draft_result(ended=False)
-    draft['nodes'][0]['quotes'] = ['原文没有的句子']
+    # 制造一个仍需修补的问题：事件挂到本批不存在的场景上（引文不逐字现在会被宽容校正，
+    # 不再产生可修问题，所以改用引用错误）。
+    draft['nodes'][4]['scene'] = '查无此场景'
     staged = project.submit_extraction(source, draft)
     pending = project.list_content_submissions(operation='submit_extraction')
     assert [row['submission_id'] for row in pending['submissions']] == [staged['submission_id']]
     fixed = project.patch_content_submission(staged['submission_id'], 1, [
-        {'op': 'set', 'path': ['result', 'nodes', 0, 'quotes'], 'value': ['甲约好接乙。']}], '统一入口只修引文')
+        {'op': 'set', 'path': ['result', 'nodes', 4, 'scene'], 'value': '甲约定并完成接乙'}], '统一入口只修引用')
     assert fixed['status'] == 'accepted'
     assert project.list_content_submissions()['submissions'] == []
 

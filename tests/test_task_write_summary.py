@@ -167,13 +167,14 @@ def test_real_extraction_delta_distinguishes_create_update_and_event_change(ops)
                        {'type': 'event', 'name': '等待', 'scene': '会面', 'participants': ['甲', '乙'], 'quotes': ['甲在门口等乙。']},
                        {'type': 'event', 'location': '未知', 'name': '会合', 'scene': '会面', 'participants': ['甲', '乙'], 'quotes': ['乙到门口见甲。']}],
              'properties': [{'node': '等待', 'op': 'set', 'property': '地点'  , "category": "未分类", 'value': '门口', 'value_type': 'node', 'at_event': '等待'},
-                            {'node': '等待', 'op': 'set', 'property': '状态' , "category": "未分类", 'value': '等待', 'value_type': 'string', 'at_event': '等待'}]}
+                            {'node': '甲', 'op': 'set', 'property': '状态' , "category": "未分类", 'value': '等待', 'value_type': 'string', 'at_event': '等待'}]}
     created = ops.submit_extraction(source, draft)
     assert created['status'] == 'accepted' and created['committed_changes']
     node = next(n for n in ops.graph_snapshot()['nodes'] if n['name'] == '等待')
     updated = ops.apply_changes([node | {'name': '等候乙'}], [], ops.graph_snapshot()['revision'], '更正名称')
     event = next(n for n in ops.graph_snapshot()['nodes'] if n['name'] == '会合')
-    changed = ops.record_property_change(node['id'], '状态', event['id'], 'clear', expected_revision=ops.graph_snapshot()['revision'], reason='场所记录结束')
+    person = next(n for n in ops.graph_snapshot()['nodes'] if n['name'] == '甲')
+    changed = ops.record_property_change(person['id'], '状态', event['id'], 'clear', expected_revision=ops.graph_snapshot()['revision'], reason='场所记录结束')
     assert changed['status'] == 'accepted'
     summary = build_submission_summary([step('submit_extraction', created, {'result': draft}), step('apply_changes', updated), step('record_property_change', changed)])
     assert summary['totals']['created'] > 0 and summary['totals']['updated'] == 1
