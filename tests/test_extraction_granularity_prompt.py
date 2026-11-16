@@ -19,7 +19,9 @@ def test_standard_and_fine_are_distinct_but_both_leave_actions_opt_in(project):
     fine = loaded_extraction_guide(project, "fine")
     assert "当前工程提取粒度：standard" in _first_prompt('提取', extraction_granularity='standard')
     assert "当前工程提取粒度：fine" in _first_prompt('提取', extraction_granularity='fine')
-    assert "全场景内部的进展步骤" in fine
+    # 精细档要查全的是实体与证据，不是"场景内部的进展步骤"——后者会把单次交涉切成事件。
+    assert "出场实体与它们各自的证据查全" in fine
+    assert "进展步骤" not in fine
     assert "次要人物、无名人物与具体地点" in fine
     assert "无法区分的泛称、同一对象的重复提及不拆新实体" in fine
     assert "不臆造身份" in fine
@@ -108,7 +110,7 @@ def test_both_modes_balance_events_between_scenes_and_actions(project):
         assert '不以固定事件数' not in prompt or True
     # 两档的粒度要求本身必须不同，否则档位没有意义。
     assert guides['standard'] != guides['fine']
-    assert '全场景内部的进展步骤' in DEFAULT_PROMPTS['granularity_fine']['text']
+    assert '进展步骤' not in DEFAULT_PROMPTS['granularity_fine']['text']
     assert '次要人物、无名人物与具体地点' in DEFAULT_PROMPTS['granularity_fine']['text']
     # 版本号会被每次提示词改动推高，这里只锁「是纯数字且不低于五层语义那一版」，
     # 「文本改了版本没升」由 tests/test_prompt_version_snapshot.py 兜住。
