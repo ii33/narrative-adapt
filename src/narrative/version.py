@@ -18,9 +18,9 @@ from pathlib import Path
 
 APP_NAME = "叙事图工作台"
 # 版本三元组；代号随 minor 换，历史写在 PROJECT_HANDOFF.md 的「版本号」一节。
-VERSION = (0, 2, 0)
+VERSION = (0, 3, 0)
 CHANNEL = "dev"
-CODENAME = "islands"
+CODENAME = "timeline"
 
 UNKNOWN = "unknown"
 SHORT_HASH_LENGTH = 7

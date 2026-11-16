@@ -92,12 +92,12 @@ class NativeBridge(QObject):
     # 与上面几个只读属性一样有 notify。版本串的真源是 narrative/version.py。
     @Property(str, notify=versionChanged)
     def appVersion(self) -> str:
-        """带构建身份的完整版本串，例如 ``v0.2.0-dev.islands+20261112.ac8d5af``。"""
+        """带构建身份的完整版本串，例如 ``v0.3.0-dev.timeline+20261112.ac8d5af``。"""
         return version.display_version()
 
     @Property(str, notify=versionChanged)
     def appVersionTag(self) -> str:
-        """不带构建身份的版本标签，例如 ``v0.2.0-dev.islands``。"""
+        """不带构建身份的版本标签，例如 ``v0.3.0-dev.timeline``。"""
         return version.tag()
 
     # 低完整性进程写不了用户目录（最近工程、模型设置都在那儿）。这不是致命错误，

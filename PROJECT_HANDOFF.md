@@ -93,15 +93,15 @@ property_audit.audit_properties   → 物品持有、地点覆盖等覆盖类
 
 | 对外串 | 例子 | 用在哪里 |
 |---|---|---|
-| `version_number()` | `0.2.0` | `pyproject.toml`、MCP `SERVER_VERSION`、`app.setApplicationVersion` |
-| `tag()` | `v0.2.0-dev.islands` | 启动页底栏（`bridge.appVersionTag`） |
+| `version_number()` | `0.3.0` | `pyproject.toml`、MCP `SERVER_VERSION`、`app.setApplicationVersion` |
+| `tag()` | `v0.3.0-dev.timeline` | 启动页底栏（`bridge.appVersionTag`） |
 | `build_id()` | `20261112.ac8d5af` | 日期 + 7 位短哈希；dirty 追加 `.dirty`；读不到 git 时 `unknown` |
-| `display_version()` | `v0.2.0-dev.islands+20261112.ac8d5af` | 状态栏 `appVersionLabel`、`bridge.appVersion`、启动日志 |
-| `banner()` | `叙事图工作台 v0.2.0-dev.islands+20261112.ac8d5af` | `python -m narrative.cli --version` |
+| `display_version()` | `v0.3.0-dev.timeline+20261112.ac8d5af` | 状态栏 `appVersionLabel`、`bridge.appVersion`、启动日志 |
+| `banner()` | `叙事图工作台 v0.3.0-dev.timeline+20261112.ac8d5af` | `python -m narrative.cli --version` |
 
 - 构建身份运行时从 git 读（`rev-parse HEAD`、`log -1 --format=%cd`、`status --porcelain`、`rev-parse --abbrev-ref HEAD`），**按进程缓存一次、不走网络**；没有 `.git`（装了 wheel）或 git 不可用时整体降级为 `unknown`，**不抛异常**。对外串的形状由 `tests/test_version.py` 的正则锁住：`v<主>.<次>.<修>-dev.<代号>+(<8 位日期>.<7 位哈希>[.dirty]|unknown)`。
 - `dirty` = 工作区有未提交改动：版本串带 `.dirty`，banner 追加「（工作区有未提交改动）」。**带 `.dirty` 的截图不能当某条提交的验收证据。**
-- 代号随 minor 换：`0.2` → `islands`（岛屿布局 / 窄窗响应式）。历史只记在这张表里。
+- 代号随 minor 换：`0.2` → `islands`（岛屿布局 / 窄窗响应式）、`0.3` → `timeline`（事件链即时间轴：五层白名单、属性 set/add、名称即属性、暂存即发编号）。历史只记在这张表里。
 
 **升版规则**
 
