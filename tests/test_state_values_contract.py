@@ -65,12 +65,16 @@ def test_many_property_returns_every_current_value(project):
 
 
 def test_three_masters_are_one_definition_with_three_current_values(project):
-    """郭靖三位师父：三条 one 记录、各指向一个对方，查询得到 3 项——不需要改成 many。"""
+    """郭靖三位师父：第一条 set，后两条 add 并列，查询得到 3 项。
+
+    单值/多值不由程序预设——身份可以有几个、外貌会随时间失效，程序猜不出哪类是哪类，
+    所以靠写法表达意图：set 取代，add 并列。
+    """
     ops, sid, ids = project
     definition = {"kind": "property_definition", "id": "师父", "value_type": "node", "cardinality": "one"}
     rows = [record(sid, 0, "set", "师父", ids["江南七怪"], identifier="t1", node_id=ids["郭靖"], event_id=ids["拜江南七怪"]),
-            record(sid, 1, "set", "师父", ids["洪七公"], identifier="t2", node_id=ids["郭靖"], event_id=ids["拜洪七公"]),
-            record(sid, 2, "set", "师父", ids["哲别"], identifier="t3", node_id=ids["郭靖"], event_id=ids["拜哲别"])]
+            record(sid, 1, "add", "师父", ids["洪七公"], identifier="t2", node_id=ids["郭靖"], event_id=ids["拜洪七公"]),
+            record(sid, 2, "add", "师父", ids["哲别"], identifier="t3", node_id=ids["郭靖"], event_id=ids["拜哲别"])]
     accepted = commit(ops, definition, rows)
     assert accepted["status"] == "accepted", accepted
     state = ops.property_state(ids["郭靖"], "师父")["state"]
@@ -96,15 +100,16 @@ def test_absent_unrecorded_and_unknown_stay_distinguishable(project):
     assert ops.property_state(ids["郭靖"], "称呼")["state"] == {"kind": "unrecorded"}
 
 
-def test_two_one_values_at_the_same_event_point_are_a_conflict(project):
-    """`one` 是录入规则：同一事件点给两个当前值必须被拒，不能按提交顺序挑一个。"""
+def test_set_replaces_and_add_keeps_both_at_the_same_event_point(project):
+    """同一事件点：两条 set 是「改口」，后者取代前者；set + add 是「又是这一个」。"""
     ops, sid, ids = project
     definition = {"kind": "property_definition", "id": "称呼", "value_type": "string", "cardinality": "one"}
     rows = [record(sid, 0, "set", "称呼", "郭靖", identifier="s1", node_id=ids["郭靖"], event_id=ids["拜江南七怪"], sequence=7),
-            record(sid, 0, "set", "称呼", "郭大侠", identifier="s2", node_id=ids["郭靖"], event_id=ids["拜江南七怪"], sequence=7)]
-    before = ops.property_records()
+            record(sid, 0, "add", "称呼", "郭大侠", identifier="s2", node_id=ids["郭靖"], event_id=ids["拜江南七怪"], sequence=8)]
     result = commit(ops, definition, rows)
-    assert result["status"] == "staged"
-    assert any(problem["code"] == "STATE_CONFLICT" for problem in result["diagnostics"])
-    assert ops.property_records() == before
-    assert ops.property_state(ids["郭靖"], "称呼")["state"] == {"kind": "unrecorded"}
+    assert result["status"] == "accepted", result
+    assert ops.property_state(ids["郭靖"], "称呼")["state"] == {"kind": "known", "values": ["郭靖", "郭大侠"]}
+
+    replace = [record(sid, 1, "set", "称呼", "郭大侠", identifier="s3", node_id=ids["郭靖"], event_id=ids["拜洪七公"])]
+    assert commit(ops, definition, replace)["status"] == "accepted"
+    assert ops.property_state(ids["郭靖"], "称呼")["state"] == {"kind": "known", "values": ["郭大侠"]}

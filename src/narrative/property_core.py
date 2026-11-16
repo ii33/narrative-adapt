@@ -191,11 +191,21 @@ def reduce_changes(changes, definition, nodes, *, event_order, cut=None):
                     active.append(identifier)
                 state = {'kind': 'known', 'values': list(known_members.values())} if baseline else {'kind': 'unknown'}
             elif op == 'set':
-                # 查询形状与基数无关：one 也返回列表，len(values) == 1。
+                # set 是「取代」：整组现有值失效，只留新值。查询形状与基数无关，仍返回列表。
+                known_members = {_freeze(value): value}
                 state, active = {'kind': 'known', 'values': [value]}, [identifier]
+            elif op == 'add':
+                # add 是「又多了」：并列，旧值仍有效。单值还是多值不由程序预设——
+                # 身份可以有几个、外貌会失效，让原文的写法决定，而不是 cardinality。
+                known_members[_freeze(value)] = value
+                state, active = {'kind': 'known', 'values': list(known_members.values())}, [identifier]
+            elif op == 'remove':
+                known_members.pop(_freeze(value), None)
+                state = {'kind': 'known', 'values': list(known_members.values())} if known_members else {'kind': 'absent'}
+                active = [identifier]
             else:
-                diagnostics.append(_issue('OP', '单值非人物关系只允许set、clear或unknown', identifier))
-    if diagnostics and any(d['code'] in {'STATE_GROUP', 'EVENT_ORDER', 'SEQUENCE'} for d in diagnostics):
+                diagnostics.append(_issue('OP', '属性变更操作无效', identifier))
+    if diagnostics and any(d['code'] in {'STATE_GROUP', 'EVENT_ORDER', 'SEQUENCE', 'STATE_CONFLICT'} for d in diagnostics):
         state = {'kind': 'conflict'}
     return {'state': state, 'active_change_ids': list(dict.fromkeys(active)), 'record_ids': list(dict.fromkeys(active)),
             'history_changes': selected, 'diagnostics': diagnostics}
@@ -311,10 +321,8 @@ def validate_records(records, snapshot, existing_records=None, *, sources=None):
             value = row.get('value')
             many = definition.get('cardinality') == 'many'
             values = value if many and isinstance(value, list) else [value]
-            if many and not isinstance(value, list) or not all(_valid_value(v, definition, nodes) for v in values) or len({_freeze(v) for v in values}) != len(values):
+            if not all(_valid_value(v, definition, nodes) for v in values) or len({_freeze(v) for v in values}) != len(values):
                 issues.append(_issue('VALUE', '值类型、集合唯一性或节点引用无效', rid))
-            if op in {'add', 'remove'} and not many and relation_target(row, nodes, definitions) is None:
-                issues.append(_issue('OP', '单值add/remove仅适用于明确人物对方关系', rid))
     return issues
 
 

@@ -1242,16 +1242,14 @@ def build_extraction(ops, data: dict) -> dict:
         if name in symmetric_flags and symmetric_flags[name] != prop["symmetric"]:
             skipped.append({"name": name, "reason": "同一属性定义的symmetric声明冲突"})
         symmetric_flags[name] = prop["symmetric"]
+    # cardinality 不再参与"值该覆盖还是并列"的判断：那由 op（set 取代 / add 并列）表达。
+    # 这里只保留首次定义，后来的不同声明不再拦截整行——身份可以有几个、外貌会失效，
+    # 程序猜不出哪个属性属于哪类，不该替模型下结论。
     cardinalities = {}
     for prop in data.get("properties", []):
         if "cardinality" not in prop:
             continue
-        name, proposed = prop["property"], prop["cardinality"]
-        if name in cardinalities and cardinalities[name] != proposed:
-            skipped.append({"name": name, "reason": "同一属性定义的cardinality声明冲突"})
-        cardinalities[name] = proposed
-        if name in definition_records and definition_records[name].get("cardinality", "one") != proposed:
-            skipped.append({"name": name, "reason": "cardinality与已有定义冲突；请显式修改属性定义"})
+        cardinalities.setdefault(prop["property"], prop["cardinality"])
     definition_updates = set()
     definitions: dict[str, str] = {
         str(item["id"]): str(item.get("value_type") or "string")
