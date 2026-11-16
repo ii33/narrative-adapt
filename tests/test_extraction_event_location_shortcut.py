@@ -80,15 +80,15 @@ def test_omission_never_supplies_unknown_and_non_event_field_is_dropped_with_not
 
 
 @pytest.mark.parametrize('property_id', ['地点', '发生地点', 'event_location'])
-def test_shortcut_plus_explicit_location_is_never_silently_selected(project, property_id):
+def test_shortcut_plus_explicit_location_keeps_the_explicit_row(project, property_id):
+    '''双写按 U-10 处理：保留模型写的地点属性，丢掉程序生成的快捷行，并回一条 info。'''
     ops, sid = project
     raw = draft()
     raw['properties'] = [{'node': '会议结束', 'at_event': '会议结束', 'property': property_id , "category": "未分类",
         'op': 'unknown', 'value_type': 'either'}]
     result = ops.submit_extraction(sid, raw)
-    assert result['status'] == 'staged', result
-    assert any('nodes[1].location' in p['message'] and '双写' in p['message'] for p in result['problems'])
-    assert not ops.graph_snapshot()['nodes']
-    fixed = ops.patch_extraction_submission(result['submission_id'], result['submission_revision'], [
-        {'op': 'remove', 'section': 'nodes', 'index': 1, 'field': 'location'}], '使用显式地点属性')
-    assert fixed['status'] == 'accepted', fixed
+    assert result['status'] == 'accepted', result
+    assert any('快捷字段' in str(row.get('message')) for row in (result.get('info') or [])), result.get('info')
+    rows = [r for r in ops.property_records() if r.get('kind') == 'property_change'
+            and r.get('property_id') == property_id]
+    assert len(rows) == 1 and rows[0].get('op') == 'unknown'

@@ -461,7 +461,8 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
     # 也记进同一个记账器，最后仍然按 (section, field) 折叠成一条 info（`U-10`）。
     # 引文定位的两种提醒（近似命中、找不到被丢弃）由 `parse_nodes` 自己折叠好带回来，
     # 同样是 info、同样不影响 valid（`U-11`）。
-    notices = dropped.diagnostics() + list(data.get("quote_notices") or []) + anchor_notices
+    notices = (dropped.diagnostics() + list(data.get("quote_notices") or [])
+               + list(data.get("shortcut_notices") or []) + anchor_notices)
     for key in ("uncertainties", "exclusions"):
         rows = result.get(key) or []
         if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
@@ -497,9 +498,18 @@ def _prepare(ops, source_id: str, result: dict, start: int, end: int | None):
             and row.get('scope', 'world') == 'world'
             and (row.get('property') in LOCATION_PROPERTIES or definitions.get(row.get('property'), {}).get('semantic') in tuple(LOCATION_SEMANTICS))]
         if explicit_locations:
-            message = f'nodes[{index}].location与本事件显式地点properties双写；保留一种明确表达后修补，不自动选择'
-            data['rejected'].append({'name': display, 'path': ['nodes', index, 'location'], 'message': message, 'reason': message,
-                'related_paths': [['properties', row['_draft_index']] for row in explicit_locations]})
+            # 双写不整批拒收（`U-10` 的口径）：模型已经用属性行明确表达了地点，快捷字段只是同一件事的
+            # 另一种写法。丢掉程序生成的那条、保留模型自己写的那条，并回一条 info 说明。
+            generated['_draft_dropped'] = True
+            data.setdefault('shortcut_notices', []).append({
+                'severity': 'info', 'code': 'EXTRACTION_INFO',
+                'message': f'事件「{display}」同时写了 location 快捷字段和地点属性，已保留属性行、丢弃快捷字段',
+                'reference': display, 'path': ['properties', generated.get('_draft_index')]})
+    # 快捷字段的提醒是在 notices 汇总之后才产生的（双写判定要用到生成行），这里补进同一条流。
+    notices += list(data.get('shortcut_notices') or [])
+    dropped_rows = {id(row) for row in data['properties'] if isinstance(row, dict) and row.get('_draft_dropped')}
+    if dropped_rows:
+        data['properties'] = [row for row in data['properties'] if id(row) not in dropped_rows]
     shortcut_paths = {explicit_count + order: ['nodes', index, 'location'] for order, index in enumerate(shortcut_indices)}
     for item in data.get('rejected', []):
         # A rejected generated row is reported where the model filled it in.
