@@ -95,7 +95,7 @@ def _properties(ops, node_id: str, cut: str | None) -> list[dict]:
             "property_id": item["property_id"],
             "label": item["label"],
             "category": item["category"],
-            "value": item["value"],
+            "value": item.get("value", (item.get("state") or {}).get("values")),
             "value_node": item.get("value_node"),
             "scope": item["scope"],
             "holder": item.get("holder_name"),

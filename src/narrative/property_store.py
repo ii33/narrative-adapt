@@ -140,6 +140,9 @@ class PropertyStore:
             if not history:
                 continue
             latest = history[-1]
+            # 披露时间 = 这条属性第一次被读者知道的时刻（history 已按事件顺序排好）。
+            # 用最后一次会把「朋友」这种会不断累加关系的关系挂在它最后一个对象上。
+            first = history[0]
             category, category_source = property_categories.resolve(latest, node_type, config, {})
             active = set(result['active_change_ids'])
             decorated = []
@@ -158,7 +161,7 @@ class PropertyStore:
                 'category': category, 'category_source': category_source, 'other_categories': [], 'state': cell,
                 'state_kind': cell['kind'], 'scope': group[3], 'scopes': [group[3]],
                 'holder_id': group[4], 'holder_name': names.get(group[4]), 'context_id': group[2], 'value_type': definitions.get(group[1], {}).get('value_type'),
-                'event_id': latest['event_id'], 'start': (latest.get('disclosure') or {}).get('start'), 'disclosed_at': names.get(latest['event_id']),
+                'event_id': first['event_id'], 'start': (first.get('disclosure') or {}).get('start'), 'disclosed_at': names.get(first['event_id']),
                 'is_current': cell['kind'] != 'unrecorded', 'record_count': len(history), 'later_count': len(changes)-len(history),
                 'records': decorated, 'history_changes': history, 'active_change_ids': result['active_change_ids'], 'diagnostics': result['diagnostics']})
         projection = projected_changes(snapshot, records, cut)

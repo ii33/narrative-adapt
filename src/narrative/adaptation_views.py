@@ -325,7 +325,8 @@ class _View:
                     "other_categories": [],
                     "scope": key[3], "scopes": [key[3]], "context_id": key[2], "holder_id": key[4], "holder_name": self.nodes.get(key[4], {}).get("name", ""),
                     "value_type": definition.get("value_type", "any"), "cardinality": definition.get("cardinality", "one"),
-                    "event_id": latest["event_id"], "disclosed_at": self.nodes.get(latest["event_id"], {}).get("name", "前置状态"),
+                    "event_id": history[0]["event_id"] if history else latest["event_id"],
+                    "disclosed_at": self.nodes.get(history[0]["event_id"] if history else latest["event_id"], {}).get("name", "前置状态"),
                     "is_current": state["kind"] != "unrecorded", "state": state, "state_kind": state["kind"], "active_change_ids": list(active),
                     "history_changes": history, "diagnostics": reduction.get("diagnostics", []),
                     "record_count": len(history), "later_count": 0, "records": values}

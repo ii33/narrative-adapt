@@ -113,3 +113,16 @@ def test_set_replaces_and_add_keeps_both_at_the_same_event_point(project):
     replace = [record(sid, 1, "set", "称呼", "郭大侠", identifier="s3", node_id=ids["郭靖"], event_id=ids["拜洪七公"])]
     assert commit(ops, definition, replace)["status"] == "accepted"
     assert ops.property_state(ids["郭靖"], "称呼")["state"] == {"kind": "known", "values": ["郭大侠"]}
+
+def test_relation_disclosure_points_at_its_first_statement(project):
+    """关系的披露时间＝第一次被读者知道的那一次，不是最后一个对象。"""
+    ops, sid, ids = project
+    definition = {"kind": "property_definition", "id": "朋友", "value_type": "node", "cardinality": "many"}
+    rows = [record(sid, 0, "set", "朋友", ids["洪七公"], identifier="f1", node_id=ids["郭靖"], event_id=ids["拜江南七怪"]),
+            record(sid, 1, "add", "朋友", ids["哲别"], identifier="f2", node_id=ids["郭靖"], event_id=ids["拜洪七公"])]
+    assert commit(ops, definition, rows)["status"] == "accepted"
+    item = next(row for row in ops.property_node_summary(ids["郭靖"])["properties"]
+                if row["property_id"] == "朋友")
+    events = {node["id"]: node["name"] for node in ops.graph_snapshot()["nodes"]}
+    assert item["disclosed_at"] == events[ids["拜江南七怪"]]
+    assert item["state"]["values"] == [ids["洪七公"], ids["哲别"]]
