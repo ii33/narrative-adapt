@@ -788,7 +788,7 @@ def _entity_event_anchors(objects, nodes_by_id, changes, definitions, action_par
     节点——取最早挂靠的事件（先看是哪种挂靠，再看事件链正式顺序与 Unicode 起点），
     把那个事件的 ``evidence``／``disclosure`` 抄过来，形状与模型亲自给引文时一致，
     所以阅读位置查询、浏览排序与「定位原文」都不需要另一套语义。找不到落点的
-    实体保持没有位置，由静态检查的 ``entity_unanchored`` 报出来。
+    实体按最早挂靠的事件定位：提取按披露顺序进行，事件点就是披露时间轴，任何实体都挂在某个事件上。
     """
     from .event_location import LOCATION_PROPERTIES, LOCATION_SEMANTICS
 
