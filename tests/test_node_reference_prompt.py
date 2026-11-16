@@ -16,14 +16,14 @@ def test_reference_prompt_is_concise_and_does_not_require_repeating_existing_nod
         initial=assistant._first_prompt("请补充已知人物的属性。", extraction_granularity=detail)
         prompt='\n'.join(row['text'] for row in tool_guidance(project, ['submit_extraction'])['guides'])
         assert "@1" not in prompt and "@2" not in prompt and "nodes数组从1开始" not in prompt
-        assert "已有节点用正式ID（P1、E2）" in prompt and "本批刚建的用它的名称" in prompt
+        assert "上一批及更早的节点一律用正式 ID" in prompt and "同一批里刚建的节点用它的名称" in prompt
         # 行号还有，但它只说明「第几行」，不再兼任引用写法。
         assert "行号只是第几行，不是节点引用" in prompt
         assert "P1" in prompt and "E2" in prompt
         assert "已有节点不必重列nodes或引文" in prompt
         assert "nodes:[]" in prompt and "properties直接引用P1/E2" in prompt
-        assert "同名说明还没分清" in prompt
-        assert "程序不取首个匹配" in prompt
+        assert "同名要改名或直接用 ID" in prompt
+        assert "程序不按名字猜首个匹配" in prompt
         assert "用户说：请补充已知人物的属性。" in initial
     assert "不写@位置索引" in tool_api.TOOLS["submit_extraction"].params["result"]["description"]
 
