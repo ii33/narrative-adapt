@@ -55,42 +55,11 @@ class References:
                              ensure_ascii=False, sort_keys=True)
             canonical = identities.setdefault(key, ref)
             self.aliases[ref] = canonical
-        self.notes: list[dict] = []
         self.names = defaultdict(list)
         for ref, row in self.local.items():
             self.names[row['name']].append((ref, row, True))
         for ref, row in self.current.items():
             self.names[row.get('name')].append((ref, row, False))
-
-
-    def _closest_name(self, value: str, allowed, context):
-        """名称是梗概，引用时可能只记得大意：取最接近且唯一的那个。
-
-        只在「明显更像一个候选」时才认（第二名要拉开差距），否则仍然报错并给候选——
-        宁可让模型改一次，也不能悄悄指错对象。
-        """
-        from difflib import SequenceMatcher
-
-        scored = []
-        for name in self.names:
-            if not isinstance(name, str) or not name or name == value:
-                continue
-            ratio = SequenceMatcher(None, value, name).ratio()
-            scored.append((ratio, name))
-        if not scored:
-            return None
-        scored.sort(reverse=True)
-        best_ratio, best = scored[0]
-        second = scored[1][0] if len(scored) > 1 else 0.0
-        if best_ratio < 0.72 or best_ratio - second < 0.06:
-            return None
-        rows = self.names.get(best) or []
-        kinds = {row.get('type') if local else row.get('node_type') for _ref, row, local in rows}
-        if allowed is not None and not (kinds & set(allowed)):
-            return None
-        if context is not None and any((row.get('context_id', 'canon') != context) for _ref, row, _local in rows):
-            return None
-        return best
 
     def resolve(self, value, *, allowed=None, context=None, optional=False, literal=False,
                 allowed_note=None):
@@ -119,16 +88,7 @@ class References:
             if not candidates and literal:
                 return value
             if not candidates:
-                close = self._closest_name(value, allowed, context)
-                if close is not None:
-                    candidates = list(self.names.get(close, []))
-                    self.notes.append({
-                        'severity': 'info', 'code': 'EXTRACTION_INFO',
-                        'message': f'引用「{value}」按最接近的名称「{close}」解析；名称是梗概，'
-                                   '引用时不必逐字复述，但请确认指向的是同一个对象',
-                        'reference': value, 'resolved_name': close})
-                else:
-                    raise ValueError(_missing_reference_message(value, self))
+                raise ValueError(_missing_reference_message(value, self))
         valid = []
         valid_kinds = []
         rejected_kinds = []
@@ -236,6 +196,4 @@ def bind(data: dict, snapshot: dict, records: list[dict]) -> dict:
     result['reference_types'] = {**{ref: row['type'] for ref, row in resolver.local.items()},
                                  **{ref: row['node_type'] for ref, row in resolver.current.items()}}
     result['property_reference_types'] = types
-    if resolver.notes:
-        result['reference_notices'] = resolver.notes
     return result
