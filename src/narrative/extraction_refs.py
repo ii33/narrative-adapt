@@ -88,7 +88,7 @@ class References:
             if not candidates and literal:
                 return value
             if not candidates:
-                raise ValueError(f'找不到引用「{value}」：本批与工程里都没有这个名称；请写名称或正式 ID')
+                raise ValueError(_missing_reference_message(value, self))
         valid = []
         valid_kinds = []
         rejected_kinds = []
@@ -131,6 +131,20 @@ class References:
             parts.append('请写名称或正式 ID')
             raise ValueError('；'.join(parts))
         raise ValueError(f'引用「{value}」指向的节点已撤回或语境不符；请写名称或正式 ID')
+
+
+def _missing_reference_message(value: str, refs) -> str:
+    """名字找不到时，把最像的几个名字一并给出——让模型一次改对，而不是再试一轮。
+
+    实跑里最常见的失败就是这类：模型写了一个本批没有的名字（常常是自己拼的复合名，
+    例如「仓库·租仓存货」），只回「找不到」它会换个猜法再来一次，每次都是一整轮请求。
+    """
+    from difflib import get_close_matches
+
+    pool = list(refs.names) + list(refs.current)
+    close = get_close_matches(value, pool, n=3, cutoff=0.4)
+    hint = f'最接近的本批/工程名称：{"、".join(close)}' if close else '本批与工程里都没有形近的名称'
+    return f'找不到引用「{value}」；{hint}；请写名称或正式 ID'
 
 
 def bind(data: dict, snapshot: dict, records: list[dict]) -> dict:
