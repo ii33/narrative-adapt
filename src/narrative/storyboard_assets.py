@@ -50,7 +50,10 @@ def validate_elements(rows, lookup, *, path, required=False):
         raise ContentValidationError('资产元素须为列表', problems=[{'message': '资产元素须为列表', 'path': path}])
     for i, row in enumerate(rows):
         base = [*path, i]
-        if not isinstance(row, dict) or set(row) != {'kind', 'name', 'usage', 'asset_id'} or row.get('kind') not in KINDS or not isinstance(row.get('name'), str) or not row['name'].strip() or not isinstance(row.get('usage'), str):
+        if (not isinstance(row, dict) or not set(row) <= {'kind', 'name', 'usage', 'asset_id', 'subject', 'variant'}
+                or not {'kind', 'name', 'usage', 'asset_id'} <= set(row)
+                or row.get('kind') not in KINDS or not isinstance(row.get('name'), str) or not row['name'].strip()
+                or not isinstance(row.get('usage'), str)):
             raise ContentValidationError('元素须包含类型、名称、使用说明和资产编号', problems=[{'message': '元素须包含类型、名称、使用说明和资产编号', 'path': base}])
         identifier = row['asset_id']
         message = ''
@@ -85,6 +88,25 @@ class StoryboardAssetsMixin:
                 'source_blocks': context['unit']['blocks'], 'assets': cards, 'asset_revision': revision, 'expected_body_revision': context['unit']['body_revision'],
                 'creative_agreement': context.get('creative_agreement'),
                 'instructions': '只分析尚未确定的出场元素，不创建、修改或自动绑定资产。confirmed_elements为用户已确定对象，保留且不重复列入。用submit_storyboard_assets提交所有所选镜头，visual_elements每项仅含kind/name/usage，程序生成待确定状态；确无新增需求可为空列表。资产由用户在元素列表手动选择或建立。'}
+
+
+    def _variant_name(self, element: dict) -> str:
+        """变体名就是这张卡的形态：没写就用类别的中性词，绝不带镜头号。"""
+        variant = str(element.get('variant') or '').strip()
+        if variant:
+            return variant
+        return '形象' if element['kind'] == 'person' else ('设定' if element['kind'] == 'item' else '空间')
+
+    def _reusable_assets(self, element: dict) -> list[dict]:
+        """已有的同对象同形态资产。先认节点，再认「名称·形态」这一整串标题。"""
+        category = KINDS[element['kind']]
+        subject = str(element.get('subject') or '').strip()
+        if subject:
+            found = self.search_assets(category=category, node_id=subject)
+            if found['assets']:
+                return [row for row in found['assets'] if row['node_id'] == subject]
+        title = f"{element['name']}·{self._variant_name(element)}"
+        return [row for row in self.search_assets(category=category)['assets'] if row['title'] == title]
 
     @staticmethod
     def _asset_analysis_targets(board, shot_ids):
@@ -121,8 +143,15 @@ class StoryboardAssetsMixin:
                 raise ContentValidationError('元素需求须为列表', problems=[{'message': '元素需求须为列表', 'path': ['elements', i, 'visual_elements']}])
             pending = []
             for number, value in enumerate(rows):
-                if not isinstance(value, dict) or set(value) != {'kind', 'name', 'usage'} or value.get('kind') not in KINDS or not isinstance(value.get('name'), str) or not value['name'].strip() or not isinstance(value.get('usage'), str):
-                    raise ContentValidationError('分析元素仅包含kind/name/usage，不选择或建立资产', problems=[{'message': '分析元素仅包含kind/name/usage，不选择或建立资产', 'path': ['elements', i, 'visual_elements', number]}])
+                if (not isinstance(value, dict) or not set(value) <= {'kind', 'name', 'usage', 'subject', 'variant'}
+                        or not {'kind', 'name', 'usage'} <= set(value)
+                        or value.get('kind') not in KINDS or not isinstance(value.get('name'), str) or not value['name'].strip()
+                        or not isinstance(value.get('usage'), str)
+                        or ('subject' in value and not isinstance(value['subject'], str))
+                        or ('variant' in value and not isinstance(value['variant'], str))):
+                    raise ContentValidationError('分析元素须含kind/name/usage，可选subject（关联节点）与variant（形态名）',
+                                                 problems=[{'message': '分析元素须含kind/name/usage，可选subject与variant',
+                                                            'path': ['elements', i, 'visual_elements', number]}])
                 pending.append({**deepcopy(value), 'asset_id': None})
             previous = next(shot for shot in board['shots'] if shot['id'] == identifier)
             confirmed = [deepcopy(row) for row in previous.get('visual_elements', []) if row.get('asset_id')]
@@ -160,7 +189,7 @@ class StoryboardAssetsMixin:
                     if (owner, index) in refs:
                         raise ContentGuardError('元素定位不能重复')
                     refs.append((owner, index))
-            created, bindings, skipped, changes = [], [], [], []
+            created, reused, bindings, skipped, changes = [], [], [], [], []
             # The attached asset database shares the project transaction and rollback.
             with self._asset_db(write=True) as asset_db:
                 asset_revision = asset_db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0]
@@ -176,15 +205,28 @@ class StoryboardAssetsMixin:
                                         'message': '已有绑定，未自动替换；缺失对象或类型问题请手动处理' if view.get('status') in {'missing', 'type_mismatch'} else '已有绑定，保留原对象'})
                         continue
                     validate_elements([element], self.get_asset, path=['shots', next(i for i, shot in enumerate(board['shots']) if shot['id'] == owner), 'visual_elements'])
-                    number = next(i for i, shot in enumerate(board['shots'], 1) if shot['id'] == owner)
-                    suffix = '形象' if element['kind'] == 'person' else '资产'
-                    title = f"{element['name']} - 镜头{number}元素{index + 1}{suffix}"
-                    card = AssetOperationsMixin.save_asset(self, {'category': KINDS[element['kind']], 'title': title,
-                        'domain': 'adaptation'}, expected_revision=asset_revision)
-                    asset_revision = card['revision']
+                    # 复用先于新建：同一对象同一形态只该有一张卡（`ASSET_STANDARD.md`）。
+                    existing = self._reusable_assets(element)
+                    if len(existing) == 1:
+                        card = self.get_asset(existing[0]['id'])
+                        asset_revision = card['revision']
+                        reused.append({'shot_id': owner, 'index': index, 'asset_id': card['id'], 'title': card['title'],
+                                        'reason': '同一对象同一形态已有资产，直接复用'})
+                    elif len(existing) > 1:
+                        skipped.append({'shot_id': owner, 'index': index, 'status': 'ambiguous',
+                                        'message': '有多个同名候选资产，请选择后再建',
+                                        'candidates': [{'asset_id': row['id'], 'title': row['title']} for row in existing]})
+                        continue
+                    else:
+                        title = f"{element['name']}·{self._variant_name(element)}"
+                        payload = {'category': KINDS[element['kind']], 'title': title, 'domain': 'adaptation'}
+                        if element.get('subject'):
+                            payload['node_id'] = element['subject']
+                        card = AssetOperationsMixin.save_asset(self, payload, expected_revision=asset_revision)
+                        asset_revision = card['revision']
+                        created.append(card)
                     rows = updated.setdefault(owner, deepcopy(selected_by_id[owner]['visual_elements']))
                     rows[index]['asset_id'] = card['id']
-                    created.append(card)
                     bindings.append({'shot_id': owner, 'index': index, 'asset_id': card['id'], 'title': card['title']})
                 for owner, rows in updated.items():
                     changes.append({'op': 'update_shot', 'shot_id': owner, 'visual_elements': rows})
@@ -193,7 +235,7 @@ class StoryboardAssetsMixin:
             committed = [{'domain': 'assets', 'action': 'created', 'object_type': 'asset', 'id': card['id'], 'name': card['title'], 'count': 1} for card in created]
             if created:
                 committed.append({'domain': 'storyboard', 'action': 'saved', 'object_type': 'storyboard', 'id': unit_id, 'name': unit_id, 'count': 1})
-            return {'status': 'accepted' if created else 'unchanged', 'committed_changes': committed,
-                    'unit_id': unit_id, 'created_count': len(created), 'created_assets': created, 'bindings': bindings,
-                    'skipped': skipped, 'asset_revision': asset_revision, 'board': self.read_storyboard(unit_id),
-                    'reuse_policy': '每条未确定元素独立建立一张空卡，不按同名推断复用；可手动选择已有资产复用'}
+            return {'status': 'accepted' if (created or reused) else 'unchanged', 'committed_changes': committed,
+                    'unit_id': unit_id, 'created_count': len(created), 'created_assets': created, 'reused_count': len(reused), 'reused': reused,
+                    'bindings': bindings, 'skipped': skipped, 'asset_revision': asset_revision, 'board': self.read_storyboard(unit_id),
+                    'reuse_policy': '先按关联节点与形态名找已有资产：唯一命中直接复用，多个候选交给人选，确实没有再建一张空卡'}

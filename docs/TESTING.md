@@ -104,6 +104,10 @@ Start-Process .venv\Scripts\python.exe -ArgumentList '-m','pytest','-q' `
   （共享状态或时序），不是产品缺陷。**暂不修**：修法要么加 `serial` 标记、要么找出被共享的状态，
   需要单独一轮排查。遇到它先按上面的判据复核，不要当成回归。
 
+- 本机用默认 `-n auto` 跑全量会崩 worker（`Windows fatal exception: stack overflow` / `MemoryError`，栈里停在
+  `xdist.remote.getinfodict → platform._wmi_query` 和收尾阶段 `terminate`）。这不是用例失败，是并行度过高把机器压垮了：
+  改用 `pytest -q -n 4` 连跑两次均 1258 passed / 1 skipped。**本机全量用 `-n 4`，不要用 `-n auto`。**
+
 - 全量并发收集偶发 `Different tests were collected between gwN and gwM`（差异集合通常是某一个测试文件）：
   xdist 只有在**某个 worker 的收集阶段出错**时才会这么报，所以先按"import 期副作用"排查。已知的排查结论与复现条件：
   `src/narrative/chat_templates.py` 与 `tests/test_chat_templates.py` 在 import 期**没有任何 I/O**（模块顶层只有常量赋值，

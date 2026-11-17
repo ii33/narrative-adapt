@@ -15,7 +15,11 @@ _OBJECT = {
 }
 _KEY = {key: value for key, value in _OBJECT.items() if key in ('x', 'y', 'rotation', 'depth', 'elevation', 'height', 'state')}
 _KEY.update(time_ms=_MS, interpolation={'type': 'string', 'enum': ['hold', 'linear']})
-_VISUAL = {'type': 'object', 'additionalProperties': False, 'required': ['kind', 'name', 'usage', 'asset_id'], 'properties': {'kind': {'type': 'string', 'enum': ['person', 'prop', 'set']}, 'name': _ID, 'usage': {'type': 'string'}, 'asset_id': {'type': ['string', 'null'], 'minLength': 1}}}
+_VISUAL = {'type': 'object', 'additionalProperties': False, 'required': ['kind', 'name', 'usage', 'asset_id'],
+           'properties': {'kind': {'type': 'string', 'enum': ['person', 'prop', 'set']}, 'name': _ID, 'usage': {'type': 'string'},
+                          'asset_id': {'type': ['string', 'null'], 'minLength': 1},
+                          # 复用键：subject 指向提取/改编节点，variant 是形态名（见 ASSET_STANDARD.md）。
+                          'subject': {'type': 'string'}, 'variant': {'type': 'string'}}}
 _SHOT = {'sound_notes': {'type': 'string'}, 'description': {'type': 'string'}, 'shot_language': {'type': 'string'}, 'visual_elements': {'type': 'array', 'items': _VISUAL}, 'sound_intent_ids': {'type': 'array', 'items': _ID, 'uniqueItems': True}, 'title': {'type': 'string', 'minLength': 1}, 'duration_ms': {'type': 'integer', 'minimum': 1},
          'source_block_ids': {'type': 'array', 'items': _ID, 'uniqueItems': True}, 'action_start_ms': _MS,
          'duration_locked': {'type': 'boolean'}, 'action_start_marker_id': {'type': ['string', 'null']}}

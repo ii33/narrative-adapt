@@ -157,10 +157,15 @@ def test_explicit_create_missing_is_per_row_atomic_and_empty(board):
     before = ops.graph_snapshot()
     now = ops.read_storyboard(unit)
     created = ops.create_missing_storyboard_assets(unit, [first, second], now['revision'])
-    assert created['created_count'] == 2 and created['status'] == 'accepted'
-    assert len(created['committed_changes']) == 3
-    assert len({card['id'] for card in created['created_assets']}) == 2
-    assert all(card['category'] == 'appearance' and not card['node_id'] and not card['detail'] and not card['prompt'] and not card['images'] and not card['reference_images'] for card in created['created_assets'])
+    # 两个镜头要的是同一个「甲·形象」：只建一张，另一个镜头复用同一张（ASSET_STANDARD.md）。
+    assert created['created_count'] == 1 and created['reused_count'] == 1 and created['status'] == 'accepted'
+    assert len(created['committed_changes']) == 2
+    cards = created['created_assets']
+    assert len({card['id'] for card in cards}) == 1
+    assert all(card['category'] == 'appearance' and not card['node_id'] and not card['detail'] and not card['prompt'] and not card['images'] and not card['reference_images'] for card in cards)
+    assert '镜头' not in cards[0]['title'] and cards[0]['title'] == '甲·形象'
+    bound = {shot['visual_elements'][0]['asset_id'] for shot in created['board']['shots']}
+    assert bound == {cards[0]['id']}
     assert created['board']['shots'][0]['visual_elements'][0]['usage'] == '出场'
     assert all(shot['asset_elements'][0]['status'] == 'image_missing' for shot in created['board']['shots'])
     assert ops.graph_snapshot() == before
@@ -195,7 +200,8 @@ def test_explicit_create_failure_rolls_back_asset_cards_and_bindings(board, monk
     from narrative.asset_operations import AssetOperationsMixin
     ops, _script, unit, b = board
     ids = [shot['id'] for shot in b['shots']]
-    call(ops, unit, b, [row(identifier) for identifier in ids], ids)
+    # 两镜要不同对象，才会各建一张卡；同名会按标准复用，反而触发不到第二次写入。
+    call(ops, unit, b, [row(ids[0]), row(ids[1], name='乙')], ids)
     current = ops.read_storyboard(unit)
     before = ops.read_storyboard_assets_context(unit, ids)
     original = AssetOperationsMixin.save_asset

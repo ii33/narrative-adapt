@@ -102,7 +102,7 @@
 | `scene_table` | v6 | 627 → 770 |
 | `scene_policy` | v6 | 330 → 391（保持一行一条；首行点明「场」指剧本场次，与提取层场景 S 无关） |
 | `granularity_standard` / `granularity_fine` | v6 / v6 | 182 → 180 / 316 → 306 |
-| `storyboard` / `sketch_style` / `storyboard_assets` | v6 / v3 / v3 | 1639 → 1588 / 415 → 426 / 439 → 495 |
+| `storyboard` / `sketch_style` / `storyboard_assets` | v6 / v4 / v3 | 1639 → 1588 / 415 → 426 / 439 → 495 |
 | `reference_policy` / `conversation_actions` | v4 / v3 | 262 → 270 / 54 → 58 |
 | `writing_shortcut`（新增） | v1 | 合并原 `scene_table_shortcut`、`unit_writing_shortcut`、`batch_writing_shortcut`（111/168/162 → 74） |
 | `batch_writing` | 已删除 | 批量语义并入 `writing`；`screenplay_writing.py` 不再单独取该键 |

@@ -680,7 +680,7 @@ flowchart LR
 | `writing_shortcut` | v1 | — | — | 本轮未规范化（P2 范围外） |
 | `scene_policy` | v6 | screenplay | — | 本轮未规范化（P2 范围外） |
 | `storyboard` | v6 | storyboard | — | 本轮未规范化（P2 范围外） |
-| `sketch_style` | v3 | storyboard | — | 本轮未规范化（P2 范围外） |
+| `sketch_style` | v4 | storyboard | — | 本轮未规范化（P2 范围外） |
 | `storyboard_assets` | v3 | storyboard | — | 本轮未规范化（P2 范围外） |
 | `reference_policy` | v4 | screenplay / storyboard | — | 本轮未规范化（P2 范围外） |
 

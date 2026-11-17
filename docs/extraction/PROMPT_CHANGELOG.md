@@ -25,7 +25,7 @@
 | `writing_shortcut` | v1 | 新建：合并原三条快捷提示 |
 | `scene_policy` | v6 | 一行一条规则（代码按行切 `rules`），首行点明与提取层场景 S 不同 |
 | `storyboard` | v6 | 分镜导演台：三个毫秒量分开写，视频提交只做一次 |
-| `sketch_style` | v3 | 工作用描述型分镜的画法与省略清单 |
+| `sketch_style` | v4 | 工作用描述型分镜：补「光照要在主体上产生结果」「灰阶不决定颜色与色温」「素描是排镜预览不是成稿」 |
 | `storyboard_assets` | v3 | 只判出场元素需求，不创建也不绑定资产 |
 | `conversation_actions` | v3 | 已完成动作摘要：不是原文，也不是新的授权 |
 | `reference_policy` | v4 | 依据优先级与「不授权恢复已排除情节」 |

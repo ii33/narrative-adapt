@@ -12,7 +12,8 @@ EXPECTED_ADAPTATION_TOOLS = {
     "sync_adaptation", "edit_adaptation_node", "copy_adaptation_node", "move_adaptation_node",
     "delete_adaptation_node", "suppress_adaptation_node", "set_adaptation_property",
     "delete_adaptation_property_changes", "list_assets", "get_asset", "save_asset",
-    "delete_asset", "asset_moments",
+    "delete_asset", "asset_moments", "search_assets", "update_asset",
+    "bind_storyboard_element", "unbind_storyboard_element", "generate_asset_sketch",
 }
 
 

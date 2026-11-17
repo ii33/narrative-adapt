@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import tempfile
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import cast
@@ -138,7 +139,205 @@ class AssetOperationsMixin:
             revision = db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0]
         if not row:
             raise ContentGuardError("资产不存在")
-        return self._asset_card(json.loads(row[0])) | {"revision": revision}
+        card = self._asset_card(json.loads(row[0])) | {"revision": revision}
+        # 谁在用它：改删之前先看这里，才知道「还被引用」具体指哪几处。
+        card["used_by"] = self.asset_usage(asset_id)
+        return card
+
+    def asset_usage(self, asset_id: str = "") -> list[dict]:
+        """资产被谁用着：扫全部分镜场次，给出手上的绑定位置。
+
+        资产改删之前先看这里——「还被引用」这句话只有配上位置才有用。
+        """
+        found = []
+        with self._store.connect() as db:
+            for key, value in db.execute("SELECT key, value FROM meta WHERE key LIKE 'storyboard:%'"):
+                board = json.loads(value)
+                unit_id = board.get('unit_id') or key.split(':', 1)[1]
+                for shot in board.get('shots') or []:
+                    for index, element in enumerate(shot.get('visual_elements') or []):
+                        if element.get('asset_id') and (not asset_id or element['asset_id'] == asset_id):
+                            found.append({'unit_id': unit_id, 'shot_id': shot.get('id'), 'shot_title': shot.get('title'),
+                                          'index': index, 'kind': element.get('kind'), 'name': element.get('name'),
+                                          'asset_id': element['asset_id']})
+                for obj in board.get('objects') or []:
+                    if obj.get('asset_id') and (not asset_id or obj['asset_id'] == asset_id):
+                        found.append({'unit_id': unit_id, 'object_id': obj.get('id'), 'kind': 'object',
+                                      'name': obj.get('name'), 'asset_id': obj['asset_id']})
+        return found
+
+    def search_assets(self, keyword="", category="", node_id="", domain="adaptation",
+                      has_images=None, unbound=False) -> dict:
+        """按关键词/类别/节点/有无图/是否被用 查找资产，返回紧凑行。
+
+        与 `list_assets` 的分工：这里不要求指定类别，用于「这个角色有没有现成资产」这类查找；
+        `list_assets` 仍按类别与改编时间点做完整读取。
+        """
+        for value, name in ((keyword, 'keyword'), (category, 'category'), (node_id, 'node_id')):
+            if not isinstance(value, str):
+                raise ContentGuardError(f'{name}须为文本')
+        if category and category not in CATEGORIES:
+            raise ContentGuardError("未知资产类别，无法确定资产路由")
+        if domain not in ('adaptation', 'extraction'):
+            raise ContentGuardError('资产域须明确为adaptation或extraction')
+        if has_images not in (None, True, False):
+            raise ContentGuardError('has_images 须为布尔值')
+        if not isinstance(unbound, bool):
+            raise ContentGuardError('unbound 须为布尔值')
+        with self._asset_db() as db:
+            cards = [json.loads(row[0]) for row in db.execute("SELECT data FROM assets ORDER BY rowid")]
+            revision = db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0]
+        usage = {}
+        for row in self.asset_usage():
+            usage.setdefault(row['asset_id'], []).append(row)
+        needle = keyword.strip().lower()
+        rows = []
+        for card in cards:
+            if category and card.get('category') != category:
+                continue
+            if card.get('category') != 'material' and card.get('domain', 'adaptation') != domain:
+                continue
+            if node_id and card.get('node_id') != node_id:
+                continue
+            if needle and needle not in f"{card.get('title', '')}\n{card.get('detail', '')}".lower():
+                continue
+            images = card.get('images') or []
+            if has_images is True and not images:
+                continue
+            if has_images is False and images:
+                continue
+            used = usage.get(card['id'], [])
+            if unbound and used:
+                continue
+            rows.append({'id': card['id'], 'title': card.get('title', ''), 'category': card.get('category'),
+                         'node_id': card.get('node_id', ''), 'domain': card.get('domain', 'adaptation'),
+                         'valid_from': card.get('valid_from', ''), 'valid_to': card.get('valid_to', ''),
+                         'image_count': len(images), 'reference_count': len(card.get('reference_images') or []),
+                         'used_count': len(used)})
+        rows.sort(key=lambda row: (row['category'] or '', row['title']))
+        return {'assets': rows, 'count': len(rows), 'revision': revision,
+                'filters': {'keyword': keyword, 'category': category, 'node_id': node_id,
+                            'domain': domain, 'has_images': has_images, 'unbound': unbound}}
+
+    def update_asset(self, asset_id: str, expected_revision=None, changes=None, image_changes=None) -> dict:
+        """局部修改资产：字段与图片分开改，不用重发整张卡。"""
+        if not isinstance(asset_id, str) or not asset_id:
+            raise ContentGuardError('请提供资产编号')
+        changes = dict(changes or {})
+        allowed = {'title', 'node_id', 'category', 'detail', 'prompt', 'valid_from', 'valid_to'}
+        unknown = sorted(set(changes) - allowed)
+        if unknown:
+            raise ContentValidationError('不允许修改的字段：' + '、'.join(unknown),
+                                         problems=[{'message': '不允许修改的字段', 'path': ['changes', key]} for key in unknown])
+        card = self.get_asset(asset_id)
+        payload = {'id': asset_id, **changes}
+
+        def current(field):
+            return [{'id': image['id'], 'caption': image.get('caption') or ''} for image in card.get(field) or []]
+
+        for field, operations in (('images', image_changes), ('reference_images', None)):
+            if not operations and field == 'images':
+                continue
+            if operations is None:
+                break
+            entries = current(field)
+            caption_field = field
+            for number, operation in enumerate(operations):
+                if not isinstance(operation, dict) or operation.get('op') not in {'add', 'adopt', 'remove'}:
+                    raise ContentValidationError('图片操作须为 add/adopt/remove',
+                                                 problems=[{'message': '图片操作须为 add/adopt/remove',
+                                                            'path': ['image_changes', number]}])
+                if operation.get('field', 'images') != caption_field:
+                    raise ContentValidationError('第一版只支持 images 字段的图片操作',
+                                                 problems=[{'message': '图片操作只支持 images',
+                                                            'path': ['image_changes', number, 'field']}])
+                image_id = operation.get('image_id')
+                if operation['op'] == 'add':
+                    entries.append({'path': operation.get('path'), 'caption': operation.get('caption') or ''})
+                elif not any(entry['id'] == image_id for entry in entries):
+                    raise ContentValidationError('图片不属于该资产',
+                                                 problems=[{'message': '图片不属于该资产',
+                                                            'path': ['image_changes', number, 'image_id']}])
+                elif operation['op'] == 'adopt':
+                    entries.sort(key=lambda entry: entry['id'] != image_id)
+                else:
+                    entries = [entry for entry in entries if entry['id'] != image_id]
+            payload[field] = entries
+        return self.save_asset(payload, expected_revision=expected_revision)
+
+    def bind_storyboard_element(self, unit_id: str, shot_id: str, index: int, asset_id: str,
+                                expected_revision=None) -> dict:
+        """把已有资产绑到某镜的某个元素；类别不符、已定案一律拒绝。"""
+        from .storyboard_assets import KINDS
+
+        board = self.read_storyboard(unit_id)
+        if board.get('approved'):
+            raise ContentGuardError('请先解除定案再改镜头元素')
+        shot = next((row for row in board['shots'] if row['id'] == shot_id), None)
+        if shot is None:
+            raise ContentGuardError('镜头不属于本场')
+        rows = [dict(element) for element in shot.get('visual_elements') or []]
+        if type(index) is not int or index < 0 or index >= len(rows):
+            raise ContentGuardError('元素下标超出本镜元素范围')
+        card = self.get_asset(asset_id)
+        expected = KINDS.get(rows[index].get('kind'))
+        if expected is None or card.get('category') != expected:
+            raise ContentGuardError('元素类型与资产类别不符：' + str(rows[index].get('kind')))
+        rows[index]['asset_id'] = asset_id
+        revision = board['revision'] if expected_revision is None else expected_revision
+        result = self.apply_storyboard_changes(unit_id, revision, [{'op': 'update_shot', 'shot_id': shot_id, 'visual_elements': rows}])
+        return result | {'bound': {'unit_id': unit_id, 'shot_id': shot_id, 'index': index, 'asset_id': asset_id}}
+
+    def unbind_storyboard_element(self, unit_id: str, shot_id: str, index: int, expected_revision=None) -> dict:
+        board = self.read_storyboard(unit_id)
+        if board.get('approved'):
+            raise ContentGuardError('请先解除定案再改镜头元素')
+        shot = next((row for row in board['shots'] if row['id'] == shot_id), None)
+        rows = [dict(element) for element in (shot or {}).get('visual_elements') or []]
+        if type(index) is not int or index < 0 or index >= len(rows):
+            raise ContentGuardError('元素下标超出本镜元素范围')
+        rows[index]['asset_id'] = None
+        revision = board['revision'] if expected_revision is None else expected_revision
+        return self.apply_storyboard_changes(unit_id, revision, [{'op': 'update_shot', 'shot_id': shot_id, 'visual_elements': rows}])
+
+    def generate_asset_sketch(self, asset_id: str = "", node_id: str = "", prompt: str = "") -> dict:
+        """用图像服务按描述型素描生成资产形象图，写回资产卡；已有图时新增而不是覆盖。"""
+        from .storyboard_sketch_style import current_sketch_style, sketch_render_instructions
+        from .storyboard_style_provider import render_sketch_image
+
+        if not asset_id and not node_id:
+            raise ContentGuardError('请提供资产编号或节点编号')
+        if asset_id:
+            card = self.get_asset(asset_id)
+        else:
+            found = self.search_assets(node_id=node_id)
+            if not found['assets']:
+                raise ContentGuardError('该节点还没有资产卡，请先建立')
+            if len(found['assets']) > 1:
+                raise ContentGuardError('该节点有多张资产卡，请指定资产编号')
+            card = self.get_asset(found['assets'][0]['id'])
+        if card.get('category') == 'material':
+            raise ContentGuardError('材质资产不生成形象素描')
+        text = (sketch_render_instructions(current_sketch_style(self), False)
+                + '\n资产类别：' + str(card.get('category'))
+                + '\n名称：' + str(card.get('title'))
+                + '\n说明：' + str(card.get('detail') or '')
+                + ('\n已有提示词：' + str(card.get('prompt')) if card.get('prompt') else '')
+                + '\n本次要求：' + (prompt or '画这张资产的可识别外观，供分镜与关键帧复用'))
+        references = [image['path'] for image in card.get('reference_images') or [] if image.get('path')]
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory(prefix='asset-sketch-') as temp:
+            # 资产图没有机位草图可给，但仍然需要一张画布当输入：空白而不是伪造构图。
+            guide = Path(temp) / 'blank.png'
+            Image.new('RGB', (1024, 1024), 'white').save(guide)
+            output = Path(temp) / 'asset-sketch.png'
+            receipt = render_sketch_image(guide, text, output, reference_images=references)
+            with Image.open(output) as image:
+                image.load()
+            updated = self.update_asset(card['id'], expected_revision=card['revision'],
+                                        image_changes=[{'op': 'add', 'path': str(output), 'caption': '生成素描'}])
+        return {'asset': updated, 'generated': {'provider': receipt, 'prompt': text}}
 
     def list_assets(self, category: str, moment="", node_id="", domain="adaptation") -> dict:
         if category not in CATEGORIES:
@@ -276,7 +475,21 @@ class AssetOperationsMixin:
             result.append({"id": image_id, "file": target.relative_to(self._asset_root()).as_posix(), "caption": caption})
         return result
 
-    def delete_asset(self, asset_id: str, expected_revision=None) -> dict:
+    def delete_asset(self, asset_id: str, expected_revision=None, force=False) -> dict:
+        """删资产。被引用时先列位置；`force` 才连带解除绑定，不静默留下悬空引用。"""
+        uses = self.asset_usage(asset_id)
+        if uses and not force:
+            where = '、'.join(f"{row['unit_id']}/{row['shot_id']}[{row['index']}]" for row in uses[:6])
+            raise ValueError(f"资产仍被分镜引用（{where}）；确认要连绑定一起解除时再删")
+        cleared = []
+        if uses:
+            for row in uses:
+                if row.get('kind') == 'object':
+                    self._unbind_storyboard_object(row['unit_id'], row['object_id'], asset_id)
+                else:
+                    self._unbind_storyboard_element(row['unit_id'], row['shot_id'], row['index'], asset_id)
+                cleared.append({'unit_id': row['unit_id'], 'shot_id': row.get('shot_id'),
+                                'index': row.get('index'), 'object_id': row.get('object_id')})
         with self._store.connect(write=True) as project_db, self._asset_db(write=True) as db:
             for row in project_db.execute("SELECT value FROM meta WHERE key LIKE 'storyboard:%'"):
                 board = json.loads(row[0])
@@ -293,4 +506,20 @@ class AssetOperationsMixin:
             db.execute("UPDATE meta SET value=? WHERE key='revision'", (revision,))
             db.execute("INSERT INTO audit(revision,action,asset_id,summary) VALUES(?,?,?,?)",
                        (revision, "delete", asset_id, "删除资产设定"))
-        return {"removed": asset_id, "revision": revision}
+        return {"removed": asset_id, "revision": revision, "cleared_bindings": cleared}
+
+    def _unbind_storyboard_element(self, unit_id, shot_id, index, asset_id):
+        board = self.read_storyboard(unit_id)
+        shot = next((row for row in board['shots'] if row['id'] == shot_id), None)
+        if shot is None or index >= len(shot.get('visual_elements') or []):
+            raise ContentGuardError('绑定位置已变化，请重新读取后重试')
+        rows = [dict(element) for element in shot['visual_elements']]
+        if rows[index].get('asset_id') != asset_id:
+            raise ContentConflictError('绑定已变化，请重新读取后重试')
+        rows[index]['asset_id'] = None
+        self.apply_storyboard_changes(unit_id, board['revision'], [{'op': 'update_shot', 'shot_id': shot_id, 'visual_elements': rows}])
+
+    def _unbind_storyboard_object(self, unit_id, object_id, asset_id):
+        board = self.read_storyboard(unit_id)
+        self.apply_storyboard_changes(unit_id, board['revision'], [{'op': 'update_object', 'object_id': object_id, 'asset_id': None}])
+
