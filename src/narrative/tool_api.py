@@ -1258,6 +1258,30 @@ def _register_loading_tools():
 _register_loading_tools()
 
 
+# 外部 MCP 工具的启动失败原因（配置或缓存坏掉时留痕）；界面想解释「为什么没看到
+# 外部工具」就读它，没有失败时为 None。
+MCP_STARTUP_ERROR: str | None = None
+
+
+def _register_mcp_tools() -> None:
+    """启动时只按缓存注册外部 MCP 工具，不在导入期去连服务器。
+
+    读两个小 JSON 文件是毫秒级的事，但起子进程、握手、tools/list 都可能等满超时；
+    应用启动不能被一台远端服务器拖住。所以这里只把「上次发现过什么」放进工具表，
+    真正的刷新由调用方（界面/测试）显式触发 mcp_client.refresh。
+    """
+    global MCP_STARTUP_ERROR
+    try:
+        from . import mcp_client
+
+        mcp_client.register_cached(Tool, _register)
+    except Exception as exc:  # noqa: BLE001 - 外部工具是附加能力，坏掉也不能影响启动
+        MCP_STARTUP_ERROR = f"{type(exc).__name__}: {exc}"
+
+
+_register_mcp_tools()
+
+
 def describe() -> list[dict]:
     """The tool list in the shape MCP asks for."""
     return [
