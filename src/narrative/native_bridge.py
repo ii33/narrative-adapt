@@ -1206,6 +1206,17 @@ class NativeBridge(QObject):
         return {"available": True, "reason": "", "url": server.url,
                 "download_dir": str(self._previs_download_dir())}
 
+    @Slot(result=str)
+    def previsThemeScript(self) -> str:
+        """预演台的换肤脚本：把它的中性灰映射到我们的深色令牌。
+
+        只改颜色不改结构；3D 视口里的画面不染色（用户要靠它判断光线）。
+        """
+        from . import previs_theme
+        from . import theme as theme_module
+
+        return previs_theme.inject_script(previs_theme.theme_css(theme_module.tokens(True)))
+
     def _previs_download_dir(self) -> Path:
         base = self._project_path.parent if self._project_path is not None else Path.cwd() / "data"
         target = base / "previs"
