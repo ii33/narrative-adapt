@@ -16,7 +16,7 @@ ApplicationWindow {
     minimumWidth: theme.window_min_width
     minimumHeight: 680
     visible: true
-    // 不要系统标题栏：窗口外框由下面的 windowBar 自己提供（拖动 + 最小化/最大化/关闭）。
+    // 沉浸式：不要系统标题栏。窗口按钮长在页面自己的顶栏里，拖动交给页头空白处。
     flags: Qt.Window | Qt.FramelessWindowHint
     title: mode === "workspace" && project.title
         ? project.title + " · 叙事图工作台" : "叙事图工作台"
@@ -236,67 +236,13 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
-        // 窗口条：没有系统标题栏时，它负责拖动与窗口按钮。
-        Rectangle {
-            id: windowBar
-            objectName: "windowBar"
-            Layout.fillWidth: true
-            Layout.preferredHeight: 30
-            color: app.theme.paper
-
-            MouseArea {
-                anchors.fill: parent
-                // 左键按住任意空白处即可拖动；双击切换最大化。
-                acceptedButtons: Qt.LeftButton
-                onPressed: app.startSystemMove()
-                onDoubleClicked: app.visibility === Window.Maximized ? app.showNormal() : app.showMaximized()
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 4
-                spacing: 6
-                Label {
-                    text: app.mode === "workspace" && app.project.title ? app.project.title : "叙事图工作台"
-                    color: app.theme.muted
-                    font.pixelSize: 11
-                    elide: Text.ElideRight
-                    Layout.fillWidth: true
-                }
-                Repeater {
-                    model: [
-                        {glyph: "—", hint: "最小化"},
-                        {glyph: "□", hint: "最大化"},
-                        {glyph: "✕", hint: "关闭"}
-                    ]
-                    delegate: Button {
-                        required property var modelData
-                        required property int index
-                        objectName: "windowControl" + index
-                        text: modelData.glyph
-                        flat: true
-                        font.pixelSize: 12
-                        implicitWidth: 34
-                        implicitHeight: 24
-                        ToolTip.visible: hovered
-                        ToolTip.text: modelData.hint
-                        onClicked: {
-                            if (index === 0) app.showMinimized()
-                            else if (index === 1) app.visibility === Window.Maximized ? app.showNormal() : app.showMaximized()
-                            else app.close()
-                        }
-                    }
-                }
-            }
-        }
-
         StackLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             currentIndex: app.mode === "launcher" ? 0 : 1
 
             LauncherPage { id: launcherPage; app: app }
+
 
             // -- workspace ----------------------------------------------
             // 导航栏和页面之间也能拖：宽一点看长节点名，窄一点留给正文。
@@ -482,6 +428,13 @@ ApplicationWindow {
                         border.color: app.theme.line
                         radius: app.islandRadius
 
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.LeftButton
+                            onPressed: app.startSystemMove()
+                            onDoubleClicked: app.visibility === Window.Maximized ? app.showNormal() : app.showMaximized()
+                        }
+
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 20
@@ -520,6 +473,7 @@ ApplicationWindow {
                                 font.pixelSize: 11
                                 onClicked: app.assistantOpen = !app.assistantOpen
                             }
+                            WindowControls { app: app }
                         }
                     }
 
@@ -709,4 +663,29 @@ ApplicationWindow {
     Component { id: structurePageComponent; ScreenplayStructurePage { app: windowRoot } }
     Component { id: staticCheckPageComponent; StaticCheckPage { app: windowRoot } }
     Component { id: projectSettingsPageComponent; ProjectSettingsPage { app: windowRoot } }
+
+    // 启动页的窗口按钮与拖动区：浮在内容之上，不占布局（放在 StackLayout 里会被当成新的一页）。
+    Item {
+        objectName: "launcherWindowChrome"
+        visible: app.mode === "launcher"
+        anchors.fill: parent
+        z: 500
+
+        MouseArea {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.right: parent.right
+            height: 44
+            acceptedButtons: Qt.LeftButton
+            onPressed: app.startSystemMove()
+            onDoubleClicked: app.visibility === Window.Maximized ? app.showNormal() : app.showMaximized()
+        }
+        WindowControls {
+            app: app
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.topMargin: 10
+            anchors.rightMargin: 12
+        }
+    }
 }

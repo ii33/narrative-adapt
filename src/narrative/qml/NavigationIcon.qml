@@ -21,6 +21,7 @@ Canvas {
         else if(name==="screenplay"){rect(5,2,14,20);line(8,7,16,7);line(8,11,16,11);line(8,15,14,15);line(8,19,12,19)}
         else if(name==="storyboard"){rect(3,8,18,13);rect(3,3,18,5);line(7,3,4,8);line(13,3,10,8);line(19,3,16,8);line(8,13,16,13);line(8,17,13,17)}
         else if(name==="director"){rect(2,3,20,13);line(12,16,12,21);line(7,21,17,21);circle(8,9,2);line(13,7,19,7);line(13,11,17,11)}
+        else if(name==="previs"){c.beginPath();c.moveTo(12,3);c.lineTo(20,7.5);c.lineTo(20,16.5);c.lineTo(12,21);c.lineTo(4,16.5);c.lineTo(4,7.5);c.closePath();c.stroke();line(4,7.5,12,12);line(20,7.5,12,12);line(12,12,12,21)}
         else if(name==="screenplay_structure"){rect(9,2,6,5);line(12,7,12,12);line(5,12,19,12);line(5,12,5,16);line(19,12,19,16);rect(2,16,6,5);rect(16,16,6,5)}
         else if(name==="static_check"){circle(12,12,9);line(7,12,10,15);line(10,15,17,8)}
         else if(name==="project_settings"){circle(12,12,4);for(var i=0;i<8;i++){var a=i*Math.PI/4;line(12+7*Math.cos(a),12+7*Math.sin(a),12+10*Math.cos(a),12+10*Math.sin(a))}}

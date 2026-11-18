@@ -1206,6 +1206,9 @@ class NativeBridge(QObject):
         return {"available": True, "reason": "", "url": server.url,
                 "download_dir": str(self._previs_download_dir())}
 
+    def _previs_system_dark(self) -> bool:
+        return self._appearance_dark
+
     @Slot(result=str)
     def previsThemeScript(self) -> str:
         """预演台的换肤脚本：把它的中性灰映射到我们的深色令牌。
@@ -1218,9 +1221,12 @@ class NativeBridge(QObject):
         dist = previs_workspace.dist_dir(workspace)
         if dist is None:
             return ""
-        if getattr(self, "_previs_theme_cache", None) is None or self._previs_theme_dist != dist:
-            self._previs_theme_cache = previs_theme.inject_script(previs_theme.themed_css(dist))
-            self._previs_theme_dist = dist
+        dark = self._appearance_dark
+        cached = getattr(self, "_previs_theme_cache", None)
+        stamp = (dist, dark)
+        if cached is None or self._previs_theme_stamp != stamp:
+            self._previs_theme_cache = previs_theme.inject_script(previs_theme.themed_css(dist, dark))
+            self._previs_theme_stamp = stamp
         return self._previs_theme_cache
 
     def _previs_download_dir(self) -> Path:
