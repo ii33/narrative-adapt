@@ -14,6 +14,7 @@ from pathlib import Path
 from . import tool_api
 from .harness import CONVERSATION_SYSTEM_PROMPT
 from .model_tool_schema import model_tool_schema
+from .tool_loading import FULL_SCOPES, STANDARD_SCOPES
 
 ASSISTANT_VERSION = "conversation-agent/54"
 ASSISTANT_SYSTEM_PROMPT = CONVERSATION_SYSTEM_PROMPT
@@ -22,14 +23,32 @@ MAX_IMAGE_BYTES = 8 * 1024 * 1024
 IMAGE_SUFFIXES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                   ".webp": "image/webp", ".gif": "image/gif"}
 # Every project-local capability uses the same public Operations contract.
+# 只收 scope="project"：其它用例把这个常量当「工程业务工具全集」核对，外部 MCP
+# 工具与主机工具不能混进来。协作者能用的完整集合由 _allowed_tool_names 决定。
 ASSISTANT_TOOLS = tuple(name for name, tool in tool_api.TOOLS.items() if tool.scope == "project")
-READ_TOOLS = tuple(name for name in ASSISTANT_TOOLS if not tool_api.TOOLS[name].writes)
+
+
+def read_tool_names() -> tuple[str, ...]:
+    """标准模式里的只读工具，按当前注册表现算。
+
+    外部 MCP 工具是运行时刷新进来的（导入之后才注册），模块导入时的快照会漏掉
+    它们，所以判定走这里；MCP 工具只有在远端明确声明 readOnlyHint=true 时
+    才是只读（mcp_client.adapt_tools 的保守判定），其余算写，不进这个集合。
+    """
+    return tuple(name for name, tool in tool_api.TOOLS.items()
+                 if tool.scope in STANDARD_SCOPES and not tool.writes)
+
+
+# 导入时的快照，供只读一遍工具表的调用点使用；精确判定用 read_tool_names()。
+READ_TOOLS = read_tool_names()
 
 
 def _allowed_tool_names(access_mode):
     if access_mode not in {"standard", "full"}:
         raise ValueError("助手访问模式须为standard或full")
-    scopes = {"project", "host", "workspace"} if access_mode == "full" else {"project"}
+    # 与 tool_loading 的按需加载共用同一份 scope 集合：两边各写一份的话，会出现
+    # 「模型能加载、调用时却被拒」的自相矛盾。
+    scopes = FULL_SCOPES if access_mode == "full" else STANDARD_SCOPES
     return {name for name, tool in tool_api.TOOLS.items() if tool.scope in scopes}
 
 

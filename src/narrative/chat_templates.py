@@ -12,7 +12,8 @@
 
 **工具集合按 `tool_loading` 的业务 family 推导**（不做逐名手写清单，避免与注册表漂移）：
 每个模板都是「常驻读取/发现工具（CORE_TOOL_NAMES）+ 该会话必需的 family」，
-再与当前访问模式允许的名字求交。单会话量级 39／53／47，不是全量 172。
+再与当前访问模式允许的名字求交。单会话量级 39／53／47，不是全量 172；
+配置了外部 MCP 服务器时另按 `mcp` 组追加（见 `TEMPLATE_FAMILIES`）。
 
 **创建即冻结**：`snapshot()` 把系统提示词全文与工具名单抄进会话元数据。会话进行中
 改模板不影响已建会话——这同时保证了「一次会话从头到尾 tools 数组不变」，模型侧的
@@ -39,10 +40,14 @@ PAGE_TEMPLATE_ROUTES = {
 }
 
 # 每个模板取哪些业务组；CORE 常驻。
+# "mcp" 是用户配置的外部 MCP 服务器工具，不属于任何业务页；但模板会话在创建时
+# 就把工具数组冻结了（load_tools 在里面也被拒绝增长），所以三个内置模板都必须
+# 带上这一组，否则界面默认走的模板会话里外部工具既看不到也加载不了。没有配置
+# 服务器时这一组是空的，工具名单与加它之前完全一致。
 TEMPLATE_FAMILIES = {
-    "extract": ("extraction", "properties", "sources"),
-    "screenplay": ("screenplay", "writing"),
-    "storyboard": ("storyboard",),
+    "extract": ("extraction", "properties", "sources", "mcp"),
+    "screenplay": ("screenplay", "writing", "mcp"),
+    "storyboard": ("storyboard", "mcp"),
 }
 
 # 模板组合用的 prompt_defaults 条目（顺序即拼接顺序；`system` 恒在首位）。

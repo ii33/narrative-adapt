@@ -7,7 +7,17 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
+from .mcp_client import SCOPE as MCP_SCOPE
+from .mcp_client import TOOL_PREFIX as MCP_TOOL_PREFIX
 from .model_tool_schema import model_tool_schema
+
+# 助手可见的 scope 集合。标准模式 = 工程业务工具 + 用户配置的外部 MCP 工具；
+# 完全访问在此基础上加工程外文件与系统命令（必须是超集，否则切到完全访问反而
+# 丢掉外部工具）。两档都不含 configuration：密钥、会话模板这类配置写入不属于
+# 任何一次任务对话。assistant._allowed_tool_names 也用这份集合，避免出现
+# 「能加载却被调用拒绝」的两套口径。
+STANDARD_SCOPES = frozenset({'project', MCP_SCOPE})
+FULL_SCOPES = STANDARD_SCOPES | {'host', 'workspace'}
 
 TOOL_LOADING_GUIDE = (
     '工具按需加载：常驻目录不是全部能力或阶段权限白名单。需要其他业务工具时，先用list_available_tools按名称、业务family或关键词发现，'
@@ -41,6 +51,7 @@ FAMILY_DESCRIPTIONS = {
     'activity': '程序入库总结和模型用量',
     'attachments': '当前聊天附件元数据和内容读取',
     'host': '完全访问模式的工程外文件与系统命令',
+    'mcp': '用户配置的外部MCP服务器提供的工具（读写由远端声明保守判定）',
     'discovery': '发现和按需加载工具合同',
     'other': '其他当前工程业务工具',
 }
@@ -66,6 +77,10 @@ def _registry():
 
 
 def tool_family(name: str) -> str:
+    # 外部 MCP 工具（mcp__<服务器>__<工具>）单独成组：远端自己的名字里可能带
+    # storyboard、source 这类词，不能被误认成本工程的业务组。
+    if name.startswith(MCP_TOOL_PREFIX):
+        return 'mcp'
     if name in {'list_available_tools', 'load_tools'}:
         return 'discovery'
     if name in {'read_task_write_summary', 'read_usage_statistics'}:
@@ -136,7 +151,7 @@ def bind_tool_loader(loader: Callable[[list[str]], Iterable[str]], *, visible_na
 def _allowed(registry, access_mode, allowed_names):
     if access_mode not in {'standard', 'full'}:
         raise ValueError('访问模式须为standard或full')
-    scopes = {'project', 'host', 'workspace'} if access_mode == 'full' else {'project'}
+    scopes = FULL_SCOPES if access_mode == 'full' else STANDARD_SCOPES
     selected = set(allowed_names) if allowed_names is not None else None
     return {name for name, tool in registry.items() if tool.scope in scopes and (selected is None or name in selected)}
 
