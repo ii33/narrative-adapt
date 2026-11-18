@@ -414,53 +414,6 @@ ApplicationWindow {
                     // 页面这一列吃掉剩下的宽度：协作者展开时只让出它自己的 360。
                     spacing: 0
 
-                    // 顶部只留一条最薄的窗口条：不是标题行，没有页面名与工程路径。
-                    // 它负责拖动、协作者开关与窗口按钮；内容页各自画自己的标题。
-                    Rectangle {
-                        id: pageHeader
-                        objectName: "pageHeader"
-                        visible: app.currentPage !== "previs"
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 28
-                        Layout.leftMargin: app.islandInset
-                        Layout.rightMargin: app.islandInset
-                        Layout.topMargin: app.islandInset
-                        color: app.theme.paper
-                        border.color: app.theme.line
-                        border.width: 0
-
-                        MouseArea {
-                            anchors.fill: parent
-                            acceptedButtons: Qt.LeftButton
-                            onPressed: app.startSystemMove()
-                            onDoubleClicked: app.visibility === Window.Maximized ? app.showNormal() : app.showMaximized()
-                        }
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 4
-                            anchors.rightMargin: 4
-                            spacing: 6
-
-                            Item { Layout.fillWidth: true }
-                            Label {
-                                visible: app.busy
-                                text: "处理中…"
-                                color: app.theme.accent
-                                font.pixelSize: 11
-                            }
-                            Button {
-                                objectName: "assistantToggle"
-                                text: app.assistantOpen ? "收起协作者" : "协作者"
-                                flat: true
-                                font.pixelSize: 11
-                                implicitHeight: 22
-                                onClicked: app.assistantOpen = !app.assistantOpen
-                            }
-                            WindowControls { app: app }
-                        }
-                    }
-
                     // 页面内容区只是容器，自己不画卡片：岛屿模式下让窗口底色 paper 从
                     // 各页面自己的列/卡片之间露出来——页面里的 card 才是岛屿，缝隙才有
                     // 层次。紧凑模式的边距本来就是 0、颜色本来就是透明，渲染与改动前一致。
@@ -647,6 +600,45 @@ ApplicationWindow {
     Component { id: structurePageComponent; ScreenplayStructurePage { app: windowRoot } }
     Component { id: staticCheckPageComponent; StaticCheckPage { app: windowRoot } }
     Component { id: projectSettingsPageComponent; ProjectSettingsPage { app: windowRoot } }
+
+
+    // 窗口按钮不独占一行：浮在右上角，压在内容之上。
+    // 顶部 8px 的透明条负责拖动（看不见，也不占布局高度）。
+    Item {
+        objectName: "windowChromeOverlay"
+        anchors.fill: parent
+        visible: app.mode === "workspace"
+        z: 1000
+
+        MouseArea {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.right: parent.right
+            height: 8
+            acceptedButtons: Qt.LeftButton
+            onPressed: app.startSystemMove()
+            onDoubleClicked: app.visibility === Window.Maximized ? app.showNormal() : app.showMaximized()
+        }
+
+        // 平时不挡内容：鼠标移到右上角才浮出来。这样既不占一行，
+        // 也不会压住页面自己的右上角按钮（比如分镜稿的「刷新」）。
+        MouseArea {
+            id: chromeHotZone
+            anchors.top: parent.top
+            anchors.right: parent.right
+            width: 132
+            height: 34
+            hoverEnabled: true
+        }
+        WindowControls {
+            app: app
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.topMargin: 5
+            anchors.rightMargin: 6
+            visible: chromeHotZone.containsMouse
+        }
+    }
 
     // 启动页的窗口按钮与拖动区：浮在内容之上，不占布局（放在 StackLayout 里会被当成新的一页）。
     Item {

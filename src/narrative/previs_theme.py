@@ -103,6 +103,12 @@ def remap_stylesheet(css: str, dark: bool = True) -> str:
 _HIDE = """
 .topbar .brand, .topbar .version, .topbar .top-separator:first-of-type,
 .application-menu { display: none !important; }
+/* 摘掉品牌与菜单后，顶栏还留着为两行准备的高度，上面就空出一条。
+   这里把它收成一行的高度：内容自己撑开，不再预留。 */
+body .topbar { min-height: 0 !important; height: auto !important; padding: 6px 12px !important;
+                align-content: center !important; flex-wrap: wrap !important; }
+body .topbar > * { flex: 0 0 auto; }
+body .topbar .scene-switcher { margin-right: auto; }
 """
 
 

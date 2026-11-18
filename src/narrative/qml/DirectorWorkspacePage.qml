@@ -34,35 +34,6 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // 预演页只留一条最薄的窗口条：拖动区 + 窗口按钮，没有标题也没有返回箭头
-        // （导航在左侧，回分镜稿点导航即可）。
-        Rectangle {
-            id: previsBar
-            objectName: "previsBar"
-            Layout.fillWidth: true
-            Layout.preferredHeight: 26
-            color: root.app.theme.paper
-
-            MouseArea {
-                anchors.left: parent.left
-                anchors.right: controls.left
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                acceptedButtons: Qt.LeftButton
-                onPressed: root.app.startSystemMove()
-                onDoubleClicked: root.app.visibility === Window.Maximized
-                    ? root.app.showNormal() : root.app.showMaximized()
-            }
-
-            WindowControls {
-                id: controls
-                app: root.app
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.right: parent.right
-                anchors.rightMargin: 4
-            }
-        }
-
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
