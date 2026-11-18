@@ -622,7 +622,8 @@ ApplicationWindow {
     Item {
         objectName: "windowChromeOverlay"
         anchors.fill: parent
-        visible: app.mode === "workspace"
+        // 预演页的工具条里已经有窗口按钮了，这里再画一套就成了双份。
+        visible: app.mode === "workspace" && app.currentPage !== "previs"
         z: 1000
 
         // 常驻在右上角：不悬浮、不隐藏。页面内容右侧留出这条宽度，
