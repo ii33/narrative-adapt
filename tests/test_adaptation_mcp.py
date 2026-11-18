@@ -208,3 +208,22 @@ def test_extraction_granularity_matches_ui_settings_without_model_change(seeded)
     assert ops.load_project_settings()["profile"] == profile
     assert ops.graph_snapshot() == before
     assert "粒度" in call(entry, "set_extraction_granularity", {"granularity": False}, error=True)
+
+def test_standard_access_hides_skill_writes_from_external_clients():
+    """技能管理工具在应用内对协作者开放，但对外部 MCP 客户端仍按写配置对待。
+
+    同一份工具表要满足两个不同边界：本机界面里的助手要能建改技能，远程 MCP 客户端
+    不能借标准访问改本机配置。这条用例守住后者，别在调 scope 时把它弄丢。
+    """
+    from narrative import skills, tool_api
+
+    standard = {row["name"] for row in mcp_server._tool_list(None, "standard")}
+    full = {row["name"] for row in mcp_server._tool_list(None, "full")}
+    writes = {name for name in skills.SKILL_TOOL_NAMES
+              if name in tool_api.TOOLS and tool_api.TOOLS[name].writes}
+    assert writes, "技能工具里应当有写操作，否则这条守卫没有意义"
+    for name in writes:
+        assert name not in standard, name
+        assert name in full, name
+    # 只读的技能工具不受影响：外部客户端本来就能看。
+    assert "list_skills" in standard and "read_skill" in standard

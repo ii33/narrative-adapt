@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from narrative import chat_templates
+from narrative import chat_templates, tool_api
 from narrative.chat_store import ChatStore
 from narrative.operations import Operations
 from narrative.prompt_defaults import DEFAULT_PROMPTS
@@ -71,6 +71,44 @@ def test_editing_the_template_does_not_touch_an_existing_chat(ops, monkeypatch):
     assert changed["tools"] != before["tools"] or changed["system_prompt"] != before["system_prompt"]
     after = store(ops).template(chat["id"])
     assert after == before
+
+
+def test_template_tool_lists_carry_the_skill_group(ops):
+    """默认页面走模板会话：冻结名单里要有技能管理工具和常驻的 load_skill。
+
+    没有这一组，界面上就列不出、建不了技能——技能管理在默认页面等于不存在。
+    """
+    from narrative.skills import LOAD_TOOL_NAME, MANAGE_TOOL_NAMES
+
+    for template_id in ("extract", "screenplay", "storyboard"):
+        frozen = chat_templates.snapshot(template_id)
+        names = set(frozen["tools"])
+        assert set(MANAGE_TOOL_NAMES) <= names, template_id
+        assert LOAD_TOOL_NAME in names, template_id
+        # 技能组带进来的是这几个，不是整张注册表；配置类工具一个都不许混进来
+        assert not any(tool_api.TOOLS[name].scope == "configuration" for name in names), template_id
+    assert "skill" in chat_templates.TEMPLATE_FAMILIES["screenplay"]
+
+
+def test_load_skill_in_a_frozen_template_session_says_what_happened(ops, tmp_path, monkeypatch):
+    """模板会话里 load_skill 可见：只给说明的技能照常生效，要开工具的技能必须
+    失败并说清原因——冻结的是工具数组，不能把失败说成成功。"""
+    from narrative import skills
+
+    monkeypatch.setenv("NARRATIVE_SKILLS_FILE", str(tmp_path / "skills.json"))
+    skills.create_skill("只给说明", "不打开工具", "先把范围说清楚再动手。")
+    skills.create_skill("要开属性工具", "核对属性", "先 audit_properties 再动手。", families=["properties"])
+    frozen = chat_templates.snapshot("screenplay")
+    visible = list(frozen["tools"])
+    allowed = [name for name, tool in tool_api.TOOLS.items() if tool.scope == "project"]
+    with bind_tool_loader(lambda names: list(visible) + list(names), visible_names=lambda: visible,
+                          allowed_names=allowed, template_frozen=True):
+        result = tool_api.TOOLS["load_skill"].handler(ops, {"name": "只给说明"})
+        assert result["runtime_loaded"] is None and result["loaded_tools"] == []
+        assert "先把范围说清楚" in result["instructions"]
+        with pytest.raises(tool_api.ToolError, match="工具集在创建时固定"):
+            tool_api.TOOLS["load_skill"].handler(ops, {"name": "要开属性工具"})
+    assert "list_skills" in visible and "load_skill" in visible
 
 
 def test_load_tools_is_refused_inside_a_frozen_session(ops):

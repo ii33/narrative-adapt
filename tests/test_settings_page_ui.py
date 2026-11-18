@@ -20,6 +20,7 @@ SECTIONS = [
     ("appearance", "settingsAppearanceSection"),
     ("model", "settingsModelSection"),
     ("mcp", "settingsMcpSection"),
+    ("skill", "settingsSkillSection"),
     ("about", "settingsAboutSection"),
 ]
 
@@ -141,11 +142,13 @@ def test_each_section_switches_and_shows_its_own_content(tmp_path, monkeypatch):
                     continue
                 assert page.findChild(object, other_name).property("visible") is False
 
-        # 每组都是真内容而不是空壳：外观两个下拉、模型渠道的保存按钮、MCP 面板、版本串。
+        # 每组都是真内容而不是空壳：外观两个下拉、模型渠道的保存按钮、MCP 面板、
+        # 技能面板、版本串。
         assert page.findChild(object, "appearanceMode") is not None
         assert page.findChild(object, "layoutMode") is not None
         assert page.findChild(object, "saveGlobalSettingsButton") is not None
         assert page.findChild(object, "mcpSettingsPanel") is not None
+        assert page.findChild(object, "skillSettingsPanel") is not None
         version = page.findChild(object, "settingsVersionLabel")
         assert version.property("text") == ui["bridge"].appVersion
         assert not ui["errors"]
@@ -233,7 +236,7 @@ def test_launcher_no_longer_carries_a_settings_area(tmp_path, monkeypatch):
         launcher = ui["window"].findChild(object, "launcherPage")
         # 同一份设置只能有一处：留在启动页就等于两个地方能改同一份值。
         for name in ("appearanceMode", "layoutMode", "globalSettingsTabs",
-                     "mcpSettingsPanel", "saveGlobalSettingsButton"):
+                     "mcpSettingsPanel", "skillSettingsPanel", "saveGlobalSettingsButton"):
             assert launcher.findChild(object, name) is None, name + " 还留在启动页里"
         # 工程列表与设置入口都还在——不该把入口和设置区一起删掉。
         assert launcher.findChild(object, "projectList") is not None

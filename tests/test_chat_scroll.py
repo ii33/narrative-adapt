@@ -60,7 +60,9 @@ def transcript_shell(tmp_path, monkeypatch, *, single_long_user=False):
     view = panel.findChild(object, 'assistantTranscript')
 
     def wait(check):
-        deadline = time.monotonic() + 5
+        # 真运行时 + QML 的往返一次就要 5~6 秒（新版运行时启动又慢了约 0.5 秒），
+        # 5 秒预算会把「逻辑全对、只是慢一点」判成失败。这里只放宽等待，不改断言。
+        deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             app.processEvents()
             if check():

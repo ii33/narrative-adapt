@@ -47,7 +47,8 @@ def _allowed_tool_names(access_mode):
     if access_mode not in {"standard", "full"}:
         raise ValueError("助手访问模式须为standard或full")
     # 与 tool_loading 的按需加载共用同一份 scope 集合：两边各写一份的话，会出现
-    # 「模型能加载、调用时却被拒」的自相矛盾。
+    # 「模型能加载、调用时却被拒」的自相矛盾。技能管理工具（scope='skill'）因此
+    # 自动跟着 STANDARD_SCOPES 放行，不需要在这里另加名字。
     scopes = FULL_SCOPES if access_mode == "full" else STANDARD_SCOPES
     return {name for name, tool in tool_api.TOOLS.items() if tool.scope in scopes}
 

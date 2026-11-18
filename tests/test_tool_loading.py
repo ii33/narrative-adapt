@@ -8,6 +8,7 @@ from agent_fixtures import project as project
 from narrative import tool_api
 from narrative.tool_loading import (
     CORE_TOOL_NAMES,
+    STANDARD_SCOPES,
     bind_tool_loader,
     initial_tool_names,
     list_available_tools,
@@ -21,13 +22,44 @@ def project_names():
     return [name for name, tool in tool_api.TOOLS.items() if tool.scope == 'project']
 
 
+def standard_names():
+    """标准访问下模型能看见的全部工具：按 scope 白名单算，不在这里另抄一份。"""
+    return [name for name, tool in tool_api.TOOLS.items() if tool.scope in STANDARD_SCOPES]
+
+
 def test_small_initial_surface_has_discovery_but_not_screenplay_or_large_storyboard():
     names = initial_tool_names(project_names())
+    # 常驻面刻意保持很小：发现工具 + 读取类 + 常驻的 load_skill（技能要一步可用）
     assert len(CORE_TOOL_NAMES) <= 20 and len(names) == len(CORE_TOOL_NAMES)
-    assert {'list_available_tools', 'load_tools'} <= set(names)
+    assert {'list_available_tools', 'load_tools', 'load_skill'} <= set(names)
     assert 'read_screenplay' not in names
     assert not any('storyboard' in name for name in names)
     assert 'read_screenplay' in tool_api.TOOLS and 'apply_storyboard_changes' in tool_api.TOOLS
+
+
+def test_skill_family_loads_in_standard_mode_without_opening_configuration():
+    """skill 组在标准模式可发现、可加载；configuration 依旧两档都摸不到。"""
+    from narrative.skills import LOAD_TOOL_NAME, MANAGE_TOOL_NAMES, SCOPE
+
+    assert SCOPE in STANDARD_SCOPES and 'configuration' not in STANDARD_SCOPES
+    resolved = resolve_tool_names(families=['skill'])
+    assert set(resolved) == {LOAD_TOOL_NAME, *MANAGE_TOOL_NAMES}
+    assert LOAD_TOOL_NAME in CORE_TOOL_NAMES
+    visible = initial_tool_names(project_names())
+    def loader(requested):
+        visible.extend(name for name in requested if name not in visible)
+        return list(visible)
+    with bind_tool_loader(loader, visible_names=lambda: visible, allowed_names=standard_names()):
+        loaded = load_tools(names=sorted(MANAGE_TOOL_NAMES))
+        assert loaded['runtime_loaded'] is True
+        assert set(loaded['newly_loaded_tools']) == set(MANAGE_TOOL_NAMES)
+        assert {row['family'] for row in loaded['tools']} == {'skill'}
+        assert {row['name'] for row in loaded['tools'] if row['writes']} == {
+            'create_skill', 'update_skill', 'delete_skill'}
+    # 配置写入类仍然不可加载（模型不能自己改密钥或会话模板）
+    for name in ('configure_project_api_key', 'save_chat_template'):
+        with pytest.raises(ValueError, match='权限'):
+            resolve_tool_names(names=[name], access_mode='full')
 
 
 def test_default_discovery_is_family_manifest_not_full_schema_or_tool_table():

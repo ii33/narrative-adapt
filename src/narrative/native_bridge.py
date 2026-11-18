@@ -27,6 +27,7 @@ from . import (
     project_removal,
     providers,
     runtime_security,
+    skills,
     theme,
     version,
 )
@@ -178,6 +179,52 @@ def _mcp_server_row(server: mcp_client.McpServer, cached: list[dict],
     }
 
 
+# -- 技能：一条「作业说明 + 要打开的工具组」 ----------------------------------
+# 与 MCP 那组同一分工：界面只负责列出、编辑、触发保存；校验与写盘都在 skills 内核里，
+# 这里只做界面形状的转换。区别在调度——一次技能保存是毫秒级的原子写，不需要后台线程，
+# 所以不像 mcpServers 那样「保存 → 后台刷新 → 信号」，而是直接写完就发 skillsChanged。
+
+
+def _skill_names(value: object, label: str) -> list[str]:
+    """界面多选框给的是 JS 数组，读回来可能是 QJSValue：这里只做形状归一。
+
+    名字合不合法（未知业务组、未知工具、是不是业务组写进了 tools）一律交给内核的
+    ``_clean_families`` / ``_clean_tools``：校验口径只写一份，界面不做第二套白名单。
+    """
+    if value is None:
+        return []
+    if hasattr(value, "toVariant"):
+        value = value.toVariant()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{label} 须为名称数组")
+    rows = [str(item).strip() for item in value if str(item).strip()]
+    return list(dict.fromkeys(rows))
+
+
+def _skill_opens(families: list[str], tools: list[str]) -> dict:
+    """这条技能会打开哪些工具；解析不了就如实说明，不假装能打开。
+
+    走的是 ``skills.resolve_family_names`` → ``tool_loading.resolve_tool_names``，
+    与模型调用 ``load_skill`` 时用的是同一个解析入口，所以界面上显示的工具数就是
+    会话里真正会打开的那一批（仍然受当前访问模式约束）。
+    """
+    try:
+        return {"resolved_tools": skills.resolve_family_names(list(families), list(tools)),
+                "problem": ""}
+    except ValueError as exc:
+        return {"resolved_tools": [], "problem": f"当前访问模式下解析不到这些工具：{exc}"}
+
+
+def _skill_row(skill: skills.Skill) -> dict:
+    """一条技能在界面上的样子：配置原文 + 「会打开什么」。
+
+    ``builtin`` 原样带出来：界面据此禁用编辑/删除，不自己按名字猜哪几条只读。
+    """
+    row = skill.to_dict()
+    row["opens"] = _skill_opens(list(skill.families), list(skill.tools))
+    return row
+
+
 class NativeBridge(QObject):
     """QML context object named ``bridge``; all Operations I/O runs off the GUI thread."""
 
@@ -201,6 +248,9 @@ class NativeBridge(QObject):
     # 外部 MCP 服务器：保存或刷新之后后台线程已经改过工具表，界面要重读 mcpServers()。
     # 从后台线程发射是安全的（Qt 把调用排进界面线程的队列），和 _workerDone 同一做法。
     mcpServersChanged = Signal()
+    # 技能：保存或删除之后配置文件已经变了，界面要重读 skills()。技能写盘是毫秒级的
+    # 原子写，所以这里由保存动作自己同步发射，不像 MCP 那样等后台刷新线程。
+    skillsChanged = Signal()
     # 进程完整性不变，所以 integrityChanged 从不发射；它只是让 Property 有 notify。
     integrityChanged = Signal()
 
@@ -777,6 +827,105 @@ class NativeBridge(QObject):
                 self.mcpServersChanged.emit()
 
         threading.Thread(target=run, name="mcp-settings-refresh", daemon=True).start()
+
+    # -- 技能（全局设置，跨工程共用） ----------------------------------------
+    # 技能不建连、不起子进程：读一份 JSON、写一份 JSON 都是毫秒级，所以这几个槽位都在
+    # 界面线程里同步做完，完成后直接发 skillsChanged 让面板重读。MCP 那组需要后台线程
+    # 是因为握手与超时会拖住界面，技能没有这个问题。
+
+    @Slot(result="QVariantMap")
+    def skills(self) -> dict:
+        """技能清单（内置在前、用户在后）+ 编辑器可选的业务组与工具。
+
+        读不懂的用户文件返回 ``ok=false`` 与可读错误，而不是空列表：说「没有技能」会把
+        用户引到错方向（他会去重建技能，而真正要改的是那个 JSON 文件）。内置技能来自
+        代码，读用户文件失败时列表照样为空——但错误已经写在 ``error`` 里，界面先显示它。
+        """
+        from . import tool_api
+
+        snapshot: dict[str, Any] = {
+            "ok": True,
+            "path": str(skills.default_path()),
+            "error": "",
+            "startup_error": tool_api.SKILL_STARTUP_ERROR or "",
+            # 可选项是注册表的静态事实，和读文件成败无关：编辑器要能选「还没有任何技能
+            # 点名过」的业务组与工具，所以先给出来再试读文件。
+            "families": sorted(skills.known_families()),
+            "tools": sorted(skills.known_tools()),
+            "skills": [],
+        }
+        try:
+            rows = skills.load_skills()
+        except skills.SkillError as exc:
+            snapshot["ok"] = False
+            snapshot["error"] = str(exc)
+            return snapshot
+        snapshot["skills"] = [_skill_row(skill) for skill in rows]
+        return snapshot
+
+    @Slot("QVariantList", "QVariantList", result="QVariantMap")
+    def skillOpens(self, families: object, tools: object) -> dict:
+        """编辑器里的「会打开哪些工具」实时预览：不必先保存就能看到结果。"""
+        try:
+            return _skill_opens(_skill_names(families, "families"), _skill_names(tools, "tools"))
+        except ValueError as exc:
+            return {"resolved_tools": [], "problem": str(exc)}
+
+    @Slot("QVariantMap")
+    def saveSkill(self, row: dict) -> None:
+        """新建或修改一条技能。``original`` 为已保存的名字时走修改，否则走新建。
+
+        名字是身份：内核没有改名接口（``update_skill`` 按名字定位），所以界面在编辑
+        已有技能时把名称框置灰；这里也不再假装支持改名——改名要另存一条。
+        """
+        data = dict(row or {})
+        original = str(data.get("original") or "").strip()
+        try:
+            enabled = data.get("enabled")
+            if enabled is not None and not isinstance(enabled, bool):
+                raise skills.SkillError("enabled 须为布尔值（界面上就是那个启用开关的状态）")
+            families = _skill_names(data.get("families"), "families")
+            tools = _skill_names(data.get("tools"), "tools")
+            if original:
+                skill = skills.update_skill(
+                    original,
+                    summary=data.get("summary"),
+                    instructions=data.get("instructions"),
+                    families=families,
+                    tools=tools,
+                    enabled=enabled,
+                )
+            else:
+                skill = skills.create_skill(data.get("name"), data.get("summary"),
+                                            data.get("instructions"), families, tools)
+                # 内核新建一律从「启用」开始；编辑器里没勾启用时在同一份提交里补一步
+                # 停用，仍然交给内核写盘——界面不自己拼一个 Skill 直接覆盖整表。
+                if enabled is False:
+                    skill = skills.update_skill(skill.name, enabled=False)
+        except ValueError as exc:
+            # SkillError 是 ValueError 的子类：校验失败与读写失败都从这里出去，
+            # 消息本来就是写给调用者看的（说清哪里不对、下一步怎么做）。
+            self.errorOccurred.emit("skill", str(exc))
+            return
+        self.noticeRaised.emit(f"技能「{skill.name}」已保存：{skills.default_path()}")
+        self.skillsChanged.emit()
+
+    @Slot(str)
+    def deleteSkill(self, name: str) -> None:
+        """删除一条用户技能；内置技能由内核拒绝，错误原样交给界面显示。"""
+        try:
+            removed = skills.delete_skill(name, confirm=True)
+        except ValueError as exc:
+            self.errorOccurred.emit("skill", str(exc))
+            return
+        if not removed:
+            # 不存在不当成功：界面那一行可能已经被别处改过（手改文件或另一个窗口），
+            # 静默「删成功」会让人以为删掉的是另一样东西。
+            self.errorOccurred.emit(
+                "skill", f"没有自定义技能 {name}：内置技能不可删除，列表可能已经变了，请重新载入")
+            return
+        self.noticeRaised.emit(f"技能「{name}」已删除：{skills.default_path()}")
+        self.skillsChanged.emit()
 
     @Slot()
     def closeProject(self) -> None:

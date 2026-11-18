@@ -1255,6 +1255,27 @@ def _register_loading_tools():
     register(Tool, _register)
 
 
+# 技能工具注册失败的原因（技能模块或技能文件坏掉时留痕）；界面想解释「为什么没有
+# 技能工具」就读它，没有失败时为 None。技能是附加能力，坏掉也不能影响应用启动。
+SKILL_STARTUP_ERROR: str | None = None
+
+
+def _register_skill_tools() -> None:
+    """注册技能工具：list/read/create/update/delete 是配置写入，load_skill 是会话行为。
+
+    单个工具模块的异常全兜在这里：一条技能写坏或依赖缺失都不该让整个工具表起不来
+    （这与外部 MCP 工具的处理口径一致，失败原因留给界面读）。
+    """
+    global SKILL_STARTUP_ERROR
+    try:
+        from . import skill_tools
+
+        skill_tools.register(Tool, _register, ToolError)
+    except Exception as exc:  # noqa: BLE001 - 技能是附加能力，坏掉不能影响启动
+        SKILL_STARTUP_ERROR = f"{type(exc).__name__}: {exc}"
+
+
+_register_skill_tools()
 _register_loading_tools()
 
 

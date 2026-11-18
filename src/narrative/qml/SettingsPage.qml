@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 独立设置页：全局默认值（外观 / 主框构 / 模型渠道 / MCP 服务器）集中在这里。
+// 独立设置页：全局默认值（外观 / 主框构 / 模型渠道 / MCP 服务器 / 技能）集中在这里。
 // 启动页此前右半边就是这一整块设置区；拆出来后启动页只剩工程列表，
 // 两处界面各自变简单：找工程的人不被设置占掉一半宽度，改设置的人不用先看工程。
 //
@@ -58,6 +58,7 @@ Item {
         {key: "appearance", label: "外观", hint: "深浅色与主框构"},
         {key: "model", label: "模型渠道", hint: "所有工程的默认值"},
         {key: "mcp", label: "MCP 服务器", hint: "外部工具服务器"},
+        {key: "skill", label: "技能", hint: "可保存的作业说明"},
         {key: "about", label: "关于", hint: "版本与配置文件"}
     ]
     property int sectionIndex: 0
@@ -271,7 +272,7 @@ Item {
             }
 
             // -- 内容区 ---------------------------------------------------
-            // 四块内容高度差很大（外观两行 / 模型渠道 14 行表单 / MCP 一整份面板），
+            // 各块内容高度差很大（外观两行 / 模型渠道 14 行表单 / MCP 与技能各一整份面板），
             // 所以按分组分页：切到哪一块，哪一块就拿到全部高度，谁也不压扁谁。
             Rectangle {
                 Layout.fillWidth: true
@@ -515,6 +516,18 @@ Item {
                         objectName: "settingsMcpSection"
 
                         McpSettingsPanel {
+                            anchors.fill: parent
+                            app: page.app
+                        }
+                    }
+
+                    // -- 技能：可保存的「作业说明 + 工具组」，跨工程共用 --------------
+                    // 同 MCP 一处一样：面板自己管列表、编辑器与刷新，这里只加一层容器，
+                    // 分组标识留在设置页上，测试与截图都靠它定位。
+                    Item {
+                        objectName: "settingsSkillSection"
+
+                        SkillSettingsPanel {
                             anchors.fill: parent
                             app: page.app
                         }

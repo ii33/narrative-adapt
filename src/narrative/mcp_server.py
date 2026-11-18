@@ -31,9 +31,21 @@ DEFAULT_PROTOCOL = "2024-11-05"
 PROJECT_ARG = "project"
 
 
+def _is_config_write(name: str) -> bool:
+    """写用户配置的工具：标准访问下对外部 MCP 客户端一律不给。
+
+    技能工具的 scope 从 configuration 挪到了 skill（这样应用内的协作者才能管理技能），
+    但对外的 MCP 面仍要守住同一条线：远程客户端不能改本机配置。
+    """
+    tool = tool_api.TOOLS.get(name)
+    if tool is None or not tool.writes:
+        return False
+    return tool.scope in {"configuration", "skill"}
+
+
 def _tool_list(default_project: str | None, access_mode="standard") -> list[dict]:
     tools = [row for row in tool_api.describe() if access_mode == "full" or (row["name"] not in HOST_TOOL_NAMES
-             and not (tool_api.TOOLS[row['name']].scope == 'configuration' and tool_api.TOOLS[row['name']].writes))]
+             and not _is_config_write(row['name']))]
     if default_project:
         return tools
     for tool in tools:
@@ -98,7 +110,7 @@ def handle(request: dict, *, default_project: str | None, access_mode="standard"
         project = arguments.pop(PROJECT_ARG, None) or default_project
         try:
             selected_tool = tool_api.TOOLS.get(name)
-            if access_mode != "full" and (name in HOST_TOOL_NAMES or selected_tool and selected_tool.scope == 'configuration' and selected_tool.writes):
+            if access_mode != "full" and (name in HOST_TOOL_NAMES or selected_tool and _is_config_write(name)):
                 raise tool_api.ToolError("当前 MCP 为标准访问；完全访问只能由 --access-mode full 启动授权")
             if name in HOST_TOOL_NAMES:
                 if not owner or cancel_event is None or not project:

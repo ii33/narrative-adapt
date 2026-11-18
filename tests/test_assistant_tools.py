@@ -15,6 +15,7 @@ from narrative.mcp_client import TOOL_PREFIX
 from narrative.tool_loading import (
     CORE_TOOL_NAMES,
     FAMILY_DESCRIPTIONS,
+    STANDARD_SCOPES,
     _allowed,
     bind_tool_loader,
     initial_tool_names,
@@ -76,7 +77,7 @@ def test_only_read_only_external_tools_join_the_read_set(external):
     assert {name for name in project_names() if not tool_api.TOOLS[name].writes} <= set(read_names)
     # 只读集合里不会混进配置类、主机类工具，也不会混进任何写工具
     for name in read_names:
-        assert tool_api.TOOLS[name].scope in {"project", MCP_SCOPE}, name
+        assert tool_api.TOOLS[name].scope in STANDARD_SCOPES, name
         assert tool_api.TOOLS[name].writes is False, name
 
 
@@ -129,6 +130,43 @@ def test_no_configured_external_tools_keeps_the_old_surface(monkeypatch):
     assert _allowed(registry, "full", None) == set(registry)
     # ASSISTANT_TOOLS 仍然是「工程业务工具全集」，没被外部工具稀释
     assert assistant.ASSISTANT_TOOLS == tuple(project_names())
+
+
+def test_skill_management_is_visible_to_collaborators_but_configuration_is_not():
+    """技能管理工具进协作者可见面；密钥/模板写入仍然进不来（设计红线）。"""
+    from narrative.skills import LOAD_TOOL_NAME, MANAGE_TOOL_NAMES, SCOPE
+
+    allowed = assistant._allowed_tool_names("standard")
+    catalog = {row["name"] for row in assistant.tool_catalog(access_mode="standard")}
+    for name in (LOAD_TOOL_NAME, *sorted(MANAGE_TOOL_NAMES)):
+        assert name in allowed and name in catalog, name
+        assert tool_api.TOOLS[name].scope in {"project", SCOPE}, name
+    # 五个管理工具都是 skill scope；写属性只落在 create/update/delete 上
+    assert {name for name in MANAGE_TOOL_NAMES} == {
+        "list_skills", "read_skill", "create_skill", "update_skill", "delete_skill"}
+    assert {name for name in MANAGE_TOOL_NAMES if tool_api.TOOLS[name].writes} == {
+        "create_skill", "update_skill", "delete_skill"}
+    assert tool_api.TOOLS[LOAD_TOOL_NAME].writes is False
+    # 配置类工具（密钥、模板写入）在两档访问模式下都不可见
+    for mode in ("standard", "full"):
+        visible = assistant._allowed_tool_names(mode)
+        assert not {name for name in visible if tool_api.TOOLS[name].scope == "configuration"}, mode
+    assert not {"configure_project_api_key", "save_chat_template", "delete_chat_template"} & catalog
+
+
+def test_template_family_lists_carry_skill_tools_and_resident_load_skill():
+    """三个模板都带 skill 组，冻结名单里因此有管理工具与常驻的 load_skill。"""
+    from narrative.skills import LOAD_TOOL_NAME, MANAGE_TOOL_NAMES
+
+    for template_id, families in TEMPLATE_FAMILIES.items():
+        assert "skill" in families, template_id
+        names = template_tool_names(template_id)
+        assert set(MANAGE_TOOL_NAMES) <= set(names), template_id
+        assert LOAD_TOOL_NAME in names, template_id
+        # 组只是组织发现：冻结名单里仍按注册表顺序，且不混进配置类工具
+        assert names == [name for name in tool_api.TOOLS if name in set(names)]
+        assert not any(tool_api.TOOLS[name].scope == "configuration" for name in names), template_id
+    assert LOAD_TOOL_NAME in CORE_TOOL_NAMES
 
 
 def test_template_family_lists_carry_external_tools():

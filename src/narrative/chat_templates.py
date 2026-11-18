@@ -12,8 +12,10 @@
 
 **工具集合按 `tool_loading` 的业务 family 推导**（不做逐名手写清单，避免与注册表漂移）：
 每个模板都是「常驻读取/发现工具（CORE_TOOL_NAMES）+ 该会话必需的 family」，
-再与当前访问模式允许的名字求交。单会话量级 39／53／47，不是全量 172；
+再与当前访问模式允许的名字求交。单会话量级 45／59／55，不是全量工具表；
 配置了外部 MCP 服务器时另按 `mcp` 组追加（见 `TEMPLATE_FAMILIES`）。
+`skill` 组同样按 family 带入（含常驻的 `load_skill`）：默认页面走的就是模板会话，
+冻结名单里没有这一组，协作者在界面上就列不出、也建不了技能。
 
 **创建即冻结**：`snapshot()` 把系统提示词全文与工具名单抄进会话元数据。会话进行中
 改模板不影响已建会话——这同时保证了「一次会话从头到尾 tools 数组不变」，模型侧的
@@ -44,10 +46,14 @@ PAGE_TEMPLATE_ROUTES = {
 # 就把工具数组冻结了（load_tools 在里面也被拒绝增长），所以三个内置模板都必须
 # 带上这一组，否则界面默认走的模板会话里外部工具既看不到也加载不了。没有配置
 # 服务器时这一组是空的，工具名单与加它之前完全一致。
+# "skill" 同理必须带上：默认页面走的就是模板会话，冻结名单里没有技能组的话，
+# 协作者在界面上既列不出也建不了技能。带上这一组会一并带进 load_skill
+# （它是常驻工具，本来就该在），于是「看技能 → 读技能 → 加载技能」在模板会话里
+# 一步可达；技能点名的业务组仍受冻结限制，load_skill 会如实拒绝并给替代做法。
 TEMPLATE_FAMILIES = {
-    "extract": ("extraction", "properties", "sources", "mcp"),
-    "screenplay": ("screenplay", "writing", "mcp"),
-    "storyboard": ("storyboard", "mcp"),
+    "extract": ("extraction", "properties", "sources", "skill", "mcp"),
+    "screenplay": ("screenplay", "writing", "skill", "mcp"),
+    "storyboard": ("storyboard", "skill", "mcp"),
 }
 
 # 模板组合用的 prompt_defaults 条目（顺序即拼接顺序；`system` 恒在首位）。

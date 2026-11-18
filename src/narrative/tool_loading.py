@@ -10,13 +10,17 @@ from typing import Any
 from .mcp_client import SCOPE as MCP_SCOPE
 from .mcp_client import TOOL_PREFIX as MCP_TOOL_PREFIX
 from .model_tool_schema import model_tool_schema
+from .skills import SCOPE as SKILL_SCOPE
+from .skills import SKILL_TOOL_NAMES
 
-# 助手可见的 scope 集合。标准模式 = 工程业务工具 + 用户配置的外部 MCP 工具；
-# 完全访问在此基础上加工程外文件与系统命令（必须是超集，否则切到完全访问反而
-# 丢掉外部工具）。两档都不含 configuration：密钥、会话模板这类配置写入不属于
-# 任何一次任务对话。assistant._allowed_tool_names 也用这份集合，避免出现
-# 「能加载却被调用拒绝」的两套口径。
-STANDARD_SCOPES = frozenset({'project', MCP_SCOPE})
+# 助手可见的 scope 集合。标准模式 = 工程业务工具 + 技能管理工具 + 用户配置的外部
+# MCP 工具；完全访问在此基础上加工程外文件与系统命令（必须是超集，否则切到完全
+# 访问反而丢掉外部工具）。两档都不含 configuration：密钥、会话模板这类配置写入
+# 不属于任何一次任务对话。skill 单列一档：技能是助手自己的作业说明，协作者要能
+# 建立、编辑、管理，而 configuration 那条红线不跟着放开。
+# assistant._allowed_tool_names 也用这份集合，避免出现「能加载却被调用拒绝」的
+# 两套口径。
+STANDARD_SCOPES = frozenset({'project', SKILL_SCOPE, MCP_SCOPE})
 FULL_SCOPES = STANDARD_SCOPES | {'host', 'workspace'}
 
 TOOL_LOADING_GUIDE = (
@@ -25,8 +29,11 @@ TOOL_LOADING_GUIDE = (
     '已经加载的工具无需重复加载，不要在工作前预先加载全部工具；读取合同和加载都不执行业务写入。现有访问模式、目标权限和Operations校验仍生效。'
 )
 
+# 常驻工具：发现（list_available_tools/load_tools）与读取类之外，load_skill 也常驻。
+# 理由：技能是「这次任务怎么做」，模型必须能一步调用；放进按需加载会逼它先
+# list_available_tools → load_tools 两步才拿到合同，白白多一轮。
 CORE_TOOL_NAMES = (
-    'list_available_tools', 'load_tools', 'project_info', 'list_nodes', 'get_node', 'search',
+    'list_available_tools', 'load_tools', 'load_skill', 'project_info', 'list_nodes', 'get_node', 'search',
     'list_sources', 'read_source', 'read_source_slice', 'list_source_slices', 'get_schema',
     'list_content_submissions', 'read_content_submission', 'patch_content_submission',
     'list_extraction_submissions', 'read_extraction_submission', 'patch_extraction_submission',
@@ -52,6 +59,7 @@ FAMILY_DESCRIPTIONS = {
     'attachments': '当前聊天附件元数据和内容读取',
     'host': '完全访问模式的工程外文件与系统命令',
     'mcp': '用户配置的外部MCP服务器提供的工具（读写由远端声明保守判定）',
+    'skill': '技能：读取、维护技能，并在会话里按需加载一段作业说明与对应工具组',
     'discovery': '发现和按需加载工具合同',
     'other': '其他当前工程业务工具',
 }
@@ -81,6 +89,12 @@ def tool_family(name: str) -> str:
     # storyboard、source 这类词，不能被误认成本工程的业务组。
     if name.startswith(MCP_TOOL_PREFIX):
         return 'mcp'
+    # 技能相关工具单独成组：它们跨两个 scope（增删改查是 SKILL_SCOPE='skill'，
+    # 对协作者开放；load_skill 是 project 会话行为），按业务归属放在一起才能在
+    # 工具发现和界面里一眼认出「这一组是技能」。名字清单来自
+    # skills.SKILL_TOOL_NAMES，不另抄一份。
+    if name in SKILL_TOOL_NAMES or name.startswith('skill_') or name.endswith('_skill'):
+        return 'skill'
     if name in {'list_available_tools', 'load_tools'}:
         return 'discovery'
     if name in {'read_task_write_summary', 'read_usage_statistics'}:
