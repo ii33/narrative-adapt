@@ -381,7 +381,7 @@ Item {
             flickableDirection:Flickable.HorizontalFlick;boundsBehavior:Flickable.StopAtBounds;clip:true
             ScrollBar.horizontal:ScrollBar{policy:headerViewport.contentWidth>headerViewport.width?ScrollBar.AlwaysOn:ScrollBar.AlwaysOff}
             RowLayout {
-                id:headerActions;objectName:"screenplayPrimaryActions";width:Math.max(0,headerViewport.contentWidth);spacing:4
+                id:headerActions;objectName:"screenplayPrimaryActions";width:Math.max(0, headerViewport.contentWidth - page.app.chromeInset);spacing:4
                 Label {objectName:"screenplayHeaderTitle";text:page.structureOnly?"结构":"剧本";font.pixelSize:22;font.bold:true;color:t.ink}
                 ComboBox {objectName:"screenplaySelector";enabled:!page.structureBusy;Layout.preferredWidth:180;Layout.minimumWidth:100;Layout.maximumWidth:240;Layout.fillWidth:true;font.pixelSize:12;model:page.workspace.screenplays||[];textRole:"title";currentIndex:Math.max(0,(page.workspace.screenplays||[]).findIndex(function(s){return s.id===page.screenplay.id}));onActivated:page.selectScreenplay(model[currentIndex].id)}
                 Button {objectName:"screenplayCreate";font.pixelSize:12;leftPadding:4;rightPadding:4;implicitWidth:contentItem.implicitWidth+8;text:"新建剧本";enabled:page.canCreateScreenplay;onClicked:createDialog.open()}
@@ -393,7 +393,6 @@ Item {
                 Button {objectName:"openStoryboard";visible:!page.structureOnly;text:"进入分镜";enabled:!!page.unit.id;onClicked:{page.captureSelection();app.goTo("storyboard")}}
                 Button {objectName:"screenplayCheck";font.pixelSize:12;leftPadding:4;rightPadding:4;implicitWidth:contentItem.implicitWidth+8;text:"检查";enabled:!!page.screenplay.id;onClicked:page.act("check_screenplay",{screenplay_id:page.screenplay.id})}
                 Button {objectName:"screenplayExport";font.pixelSize:12;leftPadding:4;rightPadding:4;implicitWidth:contentItem.implicitWidth+8;text:"编译 / 导出";enabled:!!page.screenplay.id;onClicked:{page.exportScreenplayId=page.screenplay.id;page.exportResult=({});page.act("compile_screenplay",{screenplay_id:page.exportScreenplayId,format:"html"})}}
-                WindowChrome { app: page.app }
             }
         }
         Label { visible:!!page.notice;text:page.notice;color:t.warn;wrapMode:Text.Wrap;Layout.fillWidth:true }

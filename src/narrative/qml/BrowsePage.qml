@@ -1017,6 +1017,7 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
+            Layout.rightMargin: page.app.chromeInset
             spacing: 8
 
             TextField {
@@ -1043,7 +1044,6 @@ Item {
                 flat: true
                 onClicked: page.load()
             }
-            WindowChrome { app: page.app }
         }
 
         RowLayout {

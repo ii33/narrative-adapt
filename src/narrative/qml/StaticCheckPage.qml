@@ -179,6 +179,7 @@ Item {
         spacing: 10
         RowLayout {
             Layout.fillWidth: true
+            Layout.rightMargin: page.app.chromeInset
             Label { text: "静态检查"; color: page.t.ink; font.pixelSize: 18; font.weight: Font.DemiBold }
             Item { Layout.fillWidth: true }
             BusyIndicator { running: page.running; visible: running; Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
@@ -188,7 +189,6 @@ Item {
                 enabled: !page.running && app.mode === "workspace"
                 onClicked: page.run()
             }
-            WindowChrome { app: page.app }
         }
         GroupBox {
             title: "按原文位置回退"

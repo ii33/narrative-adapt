@@ -77,12 +77,7 @@ Rectangle {
         SubmissionFeedback{state:contentSubmission}
 
         anchors.fill: parent; anchors.margins: 20; spacing: 12
-        RowLayout {
-            Layout.fillWidth: true
-            Label { text: "资产"; font.pixelSize: 22; font.bold: true; color: t.ink }
-            Item { Layout.fillWidth: true }
-            WindowChrome { app: page.app }
-        }
+        Label { text: "资产"; font.pixelSize: 22; font.bold: true; color: t.ink; Layout.rightMargin: page.app.chromeInset }
         TabBar {
             id:categoryTabs
             Layout.fillWidth: true
