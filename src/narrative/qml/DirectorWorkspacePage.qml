@@ -1,7 +1,6 @@
 // 三维预演台：整页承载 DirectorDesk 的构建产物。
-// 产物是 ES module，只能通过本地 http 打开；地址与下载落盘由 bridge.previsWorkspace() 给出。
-// 注意：WebEngine 的 QML import 只出现在 DirectorWorkspaceView.qml 里，
-// 由下面的 Loader 按需加载——否则没有 WebEngine 的环境连本页都解析不了。
+// 它自己的顶栏已由 CSS 隐藏，改由这里的一条工具条驱动（场景切换、保存、导出），
+// 窗口按钮与工具条同一行——不再单独占一行。
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -14,6 +13,9 @@ Item {
     property string reason: ""
     property bool loading: true
     property string lastNotice: ""
+    property var scenes: []
+    property string currentScene: ""
+    property bool ready: false
 
     function openWorkspace() {
         var info = bridge.previsWorkspace()
@@ -21,6 +23,50 @@ Item {
         reason = info.reason || ""
         workspaceUrl = info.url || ""
         loading = available
+    }
+
+    // 场景列表是它自己异步建出来的：注入完成时可能还是空的，过一会儿再看一次。
+    function scheduleSceneRefresh() {
+        refreshScenes()
+        sceneRetry.restart()
+    }
+
+    function refreshScenes() {
+        var loader = loaderItem.item
+        if (!loader) return
+        loader.runJavaScript("JSON.stringify(window.__narrativePrevis ? window.__narrativePrevis.scenes() : [])", function (raw) {
+            try { root.scenes = JSON.parse(raw || "[]") } catch (error) { root.scenes = [] }
+            currentScene = ""
+            root.refreshCurrent()
+        })
+    }
+
+    function refreshCurrent() {
+        var loader = loaderItem.item
+        if (!loader) return
+        loader.runJavaScript("window.__narrativePrevis ? window.__narrativePrevis.current() : ''", function (value) {
+            root.currentScene = value || ""
+        })
+    }
+
+    function selectScene(value) {
+        var loader = loaderItem.item
+        if (!loader) return
+        loader.runJavaScript("window.__narrativePrevis ? window.__narrativePrevis.select(" + JSON.stringify(value) + ") : false")
+        root.currentScene = value
+    }
+
+    function act(name) {
+        var loader = loaderItem.item
+        if (!loader) return
+        loader.runJavaScript("window.__narrativePrevis ? window.__narrativePrevis.act(" + JSON.stringify(name) + ") : false")
+    }
+
+    Timer {
+        id: sceneRetry
+        interval: 1500
+        repeat: false
+        onTriggered: root.refreshScenes()
     }
 
     Component.onCompleted: openWorkspace()
@@ -34,18 +80,88 @@ Item {
         anchors.fill: parent
         spacing: 0
 
+        // 工具条：场景切换 + 保存/导出，右侧同一行是窗口按钮。
+        Rectangle {
+            id: previsBar
+            objectName: "previsBar"
+            Layout.fillWidth: true
+            Layout.preferredHeight: 32
+            color: root.app.theme.paper
+            border.color: root.app.theme.line
+            border.width: 0
+
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                onPressed: root.app.startSystemMove()
+                onDoubleClicked: root.app.visibility === Window.Maximized
+                    ? root.app.showNormal() : root.app.showMaximized()
+            }
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 4
+                spacing: 6
+
+                ComboBox {
+                    objectName: "previsScene"
+                    implicitWidth: 220
+                    implicitHeight: 24
+                    font.pixelSize: 12
+                    model: root.scenes
+                    textRole: "label"
+                    valueRole: "value"
+                    currentIndex: root.scenes.findIndex(function (scene) { return scene.value === root.currentScene })
+                    displayText: root.scenes.length ? currentText : "（未加载）"
+                    enabled: root.scenes.length > 0
+                    onActivated: root.selectScene(model[currentIndex].value)
+                }
+                ToolButton {
+                    objectName: "previsSave"
+                    text: "保存"
+                    font.pixelSize: 12
+                    implicitHeight: 24
+                    enabled: root.ready
+                    onClicked: root.act("save")
+                }
+                ToolButton {
+                    objectName: "previsExport"
+                    text: "导出"
+                    font.pixelSize: 12
+                    implicitHeight: 24
+                    enabled: root.ready
+                    onClicked: root.act("export")
+                }
+                Item { Layout.fillWidth: true }
+            }
+
+            WindowControls {
+                id: controls
+                app: root.app
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.right: parent.right
+                anchors.rightMargin: 4
+            }
+        }
+
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: root.app.theme.paper
 
             Loader {
+                id: loaderItem
                 anchors.fill: parent
                 active: root.available && root.workspaceUrl.length > 0
                 source: "DirectorWorkspaceView.qml"
                 onLoaded: {
                     item.app = root.app
                     item.initialUrl = root.workspaceUrl
+                    item.onReady = function () {
+                        root.ready = true
+                        root.scheduleSceneRefresh()
+                    }
                 }
             }
 

@@ -32,6 +32,9 @@ ApplicationWindow {
     // 整张表被替换，所有绑定自动重算；页面只认令牌名，不认具体颜色。
     readonly property var theme: bridge.theme
 
+    // 右上角常驻着窗口按钮（最小化/最大化/关闭），页面顶部的右对齐控件要让开这条宽度。
+    readonly property int chromeRightInset: 104
+
     // 主框构：紧凑（默认，各区域共边）或岛屿（各区域浮成独立卡片，卡片间留缝）。
     // 岛屿只是加一层留白与圆角：所有 inset 在紧凑模式下都是 0，渲染与改动前一致。
     readonly property bool islandsMode: bridge.layoutMode === "islands"

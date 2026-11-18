@@ -1017,6 +1017,7 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
+            Layout.rightMargin: app.chromeRightInset
             spacing: 8
 
             TextField {

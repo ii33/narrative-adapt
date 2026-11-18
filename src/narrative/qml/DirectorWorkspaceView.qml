@@ -9,18 +9,19 @@ WebEngineView {
     property var app
     property string initialUrl: ""
     property bool offline: false
-    // 主题令牌变化（深浅切换）时重新注入：app.theme 是 bridge.theme 的绑定。
-    readonly property string themeInk: app && app.theme ? app.theme.ink : ''
+    // 页面就绪（脚本注入完成）后回调：工具条据此拉场景列表。
+    property var onReady: null
 
     url: initialUrl
     backgroundColor: "#101620"
 
-    // 换肤：把它的中性灰映射到本项目令牌。只改颜色不改结构，
-    // 3D 视口里的画面不染色——用户要靠它判断光线。
+    // 换肤：把它的中性灰映射到本项目令牌，并注入驱动它的那一小段接口。
     function applyTheme() {
         var script = bridge.previsThemeScript()
         if (script.length > 0)
-            runJavaScript(script)
+            runJavaScript(script, function () {
+                if (view.onReady !== null) view.onReady()
+            })
     }
 
     onLoadingChanged: function(request) {
@@ -31,6 +32,4 @@ WebEngineView {
             applyTheme()
         }
     }
-
-    onThemeInkChanged: applyTheme()
 }

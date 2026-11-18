@@ -352,6 +352,7 @@ Item {
         spacing: 7
         RowLayout {
             Layout.fillWidth: true
+            Layout.rightMargin: desk.app.chromeRightInset
             Label { text: desk.directorOnly?"导演台":"分镜稿"; font.pixelSize: 21; font.bold: true; color:desk.t.ink }
             ComboBox {
                 Layout.fillWidth: true

@@ -381,7 +381,7 @@ Item {
             flickableDirection:Flickable.HorizontalFlick;boundsBehavior:Flickable.StopAtBounds;clip:true
             ScrollBar.horizontal:ScrollBar{policy:headerViewport.contentWidth>headerViewport.width?ScrollBar.AlwaysOn:ScrollBar.AlwaysOff}
             RowLayout {
-                id:headerActions;objectName:"screenplayPrimaryActions";width:headerViewport.contentWidth;spacing:4
+                id:headerActions;objectName:"screenplayPrimaryActions";width:Math.max(0,headerViewport.contentWidth-app.chromeRightInset);spacing:4
                 Label {objectName:"screenplayHeaderTitle";text:page.structureOnly?"结构":"剧本";font.pixelSize:22;font.bold:true;color:t.ink}
                 ComboBox {objectName:"screenplaySelector";enabled:!page.structureBusy;Layout.preferredWidth:180;Layout.minimumWidth:100;Layout.maximumWidth:240;Layout.fillWidth:true;font.pixelSize:12;model:page.workspace.screenplays||[];textRole:"title";currentIndex:Math.max(0,(page.workspace.screenplays||[]).findIndex(function(s){return s.id===page.screenplay.id}));onActivated:page.selectScreenplay(model[currentIndex].id)}
                 Button {objectName:"screenplayCreate";font.pixelSize:12;leftPadding:4;rightPadding:4;implicitWidth:contentItem.implicitWidth+8;text:"新建剧本";enabled:page.canCreateScreenplay;onClicked:createDialog.open()}

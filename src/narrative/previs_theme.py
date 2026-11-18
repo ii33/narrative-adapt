@@ -105,14 +105,13 @@ _HIDE = """
 .application-menu { display: none !important; }
 /* 摘掉品牌与菜单后，顶栏还留着为两行准备的高度，上面就空出一条。
    这里把它收成一行的高度：内容自己撑开，不再预留。 */
-/* 它的整体布局是 grid，第一行（顶栏）写死 62px——这就是顶部那条空白的来源。
-   改成 auto，让顶栏按内容撑开；右边给常驻的窗口按钮留 118px。 */
-#app { grid-template-rows: auto minmax(320px, 1fr) var(--timeline-height, 233px) 27px !important; }
-/* padding 归零去掉顶部留白；右边留 118px 给常驻的窗口按钮。 */
-body .topbar { min-height: 0 !important; height: auto !important; padding: 4px 118px 4px 12px !important;
-               align-content: center !important; flex-wrap: wrap !important; }
-body .topbar > * { flex: 0 0 auto; }
-body .topbar .scene-switcher { margin-right: auto; }
+/* 它的顶栏折成两行、样式也与我们不同：整条藏掉，由我们自己的工具条驱动。
+   节点仍然留在 DOM 里（display:none 的按钮照样能 click），所以保存/导出照旧可用。 */
+/* 不能用 display:none：它是 grid 的子项，删掉会让后面的行整体上移一行。
+   压成 0 高、隐藏，格子还在，布局不错位。 */
+body .topbar { height: 0 !important; min-height: 0 !important; padding: 0 !important;
+               margin: 0 !important; border: none !important; overflow: hidden !important;
+               visibility: hidden !important; }
 """
 
 
@@ -126,6 +125,34 @@ def themed_css(dist: Path, dark: bool = True) -> str:
             continue
     chunks.append(_HIDE)
     return "\n".join(chunks)
+
+
+# 给我们的工具条用的小接口：列场景、切场景、点它自己的按钮。
+_API = """
+window.__narrativePrevis = {
+  scenes: function () {
+    const select = document.querySelector('#scene-switch');
+    return select ? Array.from(select.options).map(o => ({value: o.value, label: o.textContent})) : [];
+  },
+  current: function () {
+    const select = document.querySelector('#scene-switch');
+    return select ? select.value : '';
+  },
+  select: function (value) {
+    const select = document.querySelector('#scene-switch');
+    if (!select) return false;
+    select.value = value;
+    select.dispatchEvent(new Event('change', {bubbles: true}));
+    return true;
+  },
+  act: function (name) {
+    const button = document.querySelector('[data-act="' + name + '"]');
+    if (!button) return false;
+    button.click();
+    return true;
+  }
+};
+"""
 
 
 def inject_script(css: str) -> str:
@@ -144,6 +171,7 @@ def inject_script(css: str) -> str:
         "  style.id = 'narrative-theme';"
         f"  style.textContent = {json.dumps(css)};"
         "  document.head.appendChild(style);"
+        f"  {_API}"
         "  return 'ok';"
         "})();"
     )
