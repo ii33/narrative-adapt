@@ -16,6 +16,8 @@ ApplicationWindow {
     minimumWidth: theme.window_min_width
     minimumHeight: 680
     visible: true
+    // 不要系统标题栏：窗口外框由下面的 windowBar 自己提供（拖动 + 最小化/最大化/关闭）。
+    flags: Qt.Window | Qt.FramelessWindowHint
     title: mode === "workspace" && project.title
         ? project.title + " · 叙事图工作台" : "叙事图工作台"
     color: app.theme.paper
@@ -234,6 +236,61 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
+        // 窗口条：没有系统标题栏时，它负责拖动与窗口按钮。
+        Rectangle {
+            id: windowBar
+            objectName: "windowBar"
+            Layout.fillWidth: true
+            Layout.preferredHeight: 30
+            color: app.theme.paper
+
+            MouseArea {
+                anchors.fill: parent
+                // 左键按住任意空白处即可拖动；双击切换最大化。
+                acceptedButtons: Qt.LeftButton
+                onPressed: app.startSystemMove()
+                onDoubleClicked: app.visibility === Window.Maximized ? app.showNormal() : app.showMaximized()
+            }
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 4
+                spacing: 6
+                Label {
+                    text: app.mode === "workspace" && app.project.title ? app.project.title : "叙事图工作台"
+                    color: app.theme.muted
+                    font.pixelSize: 11
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+                Repeater {
+                    model: [
+                        {glyph: "—", hint: "最小化"},
+                        {glyph: "□", hint: "最大化"},
+                        {glyph: "✕", hint: "关闭"}
+                    ]
+                    delegate: Button {
+                        required property var modelData
+                        required property int index
+                        objectName: "windowControl" + index
+                        text: modelData.glyph
+                        flat: true
+                        font.pixelSize: 12
+                        implicitWidth: 34
+                        implicitHeight: 24
+                        ToolTip.visible: hovered
+                        ToolTip.text: modelData.hint
+                        onClicked: {
+                            if (index === 0) app.showMinimized()
+                            else if (index === 1) app.visibility === Window.Maximized ? app.showNormal() : app.showMaximized()
+                            else app.close()
+                        }
+                    }
+                }
+            }
+        }
+
         StackLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -412,6 +469,10 @@ ApplicationWindow {
                     spacing: 0
 
                     Rectangle {
+                        id: pageHeader
+                        objectName: "pageHeader"
+                        // 预演台整页给三维工作区，页面标题与工程路径不再占那一行。
+                        visible: app.currentPage !== "previs"
                         Layout.fillWidth: true
                         Layout.preferredHeight: 54
                         Layout.leftMargin: app.islandInset
@@ -566,6 +627,10 @@ ApplicationWindow {
         }
 
         Rectangle {
+            id: statusBar
+            objectName: "statusBar"
+            // 预演页把这一行也让给三维工作区；错误与提示仍会在页内显示。
+            visible: app.currentPage !== "previs"
             Layout.fillWidth: true
             Layout.preferredHeight: 30 + (app.islandsMode ? app.theme.island_gap : 0)
             // 卡片同样画在内层：岛屿模式下状态栏也浮起来，紧凑模式贴边即原样。

@@ -1212,10 +1212,16 @@ class NativeBridge(QObject):
 
         只改颜色不改结构；3D 视口里的画面不染色（用户要靠它判断光线）。
         """
-        from . import previs_theme
-        from . import theme as theme_module
+        from . import previs_theme, previs_workspace
 
-        return previs_theme.inject_script(previs_theme.theme_css(theme_module.tokens(True)))
+        workspace = self._project_path.parent if self._project_path is not None else None
+        dist = previs_workspace.dist_dir(workspace)
+        if dist is None:
+            return ""
+        if getattr(self, "_previs_theme_cache", None) is None or self._previs_theme_dist != dist:
+            self._previs_theme_cache = previs_theme.inject_script(previs_theme.themed_css(dist))
+            self._previs_theme_dist = dist
+        return self._previs_theme_cache
 
     def _previs_download_dir(self) -> Path:
         base = self._project_path.parent if self._project_path is not None else Path.cwd() / "data"
