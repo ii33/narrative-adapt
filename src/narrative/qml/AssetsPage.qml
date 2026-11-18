@@ -77,7 +77,12 @@ Rectangle {
         SubmissionFeedback{state:contentSubmission}
 
         anchors.fill: parent; anchors.margins: 20; spacing: 12
-        Label { text: "资产"; font.pixelSize: 22; font.bold: true; color: t.ink }
+        RowLayout {
+            Layout.fillWidth: true
+            Label { text: "资产"; font.pixelSize: 22; font.bold: true; color: t.ink }
+            Item { Layout.fillWidth: true }
+            WindowChrome { app: page.app }
+        }
         TabBar {
             id:categoryTabs
             Layout.fillWidth: true
@@ -95,8 +100,6 @@ Rectangle {
             Layout.fillWidth:true
             Label {text:"资料域";color:t.muted}
             ComboBox {id:assetDomain;objectName:"assetDomainPicker";model:["改编","提取"];onActivated:{page.domain=currentIndex===1?"extraction":"adaptation";page.nodeId="";page.moment="";page.editing=false;page.reload()}}
-            Item { Layout.fillWidth: true }
-            WindowControls { app: page.app }
         }
         RowLayout {
             visible: page.category !== "material"; Layout.fillWidth: true

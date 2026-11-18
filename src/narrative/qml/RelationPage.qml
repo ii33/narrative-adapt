@@ -283,7 +283,7 @@ Item {
                 Layout.maximumWidth: 320
             }
             Item { Layout.fillWidth: true }
-            WindowControls { app: page.app }
+            WindowChrome { app: page.app }
         }
 
         Flow {

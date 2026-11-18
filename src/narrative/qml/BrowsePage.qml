@@ -1043,7 +1043,7 @@ Item {
                 flat: true
                 onClicked: page.load()
             }
-            WindowControls { app: page.app }
+            WindowChrome { app: page.app }
         }
 
         RowLayout {

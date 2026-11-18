@@ -393,7 +393,7 @@ Item {
                 Button {objectName:"openStoryboard";visible:!page.structureOnly;text:"进入分镜";enabled:!!page.unit.id;onClicked:{page.captureSelection();app.goTo("storyboard")}}
                 Button {objectName:"screenplayCheck";font.pixelSize:12;leftPadding:4;rightPadding:4;implicitWidth:contentItem.implicitWidth+8;text:"检查";enabled:!!page.screenplay.id;onClicked:page.act("check_screenplay",{screenplay_id:page.screenplay.id})}
                 Button {objectName:"screenplayExport";font.pixelSize:12;leftPadding:4;rightPadding:4;implicitWidth:contentItem.implicitWidth+8;text:"编译 / 导出";enabled:!!page.screenplay.id;onClicked:{page.exportScreenplayId=page.screenplay.id;page.exportResult=({});page.act("compile_screenplay",{screenplay_id:page.exportScreenplayId,format:"html"})}}
-                WindowControls { app: page.app }
+                WindowChrome { app: page.app }
             }
         }
         Label { visible:!!page.notice;text:page.notice;color:t.warn;wrapMode:Text.Wrap;Layout.fillWidth:true }

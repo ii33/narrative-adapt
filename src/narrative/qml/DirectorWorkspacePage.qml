@@ -132,7 +132,7 @@ Item {
                 Item { Layout.fillWidth: true }
             }
 
-            WindowControls {
+            WindowChrome {
                 id: controls
                 app: root.app
                 anchors.verticalCenter: parent.verticalCenter

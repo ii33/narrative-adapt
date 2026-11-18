@@ -370,7 +370,7 @@ Item {
             }
             ToolButton { objectName:"storyboardImageUsageTips"; text:"生图技巧"; onClicked:usageTips.showTips() }
             ToolButton { text:"刷新"; enabled:!desk.busy; onClicked:desk.loadScreenplay(desk.app.screenplayId) }
-            WindowControls { app: desk.app }
+            WindowChrome { app: desk.app }
         }
         Label { visible:!!desk.message; text:desk.message; wrapMode:Text.Wrap; color:desk.t.warn; Layout.fillWidth:true }
         Label { visible:!desk.scenes.length; text:"先在剧本中创建场次，便可开始分镜。"; color:desk.t.muted }
