@@ -32,8 +32,6 @@ ApplicationWindow {
     // 整张表被替换，所有绑定自动重算；页面只认令牌名，不认具体颜色。
     readonly property var theme: bridge.theme
 
-    // 右上角常驻着窗口按钮（最小化/最大化/关闭），页面顶部的右对齐控件要让开这条宽度。
-    readonly property int chromeRightInset: 104
 
     // 主框构：紧凑（默认，各区域共边）或岛屿（各区域浮成独立卡片，卡片间留缝）。
     // 岛屿只是加一层留白与圆角：所有 inset 在紧凑模式下都是 0，渲染与改动前一致。
@@ -411,6 +409,38 @@ ApplicationWindow {
                             font.pixelSize: 10
                             elide: Text.ElideMiddle
                         }
+
+                        // 原来底部信息栏的那一行自检与版本号搬到这里：页面不占那一行，
+                        // 但「卡在等待」「低完整性」「构建身份」这些现场记录仍然看得见。
+                        Label {
+                            objectName: "statusLine"
+                            Layout.fillWidth: true
+                            visible: !app.navigationCollapsed
+                            elide: Text.ElideRight
+                            font.pixelSize: 10
+                            text: app.errorText.length > 0 ? app.errorText
+                                : app.notice.length > 0 ? app.notice
+                                : app.diagnosticLine
+                            color: app.errorText.length > 0 ? app.theme.bad : app.theme.muted
+                        }
+                        Label {
+                            objectName: "appVersionLabel"
+                            Layout.fillWidth: true
+                            visible: !app.navigationCollapsed
+                            text: bridge.appVersion
+                            color: app.theme.muted
+                            font.pixelSize: 10
+                            elide: Text.ElideMiddle
+                        }
+                        Label {
+                            objectName: "integrityWarningLabel"
+                            Layout.fillWidth: true
+                            visible: bridge.integrityWarning.length > 0 && !app.navigationCollapsed
+                            text: bridge.integrityWarning
+                            color: app.theme.warn
+                            font.pixelSize: 10
+                            wrapMode: Text.Wrap
+                        }
                     }
                 }
 
@@ -532,71 +562,6 @@ ApplicationWindow {
             }
         }
 
-        Rectangle {
-            id: statusBar
-            objectName: "statusBar"
-            // 预演页把这一行也让给三维工作区；错误与提示仍会在页内显示。
-            visible: app.currentPage !== "previs"
-            Layout.fillWidth: true
-            Layout.preferredHeight: 30 + (app.islandsMode ? app.theme.island_gap : 0)
-            // 卡片同样画在内层：岛屿模式下状态栏也浮起来，紧凑模式贴边即原样。
-            color: "transparent"
-            border.width: 0
-
-            Rectangle {
-                id: statusCard
-                anchors.fill: parent
-                anchors.margins: app.islandInset
-                color: app.theme.card
-                border.color: app.theme.line
-                radius: app.islandRadius
-            }
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: app.islandInset + 20
-                anchors.rightMargin: app.islandInset + 20
-                Label {
-                    objectName: "statusLine"
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                    font.pixelSize: 11
-                    // 常驻一行自检：出错/提示优先，否则说明界面自己以为在等什么。
-                    // 卡在「处理中」时，这一行就是现场记录。
-                    text: app.errorText.length > 0 ? app.errorText
-                        : app.notice.length > 0 ? app.notice
-                        : app.diagnosticLine
-                    color: app.errorText.length > 0 ? app.theme.bad : app.theme.muted
-                }
-                // 低完整性/降级运行的常驻警告：只在真的低完整性时出现（正常会话里是空串，
-                // 不占宽度也不改布局）。它会一直挂着，直到进程换成中完整性启起来——
-                // 「点一下就消失」的提示救不了「改动根本没写进用户目录」这件事。
-                Label {
-                    objectName: "integrityWarningLabel"
-                    visible: bridge.integrityWarning.length > 0
-                    text: bridge.integrityWarning
-                    color: app.theme.warn
-                    font.pixelSize: 10
-                    elide: Text.ElideRight
-                    Layout.maximumWidth: 320
-                }
-                // 构建身份：截图与 bug 报告靠这一行指回具体代码（真源 narrative/version.py）。
-                Label {
-                    objectName: "appVersionLabel"
-                    text: bridge.appVersion
-                    color: app.theme.muted
-                    font.pixelSize: 10
-                    elide: Text.ElideRight
-                    Layout.maximumWidth: 300
-                }
-                Button {
-                    visible: app.errorText.length > 0 || app.notice.length > 0
-                    text: "清除"
-                    flat: true
-                    onClicked: { app.errorText = ""; app.notice = "" }
-                }
-            }
-        }
     }
 
 
@@ -616,26 +581,6 @@ ApplicationWindow {
     Component { id: staticCheckPageComponent; StaticCheckPage { app: windowRoot } }
     Component { id: projectSettingsPageComponent; ProjectSettingsPage { app: windowRoot } }
 
-
-    // 窗口按钮不独占一行：浮在右上角，压在内容之上。
-    // 顶部 8px 的透明条负责拖动（看不见，也不占布局高度）。
-    Item {
-        objectName: "windowChromeOverlay"
-        anchors.fill: parent
-        // 预演页的工具条里已经有窗口按钮了，这里再画一套就成了双份。
-        visible: app.mode === "workspace" && app.currentPage !== "previs"
-        z: 1000
-
-        // 常驻在右上角：不悬浮、不隐藏。页面内容右侧留出这条宽度，
-        // 所以它不会压住页面自己的按钮（预演页由 CSS 给顶栏留同样的右边距）。
-        WindowControls {
-            app: app
-            anchors.top: parent.top
-            anchors.right: parent.right
-            anchors.topMargin: 13
-            anchors.rightMargin: 6
-        }
-    }
 
     // 启动页的窗口按钮与拖动区：浮在内容之上，不占布局（放在 StackLayout 里会被当成新的一页）。
     Item {

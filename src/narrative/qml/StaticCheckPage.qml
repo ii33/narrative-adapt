@@ -188,6 +188,7 @@ Item {
                 enabled: !page.running && app.mode === "workspace"
                 onClicked: page.run()
             }
+            WindowControls { app: page.app }
         }
         GroupBox {
             title: "按原文位置回退"

@@ -86,9 +86,8 @@ Item {
             objectName: "previsBar"
             Layout.fillWidth: true
             Layout.preferredHeight: 32
-            color: root.app.theme.paper
-            border.color: root.app.theme.line
-            border.width: 0
+            // 透明：底色就是窗口底色，不另调一个颜色，避免和窗口差一档。
+            color: "transparent"
 
             DragHandle {
                 app: root.app

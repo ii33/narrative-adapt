@@ -95,6 +95,8 @@ Rectangle {
             Layout.fillWidth:true
             Label {text:"资料域";color:t.muted}
             ComboBox {id:assetDomain;objectName:"assetDomainPicker";model:["改编","提取"];onActivated:{page.domain=currentIndex===1?"extraction":"adaptation";page.nodeId="";page.moment="";page.editing=false;page.reload()}}
+            Item { Layout.fillWidth: true }
+            WindowControls { app: page.app }
         }
         RowLayout {
             visible: page.category !== "material"; Layout.fillWidth: true

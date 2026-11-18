@@ -164,7 +164,12 @@ Item {
 
             width: parent.width
             spacing: 12
-            Label { text:"工程设置"; font.pixelSize:18; font.weight:Font.DemiBold; color:page.t.ink }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text:"工程设置"; font.pixelSize:18; font.weight:Font.DemiBold; color:page.t.ink }
+                Item { Layout.fillWidth: true }
+                WindowControls { app: page.app }
+            }
             Label { text:"提取粒度与模型配置仅用于当前工程，不修改全局设置。"; wrapMode:Text.Wrap; Layout.fillWidth:true; color:page.t.muted }
             RowLayout {
                 Layout.fillWidth:true

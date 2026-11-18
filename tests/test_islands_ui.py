@@ -20,7 +20,8 @@ def _rects(window, names):
     return found
 
 
-KEY_AREAS = ["workspaceColumns", "applicationNavigation", "workspaceColumnHandle", "statusLine"]
+# 底部状态栏已删除（版本与自检搬进导航底部），这里只守护主框构的三块区域。
+KEY_AREAS = ["workspaceColumns", "applicationNavigation", "workspaceColumnHandle"]
 
 
 def test_layout_mode_switches_live_and_remembers_choice(tmp_path, monkeypatch):

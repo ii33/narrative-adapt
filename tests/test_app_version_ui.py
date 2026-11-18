@@ -1,7 +1,7 @@
-"""版本号在真实界面上的露出：状态栏（唯一一处）。
+"""版本号在真实界面上的露出：导航底部（唯一一处）。
 
-离屏跑：状态栏在两种模式下都在（它不在页面 StackLayout 里），启动页只有
-launcher 模式下可见。断言文本与 ``bridge.appVersion`` 完全一致，而不是只看
+底部状态栏已经删掉，版本号与那一行自检搬到了左侧导航的底部，所以它只在工作区
+（有工程打开）里可见。断言文本与 ``bridge.appVersion`` 完全一致，而不是只看
 「有个标签」——版本串对不上，截图和 bug 报告就指不回具体代码。启动页不许再自带
 一份（那会让同一句话在屏幕上出现两次）。
 """
@@ -25,8 +25,10 @@ def test_status_bar_shows_the_same_version_as_the_bridge(tmp_path, monkeypatch):
     with _shell(tmp_path, monkeypatch) as ui:
         ui["settle"]()
         window, bridge = ui["window"], ui["bridge"]
+        window.setProperty("mode", "workspace")
+        ui["settle"]()
         label = window.findChild(object, "appVersionLabel")
-        assert label is not None, "状态栏没有版本标签"
+        assert label is not None, "导航底部没有版本标签"
         ui["settle"](lambda: label.property("text") == bridge.appVersion)
         assert label.property("visible") is True
         assert label.property("text") == bridge.appVersion

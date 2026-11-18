@@ -462,6 +462,7 @@ Item {
                     }
                 }
             }
+            WindowControls { app: page.app; Layout.alignment: Qt.AlignTop }
         }
     }
 }
