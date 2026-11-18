@@ -90,12 +90,9 @@ Item {
             border.color: root.app.theme.line
             border.width: 0
 
-            MouseArea {
+            DragHandle {
+                app: root.app
                 anchors.fill: parent
-                acceptedButtons: Qt.LeftButton
-                onPressed: root.app.startSystemMove()
-                onDoubleClicked: root.app.visibility === Window.Maximized
-                    ? root.app.showNormal() : root.app.showMaximized()
             }
 
             RowLayout {

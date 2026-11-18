@@ -235,6 +235,18 @@ ApplicationWindow {
             + " error=" + (app.errorText || "-"))
     }
 
+    // 顶部拖动带：只接住"没人要"的点击——按钮、输入框自己会吃掉鼠标事件，
+    // 空白处的按下就落到这一层，于是整条顶部（不是 8px 窄条）都能拖窗口。
+    // 双击切换最大化；拖到屏幕顶部由系统贴边最大化（Aero Snap）。
+    DragHandle {
+        objectName: "dragBand"
+        app: app
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: 46
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -613,23 +625,13 @@ ApplicationWindow {
         visible: app.mode === "workspace"
         z: 1000
 
-        MouseArea {
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.right: parent.right
-            height: 8
-            acceptedButtons: Qt.LeftButton
-            onPressed: app.startSystemMove()
-            onDoubleClicked: app.visibility === Window.Maximized ? app.showNormal() : app.showMaximized()
-        }
-
         // 常驻在右上角：不悬浮、不隐藏。页面内容右侧留出这条宽度，
         // 所以它不会压住页面自己的按钮（预演页由 CSS 给顶栏留同样的右边距）。
         WindowControls {
             app: app
             anchors.top: parent.top
             anchors.right: parent.right
-            anchors.topMargin: 4
+            anchors.topMargin: 13
             anchors.rightMargin: 6
         }
     }
@@ -641,14 +643,12 @@ ApplicationWindow {
         anchors.fill: parent
         z: 500
 
-        MouseArea {
+        DragHandle {
+            app: app
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.right: parent.right
             height: 44
-            acceptedButtons: Qt.LeftButton
-            onPressed: app.startSystemMove()
-            onDoubleClicked: app.visibility === Window.Maximized ? app.showNormal() : app.showMaximized()
         }
         WindowControls {
             app: app
