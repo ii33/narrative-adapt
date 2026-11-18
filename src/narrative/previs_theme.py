@@ -105,8 +105,12 @@ _HIDE = """
 .application-menu { display: none !important; }
 /* 摘掉品牌与菜单后，顶栏还留着为两行准备的高度，上面就空出一条。
    这里把它收成一行的高度：内容自己撑开，不再预留。 */
-body .topbar { min-height: 0 !important; height: auto !important; padding: 6px 12px !important;
-                align-content: center !important; flex-wrap: wrap !important; }
+/* 它的整体布局是 grid，第一行（顶栏）写死 62px——这就是顶部那条空白的来源。
+   改成 auto，让顶栏按内容撑开；右边给常驻的窗口按钮留 118px。 */
+#app { grid-template-rows: auto minmax(320px, 1fr) var(--timeline-height, 233px) 27px !important; }
+/* padding 归零去掉顶部留白；右边留 118px 给常驻的窗口按钮。 */
+body .topbar { min-height: 0 !important; height: auto !important; padding: 4px 118px 4px 12px !important;
+               align-content: center !important; flex-wrap: wrap !important; }
 body .topbar > * { flex: 0 0 auto; }
 body .topbar .scene-switcher { margin-right: auto; }
 """

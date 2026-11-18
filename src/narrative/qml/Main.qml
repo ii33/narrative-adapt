@@ -620,23 +620,14 @@ ApplicationWindow {
             onDoubleClicked: app.visibility === Window.Maximized ? app.showNormal() : app.showMaximized()
         }
 
-        // 平时不挡内容：鼠标移到右上角才浮出来。这样既不占一行，
-        // 也不会压住页面自己的右上角按钮（比如分镜稿的「刷新」）。
-        MouseArea {
-            id: chromeHotZone
-            anchors.top: parent.top
-            anchors.right: parent.right
-            width: 132
-            height: 34
-            hoverEnabled: true
-        }
+        // 常驻在右上角：不悬浮、不隐藏。页面内容右侧留出这条宽度，
+        // 所以它不会压住页面自己的按钮（预演页由 CSS 给顶栏留同样的右边距）。
         WindowControls {
             app: app
             anchors.top: parent.top
             anchors.right: parent.right
-            anchors.topMargin: 5
+            anchors.topMargin: 4
             anchors.rightMargin: 6
-            visible: chromeHotZone.containsMouse
         }
     }
 
