@@ -94,6 +94,7 @@ ApplicationWindow {
         {key: "screenplay", label: "剧本", hint: "选段、场表与正文"},
         {key: "storyboard", label: "分镜稿", hint: "分镜文字、图格与导出"},
         {key: "director", label: "导演台", hint: "调度、机位与动态预演"},
+        {key: "previs", label: "预演", hint: "三维预演工作区"},
         {key: "screenplay_structure", label: "结构", hint: "集、幕与段落"},
         {key: "static_check", label: "静态检查", hint: "约束与问题定位"},
         {key: "project_settings", label: "工程设置", hint: "提取粒度与模型"}
@@ -495,6 +496,7 @@ ApplicationWindow {
                         Loader { active: app.pageVisited("screenplay") || app.currentPage === "screenplay"; sourceComponent: screenplayPageComponent }
                         Loader { active: app.pageVisited("storyboard") || app.currentPage === "storyboard"; sourceComponent: storyboardPageComponent }
                         Loader { active: app.pageVisited("director") || app.currentPage === "director"; sourceComponent: directorPageComponent }
+                        Loader { active: app.pageVisited("previs") || app.currentPage === "previs"; sourceComponent: previsPageComponent }
                         Loader { active: app.pageVisited("screenplay_structure") || app.currentPage === "screenplay_structure"; sourceComponent: structurePageComponent }
                         Loader { active: app.pageVisited("static_check") || app.currentPage === "static_check"; sourceComponent: staticCheckPageComponent }
                         Loader { active: app.pageVisited("project_settings") || app.currentPage === "project_settings"; sourceComponent: projectSettingsPageComponent }
@@ -636,6 +638,9 @@ ApplicationWindow {
     Component { id: screenplayPageComponent; ScreenplayPage { app: windowRoot } }
     Component { id: storyboardPageComponent; StoryboardPage { app: windowRoot } }
     Component { id: directorPageComponent; DirectorDeskPage { app: windowRoot } }
+    // 预演页用 source 懒加载：QtWebEngineQuick 只在那一个文件里 import，
+    // 没有 WebEngine 的环境下这里只会是 Error 状态，不影响其它页面。
+    Component { id: previsPageComponent; DirectorWorkspacePage { app: windowRoot } }
     Component { id: structurePageComponent; ScreenplayStructurePage { app: windowRoot } }
     Component { id: staticCheckPageComponent; StaticCheckPage { app: windowRoot } }
     Component { id: projectSettingsPageComponent; ProjectSettingsPage { app: windowRoot } }

@@ -95,6 +95,15 @@ def main(argv: list[str] | None = None) -> int:
 
     from .native_bridge import NativeBridge
 
+    # 三维预演台用 QtWebEngine 承载；它必须在 QGuiApplication 之前初始化。
+    # 没装 WebEngine 时它自己会失败，界面按“预演台不可用”处理，不影响其他页面。
+    try:
+        from PySide6.QtWebEngineQuick import QtWebEngineQuick
+
+        QtWebEngineQuick.initialize()
+    except Exception:  # noqa: BLE001 - 缺模块就是缺模块
+        pass
+
     app = cast(QGuiApplication, QGuiApplication.instance() or QGuiApplication([sys.argv[0]]))
     if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
         # The offscreen Qt plugin may expose no system fonts on Windows.

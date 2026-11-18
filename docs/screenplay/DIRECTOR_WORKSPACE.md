@@ -53,6 +53,30 @@ QWebEngineProfile.downloadRequested
 | 视频反推动作 | 构建时剔除（依赖非商业模型） |
 | 插件 | 隐藏 |
 
+## 三·五、产物从哪来、怎么构建
+
+界面里的「预演」页按顺序找产物：
+
+```
+NARRATIVE_PREVIS_DIST        环境变量，指向构建输出（开发与打包都可）
+<工程目录>/previs-web/        随工程分发
+.runtime/vendor/director-desk/dist   开发期构建输出（当前用它）
+```
+
+构建（Windows，本项目实测可用的步骤）：
+
+```bash
+git clone --depth 1 https://github.com/mangfufu/director-desk.git .runtime/vendor/director-desk
+cd .runtime/vendor/director-desk
+pnpm install --no-frozen-lockfile     # 首次会提示忽略构建脚本
+pnpm rebuild esbuild                  # esbuild 的二进制必须装，否则 vite 起不来
+pnpm exec vite build                  # 产出 dist/（约 6.2 MB）
+```
+
+注意两点：`node` 要在 PATH 上（pnpm exec 会调用它）；产物的 QML 承载模块在 PySide6 6.12 里叫
+**`QtWebEngine`**（不是 `QtWebEngineQuick`），且 `QtWebEngineQuick.initialize()` 必须在
+`QGuiApplication` 之前调用。
+
 ## 四、数据契约
 
 - 场景（对象、走位、机位、时间轴）以**它的工程文件**为准，放在 `previs/<unit_id>/project.json`；

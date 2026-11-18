@@ -1186,6 +1186,53 @@ class NativeBridge(QObject):
             return
         self._project_task("storyboard", work)
 
+    # ---- 三维预演台（DirectorDesk 构建产物） -------------------------------------
+    # 产物是 ES module，只能走本地 http；这里给出地址并接管它的“保存/导出”下载。
+    @Slot(result="QVariantMap")
+    def previsWorkspace(self) -> dict:
+        from . import previs_workspace
+
+        workspace = self._project_path.parent if self._project_path is not None else None
+        ok, detail = previs_workspace.availability(workspace)
+        if not ok:
+            return {"available": False, "reason": detail, "url": ""}
+        try:
+            server = previs_workspace.shared_server(workspace)
+        except OSError as exc:
+            return {"available": False, "reason": f"预演台服务启动失败：{exc}", "url": ""}
+        if server is None:
+            return {"available": False, "reason": detail, "url": ""}
+        self._install_previs_downloads()
+        return {"available": True, "reason": "", "url": server.url,
+                "download_dir": str(self._previs_download_dir())}
+
+    def _previs_download_dir(self) -> Path:
+        base = self._project_path.parent if self._project_path is not None else Path.cwd() / "data"
+        target = base / "previs"
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+
+    def _install_previs_downloads(self) -> None:
+        """把它的浏览器下载落到工程目录：不伪造桌面桥，也不弹系统保存对话框。"""
+        if getattr(self, "_previs_downloads_ready", False):
+            return
+        try:
+            from PySide6.QtWebEngineCore import QWebEngineProfile
+        except Exception:  # noqa: BLE001 - 没有 WebEngine 就没有这一步
+            return
+        profile = QWebEngineProfile.defaultProfile()
+
+        def accept(item) -> None:
+            directory = self._previs_download_dir()
+            item.setDownloadDirectory(str(directory))
+            name = item.suggestedFileName() or "download.bin"
+            item.setDownloadFileName(name)
+            item.accept()
+            self.noticeRaised.emit(f"预演台已保存：{directory / name}")
+
+        profile.downloadRequested.connect(accept)
+        self._previs_downloads_ready = True
+
     @Slot(str, str, str)
     def saveScreenplayExport(self, screenplay_id: str, export_format: str, path: str) -> None:
         def work(ops):
