@@ -119,9 +119,15 @@ def themed_css(dist: Path, dark: bool = True) -> str:
 
 
 def inject_script(css: str) -> str:
-    """在页面里插一段 <style>；重复注入时替换旧的，不叠加。"""
+    """在页面里插一段 <style>，并把顶栏里我们不要的节点直接摘掉。
+
+    只靠 `display:none` 会在顶栏里留下一行空白（它按 flex 换行布局），
+    摘掉节点才会真正收起来。
+    """
     return (
         "(function () {"
+        "  document.querySelectorAll('.topbar .brand, .topbar .version, .application-menu')"
+        "    .forEach(function (node) { node.remove(); });"
         "  const old = document.getElementById('narrative-theme');"
         "  if (old) old.remove();"
         "  const style = document.createElement('style');"

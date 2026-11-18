@@ -414,19 +414,20 @@ ApplicationWindow {
                     // 页面这一列吃掉剩下的宽度：协作者展开时只让出它自己的 360。
                     spacing: 0
 
+                    // 顶部只留一条最薄的窗口条：不是标题行，没有页面名与工程路径。
+                    // 它负责拖动、协作者开关与窗口按钮；内容页各自画自己的标题。
                     Rectangle {
                         id: pageHeader
                         objectName: "pageHeader"
-                        // 预演台整页给三维工作区，页面标题与工程路径不再占那一行。
                         visible: app.currentPage !== "previs"
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 54
+                        Layout.preferredHeight: 28
                         Layout.leftMargin: app.islandInset
                         Layout.rightMargin: app.islandInset
                         Layout.topMargin: app.islandInset
-                        color: app.theme.card
+                        color: app.theme.paper
                         border.color: app.theme.line
-                        radius: app.islandRadius
+                        border.width: 0
 
                         MouseArea {
                             anchors.fill: parent
@@ -437,40 +438,23 @@ ApplicationWindow {
 
                         RowLayout {
                             anchors.fill: parent
-                            anchors.leftMargin: 20
-                            anchors.rightMargin: 20
-                            spacing: 12
+                            anchors.leftMargin: 4
+                            anchors.rightMargin: 4
+                            spacing: 6
 
-                            Label {
-                                text: {
-                                    for (var i = 0; i < app.navItems.length; ++i)
-                                        if (app.navItems[i].key === app.currentPage)
-                                            return app.navItems[i].label
-                                    return ""
-                                }
-                                font.pixelSize: 17
-                                font.weight: Font.DemiBold
-                                color: app.theme.ink
-                            }
-                            Label {
-                                text: project.path || ""
-                                color: app.theme.muted
-                                font.pixelSize: 11
-                                elide: Text.ElideMiddle
-                                Layout.maximumWidth: 380
-                            }
                             Item { Layout.fillWidth: true }
                             Label {
                                 visible: app.busy
                                 text: "处理中…"
                                 color: app.theme.accent
-                                font.pixelSize: 12
+                                font.pixelSize: 11
                             }
                             Button {
                                 objectName: "assistantToggle"
                                 text: app.assistantOpen ? "收起协作者" : "协作者"
                                 flat: true
                                 font.pixelSize: 11
+                                implicitHeight: 22
                                 onClicked: app.assistantOpen = !app.assistantOpen
                             }
                             WindowControls { app: app }

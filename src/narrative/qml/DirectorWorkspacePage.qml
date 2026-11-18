@@ -34,13 +34,13 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // 预演页自己的顶栏：返回、页名、拖动区、窗口按钮。
-        // 没有独立的系统标题栏，也没有单独的窗口条——按钮就长在这一行里。
+        // 预演页只留一条最薄的窗口条：拖动区 + 窗口按钮，没有标题也没有返回箭头
+        // （导航在左侧，回分镜稿点导航即可）。
         Rectangle {
             id: previsBar
             objectName: "previsBar"
             Layout.fillWidth: true
-            Layout.preferredHeight: 32
+            Layout.preferredHeight: 26
             color: root.app.theme.paper
 
             MouseArea {
@@ -54,41 +54,12 @@ Item {
                     ? root.app.showNormal() : root.app.showMaximized()
             }
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 6
-                anchors.rightMargin: 6
-                spacing: 8
-
-                ToolButton {
-                    objectName: "previsBack"
-                    text: "←"
-                    font.pixelSize: 15
-                    onClicked: root.app.goTo("storyboard")
-                    ToolTip.visible: hovered
-                    ToolTip.text: "回到分镜稿"
-                }
-                NavigationIcon {
-                    name: "previs"
-                    ink: root.app.theme.ink
-                    width: 18
-                    height: 18
-                }
-                Label {
-                    text: "预演"
-                    color: root.app.theme.ink
-                    font.pixelSize: 13
-                    font.weight: Font.DemiBold
-                }
-                Item { Layout.fillWidth: true }
-            }
-
             WindowControls {
                 id: controls
                 app: root.app
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.right: parent.right
-                anchors.rightMargin: 6
+                anchors.rightMargin: 4
             }
         }
 
