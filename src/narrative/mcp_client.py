@@ -1,11 +1,17 @@
 """MCP 客户端：把外部 MCP 服务器的工具并进本地工具表。
 
-协作者要能用「别人的工具」：这里起子进程、说 newline-delimited JSON-RPC 2.0
-（MCP 的 stdio 传输），把远端 ``tools/list`` 变成我们自己的 ``Tool``。
+协作者要能用「别人的工具」：这里连上一台远端 MCP 服务器，把 ``tools/list``
+变成我们自己的 ``Tool``。两种传输各有一个会话类，对外方法完全一致：
+
+- ``McpSession``：stdio。起子进程，说 newline-delimited JSON-RPC 2.0。
+- ``HttpSession``：Streamable HTTP（MCP 2025-06-18）。一个端点 URL，POST 一条消息，
+  响应可能是一整条 JSON，也可能是一条 SSE 流。
+
 ``mcp_server.py`` 是反方向的另一件事：把本工程的工具递给外部模型。
 
 不引第三方 SDK 的理由：只需要 initialize / tools.list / tools.call / ping 四件事，
-标准库够用；少一个依赖就少一份版本纠缠与离线安装风险。
+标准库够用（http 传输用 ``urllib.request``，SSE 自己按行解）；少一个依赖就少一份
+版本纠缠与离线安装风险。
 
 配置是全局的（跨工程共用），所以落在用户目录，而不是某个工程里。
 """
@@ -19,6 +25,10 @@ import re
 import shutil
 import subprocess
 import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,6 +49,19 @@ CLOSE_GRACE_SECONDS = 2.0
 TOOL_PREFIX = "mcp__"
 SCOPE = "mcp"
 TRANSPORTS = ("stdio", "http")
+
+# -- http 传输的常量 --------------------------------------------------------
+HTTP_SCHEMES = ("http", "https")
+MIME_JSON = "application/json"
+MIME_SSE = "text/event-stream"
+# 规范要求客户端同时接受这两种：服务器可以就为这一条消息开一条 SSE 流。
+ACCEPT_HEADER = f"{MIME_JSON}, {MIME_SSE}"
+# 头部名大小写不敏感，这里统一用规范里的写法；urllib 会按它自己的习惯改写大小写。
+SESSION_HEADER = "Mcp-Session-Id"
+PROTOCOL_HEADER = "MCP-Protocol-Version"
+# 错误消息里带上服务器原话，但不许把一大坨 HTML 整段塞进界面。
+SNIPPET_LIMIT = 200
+
 # 工具名只允许 [A-Za-z0-9_]：别的字符一律折成下划线，避免模型端按名字拼错。
 _NAMESPACE = re.compile(r"[^A-Za-z0-9_]")
 
@@ -54,11 +77,30 @@ class McpError(RuntimeError):
 class McpRpcError(McpError):
     """远端用 JSON-RPC error 回了一个请求。"""
 
-    def __init__(self, method: str, error: Any):
+    def __init__(self, method: str, error: Any, *, prefix: str = ""):
         body = error if isinstance(error, dict) else {"message": error}
         self.code = body.get("code")
         self.rpc_message = str(body.get("message") or "没有说明")
-        super().__init__(f"{method} 返回错误 {self.code}：{self.rpc_message}")
+        # prefix 给传输层补上下文用（http 会带上服务器名）：这条消息也会直接进日志与
+        # 界面，光有一句「tools/call 返回错误」看不出是哪台服务器说的。
+        super().__init__(f"{prefix}{method} 返回错误 {self.code}：{self.rpc_message}")
+
+
+def normalize_url(url: Any) -> str:
+    """校验并规整 http 端点地址，不合格就抛 ValueError（消息直接给人看）。
+
+    http 服务器只有一个身份：那个 URL。写错了必须当场指出来——等到握手时才报
+    「连接失败」，用户分不清是地址写错还是服务器没开。
+    """
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("缺少 url（http 传输必须给出端点地址，例如 http://127.0.0.1:8765/mcp）")
+    text = url.strip()
+    parsed = urllib.parse.urlparse(text)
+    if parsed.scheme.lower() not in HTTP_SCHEMES:
+        raise ValueError(f"url 须以 http:// 或 https:// 开头，收到 {text!r}")
+    if not parsed.netloc:
+        raise ValueError(f"url 缺少主机名，收到 {text!r}")
+    return text
 
 
 @dataclass(frozen=True)
@@ -119,14 +161,19 @@ class McpServer:
         if not isinstance(cwd, str):
             raise McpConfigError(f"MCP 服务器 {name} 的 cwd 须为字符串")
         if transport == "http":
-            url = data.get("url")
-            if not isinstance(url, str) or not url.strip():
-                raise McpConfigError(f"MCP 服务器 {name} 用 http 传输但没有 url")
-            return cls(name=name, enabled=enabled, transport="http", url=url.strip(),
+            # 地址不合法的条目在「读配置」这一步就拒绝：面板要显示的是哪一项错了，
+            # 而不是等用户点了「测试连接」才看到一句连接失败。
+            try:
+                url = normalize_url(data.get("url"))
+            except ValueError as exc:
+                raise McpConfigError(
+                    f"MCP 配置{where}（服务器 {name}）的 http url 不对：{exc}") from exc
+            return cls(name=name, enabled=enabled, transport="http", url=url,
                        timeout=float(timeout))
         command = data.get("command")
         if not isinstance(command, str) or not command.strip():
-            raise McpConfigError(f"MCP 服务器 {name} 用 stdio 传输但没有 command")
+            raise McpConfigError(
+                f"MCP 配置{where}（服务器 {name}）用 stdio 传输但没有 command")
         return cls(name=name, enabled=enabled, transport="stdio", command=command.strip(),
                    args=tuple(args), env=dict(env), cwd=cwd, timeout=float(timeout))
 
@@ -280,10 +327,87 @@ def _cache_entry(remote: dict) -> dict:
     return entry
 
 
+# -- 会话：两种传输共用同一个协议层 -----------------------------------------
+
+
+class _SessionBase:
+    """两种传输共用的协议层：只说「我要什么」，怎么送出去交给子类的 request/notify。
+
+    这么分是为了让握手、翻页、ping 的语义只有一份实现：换传输不该顺带改掉
+    「怎么握手」「怎么跟着 nextCursor 翻页」这些和传输无关的行为。
+    真正的差异（起子进程 / POST 一个 URL）全在子类里。
+    """
+
+    server: McpServer
+    timeout: float
+    protocol_version: str | None
+    server_info: dict[str, Any]
+
+    def __init__(self, server: McpServer, *, timeout: float | None = None):
+        self.server = server
+        self.timeout = float(timeout if timeout is not None else server.timeout or DEFAULT_TIMEOUT)
+        self.protocol_version: str | None = None
+        self.server_info: dict[str, Any] = {}
+
+    # -- 子类各自实现：送一条请求出去 / 送一条通知出去 --
+
+    def request(self, method: str, params: dict | None = None, *,
+                timeout: float | None = None) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def notify(self, method: str, params: dict | None = None) -> None:
+        raise NotImplementedError
+
+    # -- 与传输无关的协议动作 --
+
+    def initialize(self) -> dict[str, Any]:
+        result = self.request("initialize", {
+            "protocolVersion": PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {"name": CLIENT_NAME, "version": version_number()},
+        })
+        # 服务器可以回一个它自己支持的版本（MCP 允许协商），记下来但不在这里发难：
+        # 真不兼容会在具体方法上报错，比在握手上凭版本号猜更准。
+        self.protocol_version = str(result.get("protocolVersion") or PROTOCOL_VERSION)
+        info = result.get("serverInfo")
+        self.server_info = dict(info) if isinstance(info, dict) else {}
+        # 钩子放在通知之前：http 的 initialized 通知本身就该带协商好的版本头。
+        self._mark_initialized()
+        self.notify("notifications/initialized")
+        return result
+
+    def _mark_initialized(self) -> None:
+        """握手成功、发 initialized 通知之前的钩子；stdio 没有要记的东西。"""
+
+    def list_tools(self, *, timeout: float | None = None) -> list[dict]:
+        tools: list[dict] = []
+        cursor: str | None = None
+        seen: set[str] = set()
+        while True:
+            result = self.request("tools/list", {"cursor": cursor} if cursor else None,
+                                  timeout=timeout)
+            page = result.get("tools")
+            if isinstance(page, list):
+                tools.extend(item for item in page if isinstance(item, dict))
+            next_cursor = result.get("nextCursor")
+            if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen:
+                # 没有下一游标，或游标绕回去了：这一页就是最后一页，别把会话卡在循环里。
+                break
+            seen.add(next_cursor)
+            cursor = next_cursor
+        return tools
+
+    def call_tool(self, name: str, arguments: dict | None = None) -> dict:
+        return self.request("tools/call", {"name": name, "arguments": dict(arguments or {})})
+
+    def ping(self) -> dict:
+        return self.request("ping")
+
+
 # -- 一条 stdio 会话 ---------------------------------------------------------
 
 
-class McpSession:
+class McpSession(_SessionBase):
     """一条到某台 MCP 服务器的 stdio 会话。
 
     请求串行：一条流上挂多个在途请求时，响应按 id 对号入座虽然可行，但断开时
@@ -294,10 +418,7 @@ class McpSession:
     """
 
     def __init__(self, server: McpServer, *, timeout: float | None = None):
-        self.server = server
-        self.timeout = float(timeout if timeout is not None else server.timeout or DEFAULT_TIMEOUT)
-        self.protocol_version: str | None = None
-        self.server_info: dict[str, Any] = {}
+        super().__init__(server, timeout=timeout)
         self._process: subprocess.Popen | None = None
         self._reader: threading.Thread | None = None
         self._request_lock = threading.Lock()
@@ -318,7 +439,7 @@ class McpSession:
 
     def start(self) -> None:
         if self.server.transport != "stdio":
-            raise _unsupported_transport(self.server)
+            raise _wrong_transport(self.server, "stdio")
         if self._process is not None:
             return
         env = os.environ.copy()
@@ -371,45 +492,7 @@ class McpSession:
     def __exit__(self, *_exception) -> None:
         self.close()
 
-    # -- 协议 --
-
-    def initialize(self) -> dict[str, Any]:
-        result = self.request("initialize", {
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {},
-            "clientInfo": {"name": CLIENT_NAME, "version": version_number()},
-        })
-        # 服务器可以回一个它自己支持的版本（MCP 允许协商），记下来但不在这里发难：
-        # 真不兼容会在具体方法上报错，比在握手上凭版本号猜更准。
-        self.protocol_version = str(result.get("protocolVersion") or PROTOCOL_VERSION)
-        info = result.get("serverInfo")
-        self.server_info = dict(info) if isinstance(info, dict) else {}
-        self.notify("notifications/initialized")
-        return result
-
-    def list_tools(self, *, timeout: float | None = None) -> list[dict]:
-        tools: list[dict] = []
-        cursor: str | None = None
-        seen: set[str] = set()
-        while True:
-            result = self.request("tools/list", {"cursor": cursor} if cursor else None,
-                                  timeout=timeout)
-            page = result.get("tools")
-            if isinstance(page, list):
-                tools.extend(item for item in page if isinstance(item, dict))
-            next_cursor = result.get("nextCursor")
-            if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen:
-                # 没有下一游标，或游标绕回去了：这一页就是最后一页，别把会话卡在循环里。
-                break
-            seen.add(next_cursor)
-            cursor = next_cursor
-        return tools
-
-    def call_tool(self, name: str, arguments: dict | None = None) -> dict:
-        return self.request("tools/call", {"name": name, "arguments": dict(arguments or {})})
-
-    def ping(self) -> dict:
-        return self.request("ping")
+    # -- 协议：走到哪一步由 _SessionBase 定，这里只管怎么送出去 --
 
     def request(self, method: str, params: dict | None = None, *,
                 timeout: float | None = None) -> dict[str, Any]:
@@ -545,25 +628,338 @@ class McpSession:
                 process.stdout.close()
 
 
-def _unsupported_transport(server: McpServer) -> McpError:
+# -- 一条 Streamable HTTP 会话 -----------------------------------------------
+
+
+class HttpSession(_SessionBase):
+    """一条到某台 MCP 服务器的 Streamable HTTP 会话（规范 2025-06-18）。
+
+    端点只有一个 URL：每件事都是一次 POST，响应要么是一整条 JSON，要么是一条 SSE 流。
+    请求同样串行——理由和 stdio 一样（超时归属确定），外加一条：同一条 SSE 流里可能
+    混着服务器自己的通知，串行时「这个 id 的答案」不会被别的请求搅在一起。
+
+    会话失效的口径（``alive`` 从这里来）：
+    - 超时与连接层失败（DNS、拒绝连接、连接中断）会让会话作废，下次调用重新握手：
+      那条连接已经被放弃，再说「还活着」只是错觉。
+    - 4xx/5xx 与 JSON-RPC error 是服务器给出的回答，会话仍然可用，不作废。
+    - 收到 404 例外：规范说它表示会话已经没了，客户端应当重新 initialize。
+    """
+
+    def __init__(self, server: McpServer, *, timeout: float | None = None):
+        super().__init__(server, timeout=timeout)
+        # initialize 响应头里拿到的会话 id；之后每个请求都要回带。
+        self.session_id: str | None = None
+        self._handshake_done = False
+        self._started = False
+        self._closed = False
+        self._error: str | None = None
+        self._request_lock = threading.Lock()
+        self._state_lock = threading.Lock()
+        self._next_id = 0
+
+    # -- 生命周期 --
+
+    @property
+    def alive(self) -> bool:
+        return self._started and not self._closed and self._error is None
+
+    def matches(self, server: McpServer) -> bool:
+        return self.server == server
+
+    def start(self) -> None:
+        """http 没有「启动进程」这一步：只校验地址，连接留给第一次请求去建。"""
+        if self.server.transport != "http":
+            raise _wrong_transport(self.server, "http")
+        if self._started:
+            return
+        try:
+            normalize_url(self.server.url)
+        except ValueError as exc:
+            raise McpError(
+                f"MCP 服务器 {self.server.name} 的 http 端点地址不对：{exc}") from exc
+        self._started = True
+
+    def close(self) -> None:
+        with self._state_lock:
+            self._closed = True
+            if self._error is None:
+                self._error = f"MCP 服务器 {self.server.name} 的会话已关闭"
+            session_id = self.session_id
+            self.session_id = None  # 摘掉就等于「DELETE 只发一次」
+        if session_id:
+            self._delete_session(session_id)
+
+    def __enter__(self) -> HttpSession:
+        self.start()
+        return self
+
+    def __exit__(self, *_exception) -> None:
+        self.close()
+
+    # -- 协议 --
+
+    def _mark_initialized(self) -> None:
+        # 规范：initialize 之「后」的请求都要带 MCP-Protocol-Version。即将发出的
+        # initialized 通知已经算「之后」，所以先立旗再发。
+        self._handshake_done = True
+
+    def request(self, method: str, params: dict | None = None, *,
+                timeout: float | None = None) -> dict[str, Any]:
+        wait = float(timeout if timeout is not None else self.timeout)
+        with self._request_lock:
+            self._raise_if_dead()
+            self._next_id += 1
+            request_id = self._next_id
+            payload: dict[str, Any] = {"jsonrpc": "2.0", "id": request_id, "method": method}
+            if params is not None:
+                payload["params"] = params
+            message = self._send(payload, method, wait, expect_response=True)
+        if not isinstance(message, dict):
+            raise McpError(f"MCP 服务器 {self.server.name} 没有给出 {method} 的响应")
+        error = message.get("error")
+        if error is not None:
+            # 带上服务器名：这条消息可能直接出现在界面或日志里，光有方法名不知道是谁。
+            raise McpRpcError(method, error, prefix=f"MCP 服务器 {self.server.name} 的 ")
+        result = message.get("result")
+        return result if isinstance(result, dict) else {}
+
+    def notify(self, method: str, params: dict | None = None) -> None:
+        with self._request_lock:
+            self._raise_if_dead()
+            payload: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
+            if params is not None:
+                payload["params"] = params
+            self._send(payload, method, self.timeout, expect_response=False)
+
+    # -- 内部 --
+
+    def _headers(self, *, with_body: bool) -> dict[str, str]:
+        headers = {"Accept": ACCEPT_HEADER}
+        if with_body:
+            headers["Content-Type"] = MIME_JSON
+        if self.session_id:
+            headers[SESSION_HEADER] = self.session_id
+        if self._handshake_done:
+            headers[PROTOCOL_HEADER] = PROTOCOL_VERSION
+        return headers
+
+    def _send(self, payload: dict[str, Any], method: str, wait: float, *,
+              expect_response: bool) -> dict | None:
+        """POST 一条消息并拿回响应消息；通知返回 None。
+
+        所有 urllib 的裸异常都在这里翻成 McpError：上层（工具面）只认我们自己的错误，
+        不许 ``URLError: <urlopen error …>`` 这种话术透到界面。
+        """
+        request = urllib.request.Request(
+            self.server.url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            method="POST",
+            headers=self._headers(with_body=True),
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=wait) as response:
+                self._remember_session(response.headers)
+                status = response.getcode()
+                if not expect_response:
+                    response.read()  # 通知只要求 202：读完就释放连接，body 不用
+                    return None
+                if status in (202, 204):
+                    raise McpError(
+                        f"MCP 服务器 {self.server.name} 只回了 HTTP {status}，"
+                        f"没有 {method} 的 JSON-RPC 响应（请求必须回一条消息）")
+                return self._read_message(response, payload["id"], method, wait)
+        except urllib.error.HTTPError as exc:
+            raise self._http_error(method, exc) from None
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, TimeoutError):
+                raise self._timeout_error(method, wait) from None
+            self._fail(f"MCP 服务器 {self.server.name} 连不上：{exc.reason}")
+            raise McpError(
+                f"MCP 服务器 {self.server.name} 连不上 {self.server.url}：{exc.reason}；"
+                "确认地址与端口写对、服务真的在跑、没有被代理拦住") from None
+        except TimeoutError:
+            raise self._timeout_error(method, wait) from None
+        except (OSError, ValueError) as exc:
+            self._fail(f"MCP 服务器 {self.server.name} 的连接断了：{exc}")
+            raise McpError(
+                f"MCP 服务器 {self.server.name} 的 http 连接中断（{method}）："
+                f"{type(exc).__name__}: {exc}") from None
+
+    def _read_message(self, response: Any, request_id: int, method: str,
+                      wait: float) -> dict:
+        """按 Content-Type 走两条路：SSE 流式解析，或读完整个 body 当一条 JSON。"""
+        content_type = str(response.headers.get("Content-Type") or "")
+        media_type = content_type.split(";")[0].strip().lower()
+        if media_type == MIME_SSE:
+            return self._read_sse(response, request_id, method, wait)
+        # 不拿声明的类型当门槛：有的服务器把 json 写成 application/json-rpc 之类，
+        # 能不能解出来由下面的解析说了算，类型只进错误消息。
+        return _parse_json_message(response.read(), self.server.name, method, content_type)
+
+    def _read_sse(self, response: Any, request_id: int, method: str, wait: float) -> dict:
+        """按行读 SSE：event/data 攒到空行算一条消息，认到本次请求的 id 就返回。
+
+        不把整条流读完才返回：响应之后服务器很可能还在推心跳、日志或别的通知，
+        等流结束等于把「服务器愿意闲聊多久」算进我们的超时里。
+        """
+        deadline = time.monotonic() + wait
+        data_lines: list[str] = []
+        while True:
+            # 服务端可以一直发心跳把连接吊着：靠这个截止时间保证超时是「我们的」超时。
+            if time.monotonic() > deadline:
+                raise self._timeout_error(method, wait)
+            raw = response.readline()
+            if not raw:
+                break
+            line = raw.decode("utf-8", "replace").rstrip("\r\n")
+            if not line:
+                payload_text = "\n".join(data_lines)
+                data_lines.clear()
+                if payload_text:
+                    message = _parse_event_data(payload_text, self.server.name, method)
+                    if message.get("id") == request_id:
+                        return message
+                    # 别的 id、或服务器主动发的通知：本客户端没向远端暴露能力，忽略继续等。
+                continue
+            if line.startswith(":"):
+                continue  # 注释行（心跳），SSE 规范允许且常见
+            field_name, _, value = line.partition(":")
+            if value.startswith(" "):
+                value = value[1:]
+            if field_name == "data":
+                data_lines.append(value)
+            # event/id/retry 三个字段对本客户端没有用处：消息体里的 id 才是判据。
+        raise McpError(
+            f"MCP 服务器 {self.server.name} 的 SSE 流在给出 {method} 的响应前就结束了")
+
+    def _remember_session(self, headers: Any) -> None:
+        """记下 initialize 响应头里的 Mcp-Session-Id：之后每个请求都得回带它。"""
+        session_id = headers.get(SESSION_HEADER)
+        if isinstance(session_id, str) and session_id.strip():
+            self.session_id = session_id.strip()
+
+    def _http_error(self, method: str, exc: urllib.error.HTTPError) -> McpError:
+        body = b""
+        with contextlib.suppress(OSError, ValueError):
+            body = exc.read() or b""
+        status = f"HTTP {exc.code} {exc.reason or ''}".strip()
+        message = f"MCP 服务器 {self.server.name} 的 {method} 被拒绝：{status}"
+        detail = _error_detail(body)
+        if detail:
+            message += f"；服务器说：{detail}"
+        if exc.code == 404:
+            # 规范：404 表示这条路或这个会话已经没了，客户端应当重新 initialize。
+            self._fail(f"MCP 服务器 {self.server.name} 返回 HTTP 404（会话已失效）")
+        return McpError(message)
+
+    def _timeout_error(self, method: str, wait: float) -> McpError:
+        """超时统一从这里出：会话同时作废，消息里写明下次会重连。"""
+        self._fail(f"MCP 服务器 {self.server.name} 在 {wait:g} 秒内没有回应 {method}")
+        return McpError(
+            f"MCP 服务器 {self.server.name} 超时：{method} 在 {wait:g} 秒内没有回应"
+            f"（POST {self.server.url}）；这条会话已作废，下次调用会重新握手")
+
+    def _delete_session(self, session_id: str) -> None:
+        """按规范收尾：带会话 id 发一次 DELETE。失败一律忽略——关会话不该再抛错。"""
+        request = urllib.request.Request(
+            self.server.url, method="DELETE",
+            headers={SESSION_HEADER: session_id, PROTOCOL_HEADER: PROTOCOL_VERSION})
+        # 用关会话的宽限期封顶：为了一个「顺手通知服务器」的动作让应用多等 20 秒不值得。
+        wait = min(self.timeout, CLOSE_GRACE_SECONDS)
+        with contextlib.suppress(OSError, ValueError):
+            with urllib.request.urlopen(request, timeout=wait) as response:
+                response.read()
+
+    def _fail(self, reason: str) -> None:
+        with self._state_lock:
+            if self._error is None:
+                self._error = reason
+
+    def _raise_if_dead(self) -> None:
+        if self._error is not None:
+            raise McpError(self._error)
+        if not self._started:
+            raise McpError(f"MCP 服务器 {self.server.name} 还没有连接")
+
+
+def _wrong_transport(server: McpServer, expected: str) -> McpError:
+    """会话类只处理自己那种传输：走错了说明接线错了，别硬撑。"""
     return McpError(
-        f"MCP 服务器 {server.name} 配置为 http 传输，客户端目前只实现了 stdio；"
-        f"请在 {default_path()} 里把它的 transport 改成 \"stdio\"，并给出启动它的 "
-        "command 与 args（例如一个本地 MCP 服务器脚本或 npx 命令）。"
-        "http 只保留配置，等实现后再打开。"
-    )
+        f"MCP 服务器 {server.name} 的 transport 是 {server.transport!r}，"
+        f"这条会话只处理 {expected}；请按 transport 选对应的会话类")
+
+
+def _snippet(data: bytes | str) -> str:
+    """把服务器原话截成一句：界面要看得懂，但不该被一整页 HTML 灌满。"""
+    text = data.decode("utf-8", "replace") if isinstance(data, bytes) else str(data)
+    text = " ".join(text.split())
+    return text[:SNIPPET_LIMIT] + "…" if len(text) > SNIPPET_LIMIT else text
+
+
+def _error_detail(body: bytes) -> str:
+    """从错误响应的 body 里取出服务器自己的说明；取不到就给原始片段。"""
+    try:
+        payload = json.loads(body.decode("utf-8")) if body.strip() else None
+    except (UnicodeDecodeError, ValueError):
+        return _snippet(body)
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            code = error.get("code")
+            return f"{error['message']}（JSON-RPC {code}）" if code is not None \
+                else str(error["message"])
+        detail = payload.get("message")
+        if isinstance(detail, str) and detail.strip():
+            return detail.strip()
+    return _snippet(body)
+
+
+def _parse_json_message(body: bytes, server_name: str, method: str, content_type: str) -> dict:
+    """把一整条 JSON 响应解成消息；解不出来就报「服务器没按协议说话」。"""
+    text = body.decode("utf-8", "replace")
+    if not text.strip():
+        raise McpError(
+            f"MCP 服务器 {server_name} 回给 {method} 的响应是空的"
+            f"（Content-Type: {content_type or '未声明'}）")
+    try:
+        message = json.loads(text)
+    except ValueError as exc:
+        raise McpError(
+            f"MCP 服务器 {server_name} 回给 {method} 的不是 JSON"
+            f"（Content-Type: {content_type or '未声明'}）：{_snippet(text)}") from exc
+    if not isinstance(message, dict):
+        raise McpError(
+            f"MCP 服务器 {server_name} 回给 {method} 的不是 JSON-RPC 对象：{_snippet(text)}")
+    return message
+
+
+def _parse_event_data(data: str, server_name: str, method: str) -> dict:
+    """SSE 里一条 data 就是一条 JSON-RPC 消息；不是就当场说清楚，别拖到超时。"""
+    try:
+        message = json.loads(data)
+    except ValueError as exc:
+        raise McpError(
+            f"MCP 服务器 {server_name} 在 {method} 的 SSE 流里发来不是 JSON 的数据："
+            f"{_snippet(data)}") from exc
+    if not isinstance(message, dict):
+        raise McpError(
+            f"MCP 服务器 {server_name} 在 {method} 的 SSE 流里发来的不是 JSON-RPC 对象："
+            f"{_snippet(data)}")
+    return message
 
 
 # -- 会话登记 ---------------------------------------------------------------
 
-_SESSIONS: dict[str, McpSession] = {}
+# 两种传输的会话放在同一张表里：上层（adapt_tools / call_tool / refresh）不该关心
+# 一台服务器是子进程还是一个 URL，它们要的只是「对外方法一致的那个对象」。
+_SESSIONS: dict[str, McpSession | HttpSession] = {}
 _SESSION_LOCK = threading.Lock()
 # 我们自己注册过的工具名 -> 服务器名。刷新要原地换合同、清理消失的工具，靠它认出「自己的」。
 _OWNED: dict[str, str] = {}
 _LAST_ERRORS: dict[str, str] = {}
 
 
-def open_sessions() -> dict[str, McpSession]:
+def open_sessions() -> dict[str, McpSession | HttpSession]:
     """当前还活着的会话；界面做诊断或退出前检查用。"""
     with _SESSION_LOCK:
         return {name: session for name, session in _SESSIONS.items() if session.alive}
@@ -575,7 +971,7 @@ def last_errors() -> dict[str, str]:
 
 
 def close() -> None:
-    """收束所有会话（含 Windows 上 terminate → kill 兜底）：应用退出、配置改动、测试前后都该调。"""
+    """收束所有会话（stdio 走 terminate → kill 兜底，http 发 DELETE）：应用退出、配置改动、测试前后都该调。"""
     with _SESSION_LOCK:
         sessions = list(_SESSIONS.values())
         _SESSIONS.clear()
@@ -583,8 +979,15 @@ def close() -> None:
         session.close()
 
 
-def _session(server: McpServer) -> McpSession:
-    # 建连整个过程放在锁里：同一台服务器绝不能因为并发调用起出两个子进程。
+def _new_session(server: McpServer) -> McpSession | HttpSession:
+    """按 transport 选会话实现——这是整个模块里唯一需要知道传输差别的地方。"""
+    if server.transport == "http":
+        return HttpSession(server)
+    return McpSession(server)
+
+
+def _session(server: McpServer) -> McpSession | HttpSession:
+    # 建连整个过程放在锁里：同一台服务器绝不能因为并发调用起出两个子进程 / 两条会话。
     # 代价是最坏情况下一次建连（默认 20 秒超时）会挡住别的服务器的调用。
     with _SESSION_LOCK:
         current = _SESSIONS.get(server.name)
@@ -593,7 +996,7 @@ def _session(server: McpServer) -> McpSession:
         if current is not None:
             current.close()
             _SESSIONS.pop(server.name, None)
-        session = McpSession(server)
+        session = _new_session(server)
         session.start()
         try:
             session.initialize()

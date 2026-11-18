@@ -4,9 +4,11 @@ import QtQuick.Controls.Fusion as Fusion
 import QtQuick.Layouts
 import QtQuick.Window
 
-// Shell with two modes:
-//   launcher  — project list + global harness settings (the entry point)
+// Shell with three modes:
+//   launcher  — project list (the entry point)
 //   workspace — the open project: navigation, pages, status bar
+//   settings  — global defaults (appearance, harness profile, MCP), one page
+//               reached from either of the other two and returning to it
 // Pages own their state and subscribe to the bridge themselves.
 ApplicationWindow {
     id: app
@@ -73,6 +75,9 @@ ApplicationWindow {
     }
     property string notice: ""
     property string mode: "launcher"
+    // 设置页是从哪一页进来的：返回时原路回去，不从工作区把人甩回工程列表。
+    // 单独一个字段而不是靠 mode 反推——进设置时 mode 已经被改成 "settings" 了。
+    property string modeBeforeSettings: "launcher"
     property string currentPage: "browse"
     property int storyboardRequestSequence:0
     property var storyboardSelection:({})
@@ -152,6 +157,18 @@ ApplicationWindow {
         mode = "workspace"
         currentPage = "browse"
         markPageVisited(currentPage)
+    }
+
+    // 设置页的两个入口（启动页按钮、工作区导航底部按钮）都走这里：来源页记在
+    // modeBeforeSettings 里，closeSettings 才知道该回哪一页。
+    function openSettings() {
+        if (mode !== "settings") modeBeforeSettings = mode
+        mode = "settings"
+    }
+
+    function closeSettings() {
+        if (mode !== "settings") return
+        mode = modeBeforeSettings === "workspace" ? "workspace" : "launcher"
     }
 
     function backToLauncher() {
@@ -252,7 +269,9 @@ ApplicationWindow {
         StackLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: app.mode === "launcher" ? 0 : 1
+            // 下标按声明顺序：0 启动页 / 1 工作区 / 2 设置页。设置页排在最后，
+            // 启动页与工作区的下标保持原样（原有的懒创建与几何断言都依赖它们）。
+            currentIndex: app.mode === "launcher" ? 0 : app.mode === "workspace" ? 1 : 2
 
             LauncherPage { id: launcherPage; app: app }
 
@@ -400,6 +419,23 @@ ApplicationWindow {
                             }
                         }
 
+
+                        // 设置入口放在导航底部：上面是「这个工程有哪些页面」，下面这块
+                        // （设置、工程路径、版本）都是「这台机器 / 这个工程的身份」，
+                        // 放进页面列表里会让人以为设置也是某一页。
+                        Button {
+                            objectName: "navigationSettingsButton"
+                            Layout.fillWidth: true
+                            flat: true
+                            // 收起状态只剩一条窄栏：中文两字在 11px 下仍塞得下，
+                            // 不必再画一个齿轮图标（导航图标没有“设置”这一档）。
+                            text: "设置"
+                            font.pixelSize: app.navigationCollapsed ? 11 : 13
+                            implicitWidth: app.navigationCollapsed ? 40 : 150
+                            ToolTip.visible: hovered
+                            ToolTip.text: "设置"
+                            onClicked: app.openSettings()
+                        }
 
                         Label {
                             Layout.fillWidth: true
@@ -560,6 +596,11 @@ ApplicationWindow {
                     }
                 }
             }
+
+            // -- settings -----------------------------------------------
+            // 全局设置独立成一页：从启动页或工作区进来，返回时由 closeSettings
+            // 回到进来的那一页（工程仍开着就从工作区回去，不会丢现场）。
+            SettingsPage { id: settingsPage; app: app }
         }
 
     }
@@ -582,10 +623,11 @@ ApplicationWindow {
     Component { id: projectSettingsPageComponent; ProjectSettingsPage { app: windowRoot } }
 
 
-    // 启动页的窗口按钮与拖动区：浮在内容之上，不占布局（放在 StackLayout 里会被当成新的一页）。
+    // 启动页与设置页的窗口按钮与拖动区：浮在内容之上，不占布局（放在 StackLayout 里会被当成新的一页）。
+    // 设置页也一起接住：窗口无边框，少了这一层，在设置里既不能拖也不能关窗口。
     Item {
         objectName: "launcherWindowChrome"
-        visible: app.mode === "launcher"
+        visible: app.mode !== "workspace"
         anchors.fill: parent
         z: 500
 

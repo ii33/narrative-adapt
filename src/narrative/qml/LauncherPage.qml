@@ -3,45 +3,15 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 
-// 启动页：工程列表 + 全局设置（harness 默认配置）。
+// 启动页：工程列表 + 设置入口。
 // 只有从这里打开工程，才会进入操作界面。
+// 全局设置（外观、模型渠道、MCP 服务器）已经搬进独立设置页 SettingsPage.qml：
+// 这一页只回答「打开哪个工程」，设置按钮在工程工具条右侧。
 Item {
     id: page
     objectName: "launcherPage"
     property var app
     readonly property var t: app.theme
-
-    property var catalog: []
-    property var profile: ({})
-    property string settingsPath: ""
-    property bool loaded: false
-
-    readonly property var effortOptions: ["不设置", "off", "minimal", "low", "medium", "high"]
-
-    // 外观三档：跟随系统（默认）、固定浅色、固定深色。选择由 bridge 记住。
-    readonly property var appearanceModes: [
-        {key: "system", label: "跟随系统"},
-        {key: "light", label: "浅色"},
-        {key: "dark", label: "深色"}
-    ]
-
-    function appearanceIndex(mode) {
-        for (var i = 0; i < appearanceModes.length; ++i)
-            if (appearanceModes[i].key === mode) return i
-        return 0
-    }
-
-    // 主框构两档：紧凑（默认，各区域共边）与岛屿（各区域浮成独立卡片，卡片间留缝）。
-    readonly property var layoutModes: [
-        {key: "compact", label: "紧凑"},
-        {key: "islands", label: "岛屿"}
-    ]
-
-    function layoutIndex(layout) {
-        for (var i = 0; i < layoutModes.length; ++i)
-            if (layoutModes[i].key === layout) return i
-        return 0
-    }
 
     ListModel { id: projectRows }
     // 没有「工程目录」这回事：列表就是打开过的那些工程包。
@@ -80,70 +50,6 @@ Item {
 
     Component.onCompleted: {
         bridge.loadRecentProjects()
-        bridge.loadGlobalSettings()
-    }
-
-    function applyProfile(p) {
-        profile = p || ({})
-        loaded = true
-        var idx = 0
-        for (var i = 0; i < catalog.length; ++i)
-            if (catalog[i].id === profile.provider) idx = i
-        providerBox.currentIndex = idx
-        baseUrlField.text = profile.base_url || ""
-        baseUrlField.cursorPosition = 0
-        modelField.text = profile.model || ""
-        keyEnvField.text = profile.key_env || ""
-        tokenParamBox.currentIndex = (profile.token_parameter === "max_completion_tokens") ? 1 : 0
-        var effort = profile.reasoning_effort || ""
-        effortBox.currentIndex = effort === "" ? 0
-            : effort === "off" ? 1 : effort === "minimal" ? 2 : effort === "low" ? 3
-            : effort === "medium" ? 4 : effort === "high" ? 5 : 0
-        maxTokensField.text = profile.max_tokens || ""
-        contextField.text = profile.context_window || ""
-        outputReserveField.text = profile.output_reserve || ""
-        compactionReserveField.text = profile.compaction_reserve || ""
-        compactionMaxField.text = profile.compaction_max_tokens || ""
-        timeoutField.text = profile.timeout_seconds || ""
-        temperatureField.text = profile.temperature === null
-            || profile.temperature === undefined ? "" : profile.temperature
-    }
-
-    function applyProviderPreset(index) {
-        if (index < 0 || index >= catalog.length) return
-        var preset = catalog[index]
-        baseUrlField.text = preset.base_url || ""
-        modelField.text = preset.model || ""
-        keyEnvField.text = preset.key_env || ""
-        tokenParamBox.currentIndex = (preset.token_parameter === "max_completion_tokens") ? 1 : 0
-        var effort = preset.reasoning_effort || ""
-        effortBox.currentIndex = effort === "" ? 0
-            : effort === "off" ? 1 : effort === "minimal" ? 2 : effort === "low" ? 3
-            : effort === "medium" ? 4 : effort === "high" ? 5 : 0
-    }
-
-    function collect() {
-        return {
-            provider: catalog.length > 0 ? catalog[providerBox.currentIndex].id : (profile.provider || "ark"),
-            base_url: baseUrlField.text.trim(),
-            model: modelField.text.trim(),
-            key_env: keyEnvField.text.trim(),
-            token_parameter: tokenParamBox.currentIndex === 1 ? "max_completion_tokens" : "max_tokens",
-            reasoning_effort: effortBox.currentIndex === 0 ? null : effortOptions[effortBox.currentIndex],
-            max_tokens: parseInt(maxTokensField.text, 10) || 0,
-            context_window: parseInt(contextField.text, 10) || 0,
-            output_reserve: parseInt(outputReserveField.text, 10) || 0,
-            compaction_reserve: parseInt(compactionReserveField.text, 10) || 0,
-            compaction_max_tokens: parseInt(compactionMaxField.text, 10) || 0,
-            timeout_seconds: parseInt(timeoutField.text, 10) || 0,
-            // 留空 = 用供应商默认；提取建议 0.2，低了同一段原文跑两遍才稳。
-            temperature: temperatureField.text.trim() === ""
-                ? null : parseFloat(temperatureField.text)
-        }
-    }
-
-    function save() {
-        bridge.saveGlobalSettings(page.collect())
     }
 
     Connections {
@@ -188,11 +94,6 @@ Item {
                 } else {
                     app.toast("已删除工程文件（" + gone + " 项）", false)
                 }
-            } else if (kind === "global_settings") {
-                catalog = payload.catalog || []
-                settingsPath = payload.path || ""
-                page.applyProfile(payload.profile)
-                if (payload.notice) app.toast(payload.notice, false)
             }
         }
         function onErrorOccurred(kind, message) {
@@ -224,7 +125,7 @@ Item {
                     color: t.ink
                 }
                 Label {
-                    text: "选择工程进入；这里配置的模型服务是所有工程的默认值。"
+                    text: "选择工程进入；模型服务等全局默认值在「设置」里改。"
                     color: t.muted
                     font.pixelSize: 12
                 }
@@ -238,482 +139,262 @@ Item {
             }
         }
 
-        RowLayout {
+        // -- project list -----------------------------------------------
+        // 原来这里是「工程列表 | 全局设置」两列；设置搬走后不再需要这层分栏，
+        // 工程列表独占整行（margins 与分栏时一致，间距观感不变）。
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.margins: 20
-            spacing: 16
+            spacing: 10
 
-            // -- project list -------------------------------------------
-            ColumnLayout {
+            RowLayout {
                 Layout.fillWidth: true
-                Layout.fillHeight: true
-                spacing: 10
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    Label {
-                        text: "工程"
-                        font.pixelSize: 16
-                        font.weight: Font.DemiBold
-                        color: t.ink
-                    }
-                    Label {
-                        text: projectRows.count + " 个"
-                        color: t.muted
-                        font.pixelSize: 12
-                    }
-                    Item { Layout.fillWidth: true }
-                    Button {
-                        objectName: "openProjectButton"
-                        text: "打开工程…"
-                        highlighted: true
-                        enabled: !app.busy
-                        // 中文在系统字体下的实测宽度比 Qt 估的宽一点，留出余量，
-                        // 否则右边缘会把最后一个字吃掉。
-                        leftPadding: 14
-                        rightPadding: 14
-                        onClicked: packageDialog.open()
-                    }
-
+                spacing: 8
+                Label {
+                    text: "工程"
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
+                    color: t.ink
+                }
+                Label {
+                    text: projectRows.count + " 个"
+                    color: t.muted
+                    font.pixelSize: 12
+                }
+                Item { Layout.fillWidth: true }
+                Button {
+                    objectName: "openProjectButton"
+                    text: "打开工程…"
+                    highlighted: true
+                    enabled: !app.busy
+                    // 中文在系统字体下的实测宽度比 Qt 估的宽一点，留出余量，
+                    // 否则右边缘会把最后一个字吃掉。
+                    leftPadding: 14
+                    rightPadding: 14
+                    onClicked: packageDialog.open()
+                }
+                // 设置入口放在工程工具条上：启动页只剩「打开哪个工程」这件事，
+                // 设置不再是右半边的一整块，而是一个可以进去再出来的页面。
+                Button {
+                    objectName: "launcherSettingsButton"
+                    text: "设置"
+                    enabled: !app.busy
+                    leftPadding: 12
+                    rightPadding: 12
+                    onClicked: page.app.openSettings()
                 }
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: t.card
-                    border.color: t.line
-                    radius: t.radius
-
-                    ListView {
-                        id: projectList
-                        objectName: "projectList"
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        clip: true
-                        model: projectRows
-                        spacing: 6
-                        delegate: Rectangle {
-                            required property string path
-                            required property string folder
-                            required property string name
-                            required property string title
-                            required property int revision
-                            required property bool copyable
-                            required property bool openable
-                            required property string statusText
-                            required property bool external
-
-                            width: ListView.view.width
-                            height: 64
-                            radius: 6
-                            color: rowHover.hovered && openable ? t.accentSoft : "transparent"
-
-                            HoverHandler { id: rowHover }
-
-                            // 行点击必须**先声明**：后声明的 MouseArea 盖在上面，
-                            // 会把「移除」和「打开」的点击全吞掉（之前就是这样）。
-                            MouseArea {
-                                anchors.fill: parent
-                                enabled: openable
-                                onClicked: bridge.openProject(path)
-                            }
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 14
-                                anchors.rightMargin: 12
-                                spacing: 10
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 3
-                                    Label {
-                                        text: title || name
-                                        color: openable ? t.ink : t.muted
-                                        font.pixelSize: 14
-                                        font.weight: Font.DemiBold
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-                                    Label {
-                                        objectName: "projectRowFolder"
-                                        text: folder
-                                        color: t.muted
-                                        font.pixelSize: 10
-                                        elide: Text.ElideMiddle
-                                        Layout.fillWidth: true
-                                        ToolTip.visible: folderHover.hovered
-                                        ToolTip.text: path
-                                        HoverHandler { id: folderHover }
-                                    }
-                                }
-                                Label {
-                                    text: openable
-                                        ? (external ? statusText : "修订 " + revision)
-                                        : statusText
-                                    color: openable ? t.muted : t.bad
-                                    font.pixelSize: 11
-                                }
-                                Label {
-                                    objectName: "forgetRecent"
-                                    visible: external
-                                    text: "移除"
-                                    color: t.muted
-                                    font.pixelSize: 11
-                                    font.underline: true
-                                    MouseArea {
-                                        objectName: "forgetRecentArea"
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: page.askRemove(path, title || name)
-                                    }
-                                }
-                                Button {
-                                    objectName: "copyRecentProject"
-                                    text: "创建副本"
-                                    enabled: copyable && !app.busy && !page.copyingProject
-                                    onClicked: {
-                                        page.copySource = path
-                                        page.copyingProject = true
-                                        bridge.suggestProjectCopy(path)
-                                    }
-                                }
-                                Button {
-                                    text: "打开"
-                                    highlighted: true
-                                    enabled: openable && !app.busy
-                                    onClicked: bridge.openProject(path)
-                                }
-                            }
-                        }
-
-                        // 空列表不该只是一个空框：把「去哪儿找」直接放在这里。
-                        ColumnLayout {
-                            anchors.centerIn: parent
-                            width: parent.width - 40
-                            spacing: 10
-                            visible: projectRows.count === 0
-
-                            Label {
-                                Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignHCenter
-                                wrapMode: Text.WordWrap
-                                text: "列表里还没有工程。\n打开一个 .nproj 工程文件，它就留在这里。"
-                                color: t.muted
-                                font.pixelSize: 12
-                            }
-                            Button {
-                                objectName: "emptyOpenProject"
-                                Layout.alignment: Qt.AlignHCenter
-                                text: "打开工程…"
-                                highlighted: true
-                                onClicked: packageDialog.open()
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 84
-                    color: t.card
-                    border.color: t.line
-                    radius: t.radius
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 14
-                        spacing: 10
-
-                        ColumnLayout {
-                            spacing: 2
-                            Label {
-                                text: "新建工程"
-                                color: t.ink
-                                font.pixelSize: 13
-                                font.weight: Font.DemiBold
-                            }
-                            Label {
-                                text: "工程以 .nproj 信息文件为入口，数据库和资料单独存放。"
-                                color: t.muted
-                                font.pixelSize: 11
-                            }
-                            RowLayout {
-                                spacing: 6
-                                Label {
-                                    text: "位置"
-                                    color: t.muted
-                                    font.pixelSize: 11
-                                }
-                                Label {
-                                    objectName: "newProjectParent"
-                                    text: page.newProjectParent
-                                    color: t.ink
-                                    font.pixelSize: 11
-                                    elide: Text.ElideMiddle
-                                    Layout.maximumWidth: 300
-                                }
-                                Label {
-                                    text: "选择…"
-                                    color: t.accent
-                                    font.pixelSize: 11
-                                    font.underline: true
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: parentDialog.open()
-                                    }
-                                }
-                            }
-                        }
-                        Item { Layout.fillWidth: true }
-                        TextField {
-                            id: nameField
-                            objectName: "projectNameField"
-                            Layout.preferredWidth: 200
-                            placeholderText: "代号，例如 my-novel"
-                            onAccepted: {
-                                if (nameField.text.trim().length > 0 && !app.busy)
-                                    bridge.createProjectAt(page.newProjectParent,
-                                                           nameField.text.trim())
-                            }
-                        }
-                        Button {
-                            objectName: "createProjectButton"
-                            text: app.busy ? "创建中…" : "创建并进入"
-                            highlighted: true
-                            enabled: !app.busy && nameField.text.trim().length > 0
-                            onClicked: bridge.createProjectAt(page.newProjectParent,
-                                                              nameField.text.trim())
-                        }
-                    }
-                }
             }
 
-            // -- global settings ----------------------------------------
             Rectangle {
-                Layout.preferredWidth: 460
+                Layout.fillWidth: true
                 Layout.fillHeight: true
                 color: t.card
                 border.color: t.line
                 radius: t.radius
 
-                ColumnLayout {
+                ListView {
+                    id: projectList
+                    objectName: "projectList"
                     anchors.fill: parent
-                    anchors.margins: 16
+                    anchors.margins: 8
+                    clip: true
+                    model: projectRows
+                    spacing: 6
+                    delegate: Rectangle {
+                        required property string path
+                        required property string folder
+                        required property string name
+                        required property string title
+                        required property int revision
+                        required property bool copyable
+                        required property bool openable
+                        required property string statusText
+                        required property bool external
+
+                        width: ListView.view.width
+                        height: 64
+                        radius: 6
+                        color: rowHover.hovered && openable ? t.accentSoft : "transparent"
+
+                        HoverHandler { id: rowHover }
+
+                        // 行点击必须**先声明**：后声明的 MouseArea 盖在上面，
+                        // 会把「移除」和「打开」的点击全吞掉（之前就是这样）。
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: openable
+                            onClicked: bridge.openProject(path)
+                        }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 14
+                            anchors.rightMargin: 12
+                            spacing: 10
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 3
+                                Label {
+                                    text: title || name
+                                    color: openable ? t.ink : t.muted
+                                    font.pixelSize: 14
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                Label {
+                                    objectName: "projectRowFolder"
+                                    text: folder
+                                    color: t.muted
+                                    font.pixelSize: 10
+                                    elide: Text.ElideMiddle
+                                    Layout.fillWidth: true
+                                    ToolTip.visible: folderHover.hovered
+                                    ToolTip.text: path
+                                    HoverHandler { id: folderHover }
+                                }
+                            }
+                            Label {
+                                text: openable
+                                    ? (external ? statusText : "修订 " + revision)
+                                    : statusText
+                                color: openable ? t.muted : t.bad
+                                font.pixelSize: 11
+                            }
+                            Label {
+                                objectName: "forgetRecent"
+                                visible: external
+                                text: "移除"
+                                color: t.muted
+                                font.pixelSize: 11
+                                font.underline: true
+                                MouseArea {
+                                    objectName: "forgetRecentArea"
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: page.askRemove(path, title || name)
+                                }
+                            }
+                            Button {
+                                objectName: "copyRecentProject"
+                                text: "创建副本"
+                                enabled: copyable && !app.busy && !page.copyingProject
+                                onClicked: {
+                                    page.copySource = path
+                                    page.copyingProject = true
+                                    bridge.suggestProjectCopy(path)
+                                }
+                            }
+                            Button {
+                                text: "打开"
+                                highlighted: true
+                                enabled: openable && !app.busy
+                                onClicked: bridge.openProject(path)
+                            }
+                        }
+                    }
+
+                    // 空列表不该只是一个空框：把「去哪儿找」直接放在这里。
+                    ColumnLayout {
+                        anchors.centerIn: parent
+                        width: parent.width - 40
+                        spacing: 10
+                        visible: projectRows.count === 0
+
+                        Label {
+                            Layout.fillWidth: true
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.WordWrap
+                            text: "列表里还没有工程。\n打开一个 .nproj 工程文件，它就留在这里。"
+                            color: t.muted
+                            font.pixelSize: 12
+                        }
+                        Button {
+                            objectName: "emptyOpenProject"
+                            Layout.alignment: Qt.AlignHCenter
+                            text: "打开工程…"
+                            highlighted: true
+                            onClicked: packageDialog.open()
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 84
+                color: t.card
+                border.color: t.line
+                radius: t.radius
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 14
                     spacing: 10
 
-                    // -- 外观 -------------------------------------------------
-                    Label {
-                        text: "外观"
-                        font.pixelSize: 13
-                        font.weight: Font.DemiBold
-                        color: t.ink
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
+                    ColumnLayout {
+                        spacing: 2
                         Label {
-                            text: "界面深浅色"
-                            color: t.muted
-                            font.pixelSize: 11
-                        }
-                        Item { Layout.fillWidth: true }
-                        ComboBox {
-                            objectName: "appearanceMode"
-                            Layout.preferredWidth: 140
-                            model: page.appearanceModes
-                            textRole: "label"
-                            currentIndex: page.appearanceIndex(bridge.themeMode)
-                            // 立刻生效并记住选择；不需要按「保存全局设置」。
-                            onActivated: bridge.setThemeMode(page.appearanceModes[index].key)
-                        }
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        text: "跟随系统时随 Windows 深浅色自动切换；选浅色或深色后固定，不再跟系统。"
-                        color: t.muted
-                        font.pixelSize: 11
-                        wrapMode: Text.Wrap
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-                        Label {
-                            text: "主框构"
-                            color: t.muted
-                            font.pixelSize: 11
-                        }
-                        Item { Layout.fillWidth: true }
-                        ComboBox {
-                            objectName: "layoutMode"
-                            Layout.preferredWidth: 140
-                            model: page.layoutModes
-                            textRole: "label"
-                            currentIndex: page.layoutIndex(bridge.layoutMode)
-                            // 立刻生效并记住选择；不需要按「保存全局设置」。
-                            onActivated: bridge.setLayoutMode(page.layoutModes[index].key)
-                        }
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        text: "紧凑：各区域共边，占满窗口（默认）。岛屿：导航、页面、协作者与状态栏各成一张圆角卡片，卡片之间留缝。"
-                        color: t.muted
-                        font.pixelSize: 11
-                        wrapMode: Text.Wrap
-                    }
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 1
-                        color: t.line
-                    }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Label {
-                            text: "全局设置 · Harness"
-                            font.pixelSize: 14
-                            font.weight: Font.DemiBold
+                            text: "新建工程"
                             color: t.ink
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
                         }
-                        Item { Layout.fillWidth: true }
-                        Button {
-                            text: "重新载入"
-                            flat: true
-                            onClicked: bridge.loadGlobalSettings()
+                        Label {
+                            text: "工程以 .nproj 信息文件为入口，数据库和资料单独存放。"
+                            color: t.muted
+                            font.pixelSize: 11
                         }
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        text: "未单独配置的工程沿用这里的值。"
-                        color: t.muted
-                        font.pixelSize: 11
-                        wrapMode: Text.Wrap
-                    }
-
-                    ScrollView {
-                        id: settingsScroll
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-
-                        GridLayout {
-                            width: settingsScroll.availableWidth
-                            columns: 2
-                            columnSpacing: 10
-                            rowSpacing: 8
-
-                            Label { text: "服务"; color: t.muted; font.pixelSize: 12 }
-                            ComboBox {
-                                id: providerBox
-                                Layout.fillWidth: true
-                                model: page.catalog.map(function (item) { return item.name })
-                                onActivated: page.applyProviderPreset(index)
+                        RowLayout {
+                            spacing: 6
+                            Label {
+                                text: "位置"
+                                color: t.muted
+                                font.pixelSize: 11
                             }
-
-                            Label { text: "地址"; color: t.muted; font.pixelSize: 12 }
-                            TextField {
-                                id: baseUrlField
-                                Layout.fillWidth: true
-                                placeholderText: "https://…"
+                            Label {
+                                objectName: "newProjectParent"
+                                text: page.newProjectParent
+                                color: t.ink
+                                font.pixelSize: 11
+                                elide: Text.ElideMiddle
+                                Layout.maximumWidth: 300
                             }
-
-                            Label { text: "模型"; color: t.muted; font.pixelSize: 12 }
-                            TextField {
-                                id: modelField
-                                Layout.fillWidth: true
-                                placeholderText: "模型 ID"
-                            }
-
-                            Label { text: "推理强度"; color: t.muted; font.pixelSize: 12 }
-                            ComboBox {
-                                id: effortBox
-                                Layout.fillWidth: true
-                                model: page.effortOptions
-                            }
-
-                            Label { text: "密钥变量"; color: t.muted; font.pixelSize: 12 }
-                            TextField {
-                                id: keyEnvField
-                                Layout.fillWidth: true
-                                placeholderText: "ARK_API_KEY"
-                            }
-
-                            Label { text: "输出参数名"; color: t.muted; font.pixelSize: 12 }
-                            ComboBox {
-                                id: tokenParamBox
-                                Layout.fillWidth: true
-                                model: ["max_tokens", "max_completion_tokens"]
-                            }
-
-                            Label { text: "最大输出"; color: t.muted; font.pixelSize: 12 }
-                            TextField {
-                                id: maxTokensField
-                                Layout.fillWidth: true
-                                inputMethodHints: Qt.ImhDigitsOnly
-                            }
-
-                            Label { text: "上下文窗口"; color: t.muted; font.pixelSize: 12 }
-                            TextField {
-                                id: contextField
-                                Layout.fillWidth: true
-                                inputMethodHints: Qt.ImhDigitsOnly
-                            }
-
-                            Label { text: "输出预留"; color: t.muted; font.pixelSize: 12 }
-                            TextField {
-                                id: outputReserveField
-                                Layout.fillWidth: true
-                                inputMethodHints: Qt.ImhDigitsOnly
-                            }
-
-                            Label { text: "压缩预留"; color: t.muted; font.pixelSize: 12 }
-                            TextField {
-                                id: compactionReserveField
-                                Layout.fillWidth: true
-                                inputMethodHints: Qt.ImhDigitsOnly
-                            }
-
-                            Label { text: "压缩最大输出"; color: t.muted; font.pixelSize: 12 }
-                            TextField {
-                                id: compactionMaxField
-                                Layout.fillWidth: true
-                                inputMethodHints: Qt.ImhDigitsOnly
-                            }
-
-                            Label { text: "响应空闲超时（秒）"; color: t.muted; font.pixelSize: 12 }
-                            TextField {
-                                id: timeoutField
-                                Layout.fillWidth: true
-                                inputMethodHints: Qt.ImhDigitsOnly
-                            }
-
-                            Label { text: "温度"; color: t.muted; font.pixelSize: 12 }
-                            TextField {
-                                id: temperatureField
-                                Layout.fillWidth: true
-                                placeholderText: "留空用供应商默认；提取建议 0.2"
-                                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                            Label {
+                                text: "选择…"
+                                color: t.accent
+                                font.pixelSize: 11
+                                font.underline: true
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: parentDialog.open()
+                                }
                             }
                         }
                     }
-
-                    Label {
-                        Layout.fillWidth: true
-                        text: page.settingsPath
-                        color: t.muted
-                        font.pixelSize: 10
-                        elide: Text.ElideMiddle
+                    Item { Layout.fillWidth: true }
+                    TextField {
+                        id: nameField
+                        objectName: "projectNameField"
+                        Layout.preferredWidth: 200
+                        placeholderText: "代号，例如 my-novel"
+                        onAccepted: {
+                            if (nameField.text.trim().length > 0 && !app.busy)
+                                bridge.createProjectAt(page.newProjectParent,
+                                                       nameField.text.trim())
+                        }
                     }
                     Button {
-                        objectName: "saveGlobalSettingsButton"
-                        Layout.fillWidth: true
-                        text: "保存全局设置"
+                        objectName: "createProjectButton"
+                        text: app.busy ? "创建中…" : "创建并进入"
                         highlighted: true
-                        enabled: page.loaded && !app.busy
-                        onClicked: page.save()
+                        enabled: !app.busy && nameField.text.trim().length > 0
+                        onClicked: bridge.createProjectAt(page.newProjectParent,
+                                                          nameField.text.trim())
                     }
                 }
             }

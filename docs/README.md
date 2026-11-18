@@ -56,6 +56,7 @@
 | 属性分类验收矩阵 | [PROPERTY_ACCEPTANCE.md](data/PROPERTY_ACCEPTANCE.md) |
 | 节点更正 | [NODE_CORRECTION.md](data/NODE_CORRECTION.md) |
 | 工具参数与返回 | [AGENT_API.md](features/AGENT_API.md) |
+| 外部 MCP 服务器（配置在哪、字段含义、工具命名、只读判定、缓存与刷新、排查） | [MCP_CLIENT.md](MCP_CLIENT.md) |
 | 公开仓库范围 | [PUBLIC_REPOSITORY.md](features/PUBLIC_REPOSITORY.md) |
 | 上下文运行时 | [context-runtime.md](features/context-runtime.md) |
 | 提示词写法（五段结构、硬指标） | [PROMPT_STYLE.md](PROMPT_STYLE.md) |

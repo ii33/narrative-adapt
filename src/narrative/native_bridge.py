@@ -21,6 +21,7 @@ from PySide6.QtCore import Property, QObject, Signal, Slot
 from . import (
     appearance,
     graph_profile_ops,
+    mcp_client,
     project_catalog,
     project_package,
     project_removal,
@@ -44,6 +45,138 @@ SCREENPLAY_WRITING_PROMPT_VERSION = "screenplay-writing-ui/9"
 SCREENPLAY_SCENE_TABLE_RULES = DEFAULT_PROMPTS["scene_table"]["text"]
 
 
+# -- 全局 MCP 服务器：界面交上来的那一行怎么变成配置 --------------------------
+# 解析规则只写一份，QML 那边不重复实现：参数怎么切、环境变量怎么写，永远以这里为准。
+
+
+def _mcp_split_args(text: str) -> list[str]:
+    """把界面上那一行参数按空白切开，允许用一对双引号护住带空格的一段。
+
+    为什么不用 shlex：Windows 上 POSIX 模式会把 ``C:\\a\\b`` 里的反斜杠当转义吃掉，
+    而参数里最常见的恰恰是路径。所以只认双引号这一条规则，并且明确不做引号嵌套、
+    单引号和反斜杠转义——碰到没配对的引号就报错，不替用户猜一个用法不同的切法。
+    """
+    tokens: list[str] = []
+    current: list[str] = []
+    quoted = False
+    started = False  # 区分空串 ""（一个空参数）与「这里根本没有参数」
+    for char in text:
+        if char == '"':
+            quoted = not quoted
+            started = True
+            continue
+        if char.isspace() and not quoted:
+            if started:
+                tokens.append("".join(current))
+                current, started = [], False
+            continue
+        current.append(char)
+        started = True
+    if quoted:
+        raise ValueError("参数里的双引号没有配对；这里只支持用一对双引号护住带空格的一段，"
+                         "不支持引号嵌套，也不支持单引号")
+    if started:
+        tokens.append("".join(current))
+    return tokens
+
+
+def _mcp_env_map(value: object) -> dict[str, str]:
+    """环境变量：界面上是「每行一条 K=V」的文本，配置里是对象，两种都收。"""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return {str(key): str(item) for key, item in value.items()}
+    lines = value.splitlines() if isinstance(value, str) else value
+    if not isinstance(lines, (list, tuple)):
+        raise ValueError("环境变量须为 K=V 文本或字符串键值对")
+    env: dict[str, str] = {}
+    for number, line in enumerate(lines, start=1):
+        text = str(line).strip()
+        if not text or text.startswith("#"):
+            continue  # 空行与注释跳过：手写这一段时留空行是常态，不该算错
+        key, sep, item = text.partition("=")
+        if not sep or not key.strip():
+            raise ValueError(f"环境变量第 {number} 行不是 K=V：{text}")
+        env[key.strip()] = item.strip()
+    return env
+
+
+def _mcp_timeout(value: object) -> float:
+    """超时：界面给的是文本，配置里是秒数；留空就用内核默认值。"""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return mcp_client.DEFAULT_TIMEOUT
+    if isinstance(value, bool):
+        raise ValueError("超时须为正数秒")
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"超时须为正数秒，收到 {value!r}") from exc
+
+
+def _mcp_server_from_row(row: object, index: int) -> mcp_client.McpServer:
+    """把界面交来的一行折成 McpServer；字段校验一律交给 McpServer.from_dict。"""
+    if not isinstance(row, dict):
+        raise ValueError(f"第 {index + 1} 台服务器不是对象")
+    transport = str(row.get("transport") or "stdio").strip()
+    enabled = row.get("enabled")
+    data: dict[str, Any] = {
+        "name": row.get("name"),
+        "enabled": True if enabled is None else enabled,
+        "transport": transport,
+        "timeout": _mcp_timeout(row.get("timeout")),
+    }
+    if transport == "http":
+        data["url"] = row.get("url")
+    else:
+        data["command"] = row.get("command")
+        # 文本形式（界面上这一行刚被编辑过）在这里折成数组/对象；列表里没被编辑过的行
+        # 直接带着数组/对象过来，原样通过，不重算。
+        args = row.get("args")
+        data["args"] = _mcp_split_args(args) if isinstance(args, str) else args
+        data["env"] = _mcp_env_map(row.get("env"))
+        data["cwd"] = row.get("cwd") or ""
+    return mcp_client.McpServer.from_dict(data, index=index)
+
+
+def _mcp_cached_tools(rows: list[dict]) -> list[dict]:
+    """缓存里的工具条目 -> 面板要的形状；只读判定与 mcp_client.adapt_tools 同口径。"""
+    tools: list[dict] = []
+    for row in rows:
+        annotations = row.get("annotations")
+        tools.append({
+            "name": str(row.get("name") or ""),
+            "description": str(row.get("description") or ""),
+            # 远端没明说 readOnlyHint=true 就按写处理：宁可多要一次确认，
+            # 也不能把有副作用的工具在界面上标成只读。
+            "writes": not (isinstance(annotations, dict)
+                           and annotations.get("readOnlyHint") is True),
+        })
+    return tools
+
+
+def _mcp_server_row(server: mcp_client.McpServer, cached: list[dict],
+                    last_errors: dict[str, str]) -> dict[str, Any]:
+    """一台服务器在界面上的样子：配置原文 + 缓存里已知的工具 + 静态问题 + 上次失败原因。
+
+    ``error`` 与 ``last_error`` 分开：前者不连服务器就能判定（例如配置缺字段），
+    后者来自上一次刷新。两者都要显示——用户改完命令还没刷新时，看到的是上一次的失败原因。
+    stdio 与 http 两种传输都真能连了，这里不再对 http 造静态错误。
+    """
+    return {
+        "name": server.name,
+        "enabled": server.enabled,
+        "transport": server.transport,
+        "command": server.command,
+        "args": list(server.args),
+        "env": dict(server.env),
+        "cwd": server.cwd,
+        "url": server.url,
+        "timeout": server.timeout,
+        "tools": _mcp_cached_tools(cached),
+        "error": "",
+        "last_error": last_errors.get(server.name, ""),
+    }
+
 
 class NativeBridge(QObject):
     """QML context object named ``bridge``; all Operations I/O runs off the GUI thread."""
@@ -65,6 +198,9 @@ class NativeBridge(QObject):
     # 非致命提示（「事已经按你说的办好了，只是有个附带动作没成」）。界面当提示显示，
     # 不当错误：最近工程列表这类便利记录写不进去，不该把一个做完的动作染成失败。
     noticeRaised = Signal(str)
+    # 外部 MCP 服务器：保存或刷新之后后台线程已经改过工具表，界面要重读 mcpServers()。
+    # 从后台线程发射是安全的（Qt 把调用排进界面线程的队列），和 _workerDone 同一做法。
+    mcpServersChanged = Signal()
     # 进程完整性不变，所以 integrityChanged 从不发射；它只是让 Property 有 notify。
     integrityChanged = Signal()
 
@@ -161,12 +297,20 @@ class NativeBridge(QObject):
         self._appearance_layout = appearance.DEFAULT_LAYOUT
         self._appearance_dark = False
         self._appearance_watching = False
+        # 外部 MCP 服务器正在后台刷新：重复点「测试连接」不该并行起两个刷新线程。
+        self._mcp_refreshing = False
         self._workerDone.connect(self._on_worker_done)
 
     def close(self) -> None:
         """Cancel owned tasks and close this project runtime; ignore late UI callbacks."""
         self._closed = True
         self._close_assistant()
+        # 外部 MCP 服务器是我们自己起的子进程：进程退出前必须收掉，否则每台都会留下
+        # 一个没人管的孤儿进程。收尾失败也不能拦住关窗，所以只吞掉异常。
+        try:
+            mcp_client.close()
+        except Exception:  # noqa: BLE001 - 退出路径上不允许再抛
+            pass
         self._pool.shutdown(wait=False, cancel_futures=True)
 
     def load_appearance(self) -> None:
@@ -518,6 +662,121 @@ class NativeBridge(QObject):
             return {"profile": profile, "catalog": providers.catalog(), "path": str(store.path)}
 
         self._submit("global_settings", work)
+
+    # -- 外部 MCP 服务器（全局设置，跨工程共用） ------------------------------
+    # 界面只负责「列出、编辑、触发刷新」；读配置、起子进程、注册工具都在 mcp_client 里，
+    # 这里不重复实现那份逻辑，只做界面形状的转换与后台调度。
+
+    @Slot(result="QVariantMap")
+    def mcpServers(self) -> dict:
+        """MCP 服务器清单 + 上次发现的工具；只读配置与缓存，不现场建连。
+
+        ``tools`` 取缓存是为了「点开面板立刻有东西看」：真连接要等握手和超时，
+        不能让一条列表把界面拖住；要最新结果按「测试连接」或「刷新工具」。
+        """
+        from . import tool_api
+
+        snapshot: dict[str, Any] = {
+            "ok": True,
+            "path": str(mcp_client.default_path()),
+            "cache_path": str(mcp_client.default_cache_path()),
+            "error": "",
+            "servers": [],
+            "startup_error": tool_api.MCP_STARTUP_ERROR or "",
+        }
+        try:
+            servers = mcp_client.load_servers()
+        except mcp_client.McpConfigError as exc:
+            # 坏配置要报成错误而不是空列表：说「没有服务器」会把用户引到错方向
+            # （他会去满头找设置，而真正要改的是那个 JSON 文件）。
+            snapshot["ok"] = False
+            snapshot["error"] = str(exc)
+            return snapshot
+        cache = mcp_client.load_cache()
+        last_errors = mcp_client.last_errors()
+        snapshot["servers"] = [_mcp_server_row(server, cache.get(server.name) or [], last_errors)
+                               for server in servers]
+        return snapshot
+
+    @Slot("QVariantList")
+    def saveMcpServers(self, rows: object) -> None:
+        """保存整份 MCP 服务器清单（界面传全量），成功后后台刷新工具。
+
+        写文件是毫秒级的小操作，留在界面线程无妨；建连与 ``tools/list`` 要等超时，
+        所以刷新一律扔到后台，完成后再发 ``mcpServersChanged`` 让面板重读。
+        """
+        names: list[str] = []
+        try:
+            servers = [_mcp_server_from_row(row, index)
+                       for index, row in enumerate(list(rows or []))]
+            names = [server.name for server in servers]
+            duplicated = sorted({name for name in names if names.count(name) > 1})
+            if duplicated:
+                # 重名不能存：load_servers 会因为重名整份配置读不出来，
+                # 那比在这里报错更难恢复（界面上连列表都没有了）。
+                raise mcp_client.McpConfigError(f"服务器名称重复：{'、'.join(duplicated)}")
+            previous = {server.name for server in mcp_client.load_servers()}
+            target = mcp_client.save_servers(servers)
+        except (mcp_client.McpConfigError, ValueError) as exc:
+            self.errorOccurred.emit("mcp", str(exc))
+            return
+        removed = previous - set(names)
+        if removed:
+            self._drop_mcp_tools_of(removed)
+        self.noticeRaised.emit(f"MCP 配置已保存：{target}，正在后台刷新工具…")
+        self._refresh_mcp_servers(close_sessions=True)
+
+    @Slot()
+    def refreshMcpServers(self) -> None:
+        """后台重连所有启用的服务器并重发现工具；结果通过 mcpServersChanged 回报。"""
+        self._refresh_mcp_servers()
+
+    @staticmethod
+    def _drop_mcp_tools_of(names: set[str]) -> None:
+        """配置里删掉（或改名）的服务器，它的工具要立刻从工具表撤掉。
+
+        mcp_client.refresh 只清理「还在配置里」的服务器留下的过期工具，被删掉的服务器
+        注册过的工具名会一直挂在工具表上：模型还能调用它，而一调用又会把这台已经
+        不存在的服务器重新拉起来。归属判断用内核自己维护的那张表——重名后缀让工具名
+        无法反推出属于谁，按前缀猜会误伤名字有包含关系的服务器。
+        """
+        from . import tool_api
+
+        owned = getattr(mcp_client, "_OWNED", None)
+        if not isinstance(owned, dict):
+            return
+        for tool_name, owner in list(owned.items()):
+            if owner in names:
+                tool_api.TOOLS.pop(tool_name, None)
+
+    def _refresh_mcp_servers(self, *, close_sessions: bool = False) -> None:
+        """在后台线程里刷新外部工具，结束时发 ``mcpServersChanged``。
+
+        没有直接用 ``mcp_client.refresh_async``，是因为「重配前先 close」必须排在刷新
+        之前：close 要等每台服务器优雅退出（最坏几秒），同样不能占界面线程，所以两件事
+        一起放进同一个后台线程里按顺序做。
+        """
+        if self._mcp_refreshing:
+            return  # 面板已经按状态禁用了按钮，这里再兜一层：不并行起两个刷新线程
+        self._mcp_refreshing = True
+
+        def run() -> None:
+            from . import tool_api
+
+            try:
+                if close_sessions:
+                    mcp_client.close()
+                try:
+                    # 每台服务器的成败已经落在 last_errors() 与工具缓存里，面板重读
+                    # mcpServers() 就能看到，报告本身不用再往界面上塞一份。
+                    mcp_client.refresh(tool_api.Tool, tool_api._register)
+                except Exception as exc:  # noqa: BLE001 - 后台线程里的异常没人接得住
+                    self.errorOccurred.emit("mcp", f"MCP 工具刷新失败：{exc}")
+            finally:
+                self._mcp_refreshing = False
+                self.mcpServersChanged.emit()
+
+        threading.Thread(target=run, name="mcp-settings-refresh", daemon=True).start()
 
     @Slot()
     def closeProject(self) -> None:

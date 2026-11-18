@@ -43,8 +43,9 @@ def theme_shell(tmp_path, monkeypatch):
         return window.property('theme')[name]
 
     def combo():
-        launcher = window.findChild(object, 'launcherPage')
-        return launcher.findChild(object, 'appearanceMode')
+        # 外观下拉已搬进独立设置页（SettingsPage.qml）：按 objectName 在整个窗口里找，
+        # 不再挂在启动页下面——设置页常驻在 StackLayout 里，没打开时控件也存在。
+        return window.findChild(object, 'appearanceMode')
 
     feedback['settle'] = settle
     feedback['theme_color'] = theme_color

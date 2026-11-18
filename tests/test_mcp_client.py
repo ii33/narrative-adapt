@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import sys
 from pathlib import Path
 
@@ -228,16 +229,29 @@ def test_timeout_closes_session_and_reports(config_file):
     assert mcp_client.open_sessions() == {}  # 超时的会话被关掉，不留僵尸进程
 
 
-def test_http_transport_is_saved_but_refused_on_connect(registry):
+def test_http_transport_is_saved_and_reports_connection_error(registry):
+    """http 条目能保存；连不上时给的是我们自己的错误，不是 urllib 的裸异常。
+
+    这里只钉「配置层不管传输差别、失败只落在这一台」；http 传输本身（握手、SSE、
+    会话头、DELETE）在 test_mcp_http_client.py 里用假服务器全程覆盖。
+    """
     tools, register = registry
+    # 先占一个随机端口再放开：连它必然被拒绝，且不需要 DNS、不碰外网
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
     web = mcp_client.McpServer.from_dict(
-        {"name": "web", "transport": "http", "url": "https://example.invalid/mcp"})
+        {"name": "web", "transport": "http", "url": f"http://127.0.0.1:{port}/mcp",
+         "timeout": 5})
     mcp_client.save_servers([web])
     assert mcp_client.load_servers()[0].transport == "http"
 
     report = mcp_client.refresh(tool_api.Tool, register, tools=tools)
     message = report["errors"]["web"]
-    assert "stdio" in message and "web" in message
+    assert "web" in message and "连不上" in message
+    assert f"127.0.0.1:{port}" in message
+    assert "URLError" not in message  # 裸的 urllib 异常不许透到上层
     assert tools == {}
 
 
