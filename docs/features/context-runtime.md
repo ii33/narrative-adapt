@@ -1,8 +1,8 @@
-# 上下文预算与自动压缩（SDK/runtime 0.1.5rc1）
+# 上下文预算与自动压缩（SDK/runtime 0.2.2rc2）
 
 > 本文只讲运行时配置与压缩计量，不涉及提取规则；提取规则只看[提取任务规范](../extraction/SPEC.md)。
 
-本轮依据安装的 `deepseek-harness-sdk==0.1.5rc1` 与同版本 runtime 二进制内嵌的官方插件源码、README，以及 `--dump-default-config`/`--dump-config` 核实配置；未以当前主分支文档替代安装版本。运行器同时检查两个已安装发行包的版本。
+本轮依据安装的 `deepseek-harness-sdk==0.2.2rc2` 与同版本 runtime 二进制内嵌的官方插件源码、README，以及 `--dump-default-config`/`--dump-config` 核实配置；未以当前主分支文档替代安装版本。运行器同时检查两个已安装发行包的版本。
 
 | 设置 | 新项目默认 | 约束与作用 |
 | --- | ---: | --- |

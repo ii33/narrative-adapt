@@ -20,7 +20,7 @@ from .model_gateway import COMPACTION_MODEL, RUNTIME_EFFORTS, ModelGateway
 from .prompt_defaults import DEFAULT_PROMPTS
 from .providers import preset
 
-SDK_VERSION = "0.2.1rc2"
+SDK_VERSION = "0.2.2rc2"
 
 CONVERSATION_SYSTEM_PROMPT = DEFAULT_PROMPTS["system"]["text"]
 
