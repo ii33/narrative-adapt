@@ -240,7 +240,7 @@ Item {
         SubmissionFeedback{state:contentSubmission}
 
         anchors.fill: parent
-        anchors.margins: 16
+        anchors.margins: 12
         spacing: 8
         // 这一页主体是并排铺满的三栏，没有标题行：顶部单独给一行放窗口按钮，位置与其它页一致。
         RowLayout {

@@ -85,7 +85,7 @@ Item {
             id: previsBar
             objectName: "previsBar"
             Layout.fillWidth: true
-            Layout.preferredHeight: 32
+            Layout.preferredHeight: 40
             // 透明：底色就是窗口底色，不另调一个颜色，避免和窗口差一档。
             color: "transparent"
 
@@ -96,8 +96,8 @@ Item {
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 8
-                anchors.rightMargin: 4
+                anchors.leftMargin: 12
+                anchors.rightMargin: 128
                 spacing: 6
 
                 ComboBox {
@@ -135,9 +135,10 @@ Item {
             WindowChrome {
                 id: controls
                 app: root.app
-                anchors.verticalCenter: parent.verticalCenter
+                anchors.top: parent.top
+                anchors.topMargin: 12
                 anchors.right: parent.right
-                anchors.rightMargin: 4
+                anchors.rightMargin: 12
             }
         }
 

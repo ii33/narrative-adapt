@@ -155,9 +155,10 @@ Item {
         }
     }
     ScrollView {
+        id: settingsScroll
         objectName:"projectSettingsScroll"
         anchors.fill: parent
-        anchors.margins: 20
+        anchors.margins: 12
         contentWidth: availableWidth
         ColumnLayout {
         SubmissionFeedback{state:contentSubmission}
@@ -166,6 +167,9 @@ Item {
             spacing: 12
             RowLayout {
                 Layout.fillWidth: true
+                // 这一页整体在 ScrollView 里，内容比视口窄一条滚动条；
+                // 把这部分补回来，右上角那组控件才和其它页停在同一位置。
+                Layout.rightMargin: -(settingsScroll.width - settingsScroll.availableWidth)
                 Label { text:"工程设置"; font.pixelSize:18; font.weight:Font.DemiBold; color:page.t.ink }
                 Item { Layout.fillWidth: true }
                 WindowChrome { app: page.app }

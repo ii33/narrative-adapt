@@ -373,7 +373,7 @@ Item {
     ColumnLayout {
         SubmissionFeedback{state:contentSubmission}
 
-        anchors.fill:parent;anchors.margins:16;spacing:10
+        anchors.fill:parent;anchors.margins:12;spacing:10
         Flickable {
             id:headerViewport;objectName:"screenplayHeaderViewport"
             Layout.fillWidth:true;Layout.preferredHeight:headerActions.implicitHeight+(contentWidth>width?10:0)

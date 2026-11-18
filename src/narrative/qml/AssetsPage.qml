@@ -76,7 +76,7 @@ Rectangle {
     ColumnLayout {
         SubmissionFeedback{state:contentSubmission}
 
-        anchors.fill: parent; anchors.margins: 20; spacing: 12
+        anchors.fill: parent; anchors.margins: 12; spacing: 12
         RowLayout {
             Layout.fillWidth: true
             Label { text: "资产"; font.pixelSize: 22; font.bold: true; color: t.ink }

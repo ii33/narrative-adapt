@@ -1011,7 +1011,7 @@ Item {
         SubmissionFeedback{state:contentSubmission}
 
         anchors.fill: parent
-        anchors.margins: 20
+        anchors.margins: 12
         spacing: 12
         Label { visible: page.adaptationMode && !!page.adaptationNotice; text: page.adaptationNotice; color: t.warn; wrapMode: Text.Wrap; Layout.fillWidth: true }
 

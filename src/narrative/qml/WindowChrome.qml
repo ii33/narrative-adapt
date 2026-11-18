@@ -3,11 +3,14 @@
 // 位置、间距、顺序就完全一致，不会再出现“有的页在标题行、有的页在别的行”。
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 
 Row {
     id: chrome
     property var app
     spacing: 6
+    // 顶对齐：各页标题行高度不同，居中对齐会让这组控件的纵向位置每页差几像素。
+    Layout.alignment: Qt.AlignTop
 
     Button {
         objectName: "assistantToggle"

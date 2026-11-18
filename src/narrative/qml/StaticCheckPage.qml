@@ -175,7 +175,7 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 20
+        anchors.margins: 12
         spacing: 10
         RowLayout {
             Layout.fillWidth: true
