@@ -32,9 +32,6 @@ ApplicationWindow {
     // 整张表被替换，所有绑定自动重算；页面只认令牌名，不认具体颜色。
     readonly property var theme: bridge.theme
 
-    // 右上角浮着「协作者 + 窗口按钮」，页面顶行在右侧让出这条宽度，别压到它们下面。
-    readonly property int chromeInset: 116
-
 
     // 主框构：紧凑（默认，各区域共边）或岛屿（各区域浮成独立卡片，卡片间留缝）。
     // 岛屿只是加一层留白与圆角：所有 inset 在紧凑模式下都是 0，渲染与改动前一致。
@@ -585,24 +582,6 @@ ApplicationWindow {
     Component { id: projectSettingsPageComponent; ProjectSettingsPage { app: windowRoot } }
 
 
-
-    // 右上角这组控件由窗口统一画：位置在所有页面上完全一致，且贴窗口边。
-    // 页面只负责在右侧留出 chromeInset 的宽度（见各页顶部 RowLayout）。
-    Item {
-        objectName: "workspaceWindowChrome"
-        anchors.fill: parent
-        visible: app.mode === "workspace"
-        z: 1000
-
-        WindowChrome {
-            app: app
-            anchors.top: parent.top
-            anchors.right: parent.right
-            anchors.topMargin: 4
-            anchors.rightMargin: 6
-        }
-    }
-
     // 启动页的窗口按钮与拖动区：浮在内容之上，不占布局（放在 StackLayout 里会被当成新的一页）。
     Item {
         objectName: "launcherWindowChrome"
@@ -617,12 +596,12 @@ ApplicationWindow {
             anchors.right: parent.right
             height: 44
         }
-        WindowChrome {
+        WindowControls {
             app: app
             anchors.top: parent.top
             anchors.right: parent.right
-            anchors.topMargin: 4
-            anchors.rightMargin: 6
+            anchors.topMargin: 10
+            anchors.rightMargin: 12
         }
     }
 }

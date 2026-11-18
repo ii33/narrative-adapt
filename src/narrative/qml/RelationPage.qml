@@ -265,7 +265,6 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             Layout.minimumWidth: 0
-            Layout.rightMargin: page.app.chromeInset
             spacing: 8
 
             Label {
@@ -284,6 +283,7 @@ Item {
                 Layout.maximumWidth: 320
             }
             Item { Layout.fillWidth: true }
+            WindowChrome { app: page.app }
         }
 
         Flow {

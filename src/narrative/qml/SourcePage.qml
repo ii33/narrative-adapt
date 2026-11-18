@@ -242,6 +242,13 @@ Item {
         anchors.fill: parent
         anchors.margins: 16
         spacing: 8
+        // 这一页主体是并排铺满的三栏，没有标题行：顶部单独给一行放窗口按钮，位置与其它页一致。
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 24
+            Item { Layout.fillWidth: true }
+            WindowChrome { app: page.app }
+        }
         Label {
             visible: page.notice.length > 0
             text: page.notice
@@ -252,7 +259,6 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.rightMargin: page.app.chromeInset
             spacing: 12
             Rectangle {
                 Layout.preferredWidth: 240

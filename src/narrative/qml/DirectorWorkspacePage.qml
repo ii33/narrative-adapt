@@ -97,8 +97,7 @@ Item {
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: 8
-                // 右上角那组控件由窗口统一画，这里让出同一条宽度。
-                anchors.rightMargin: root.app.chromeInset + 4
+                anchors.rightMargin: 4
                 spacing: 6
 
                 ComboBox {
@@ -133,7 +132,13 @@ Item {
                 Item { Layout.fillWidth: true }
             }
 
-
+            WindowChrome {
+                id: controls
+                app: root.app
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.right: parent.right
+                anchors.rightMargin: 4
+            }
         }
 
         Rectangle {
