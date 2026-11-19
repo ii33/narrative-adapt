@@ -149,7 +149,7 @@ def test_global_line_drawing_default_applies_without_project_override(prepared):
     row = next(row for row in ops.load_prompt_settings()['prompts'] if row['id'] == 'sketch_style')
     assert row['overridden'] is False
     assert row['effective'] == DEFAULT_PROMPTS['sketch_style']['text']
-    assert row['version'] == '3'
+    assert row['version'] == DEFAULT_PROMPTS['sketch_style']['version']
     for simple_color in (False, True):
         prompt = sketch_render_instructions(row['effective'], simple_color)
         assert '几何体' in prompt and '白底' in prompt

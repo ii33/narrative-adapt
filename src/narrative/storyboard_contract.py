@@ -91,6 +91,27 @@ _ACTIONS.extend([
     _action('add_panel_candidate', {'shot_id': _ID, 'panel_id': _ID, 'image_path': _ID}, ['shot_id', 'panel_id', 'image_path']),
     _action('adopt_panel_candidate', {'shot_id': _ID, 'panel_id': _ID, 'candidate_id': _NULL_ID}, ['shot_id', 'panel_id', 'candidate_id']),
 ])
+# B0 资产需求：需求（想要什么）与引用（visual_elements 的 asset_id）分开存，
+# 所以需求自己一组动作，永远不改引用。
+_NEED = {'type': 'object', 'additionalProperties': False, 'required': ['kind', 'name'],
+         'properties': {'kind': {'type': 'string', 'enum': ['person', 'prop', 'location', 'material']},
+                        'name': _ID, 'variant': {'type': 'string'}, 'note': {'type': 'string'}}}
+_ACTIONS.extend([
+    _action('set_asset_needs', {'needs': {'type': 'array', 'items': _NEED}}, ['needs']),
+    _action('set_shot_asset_needs', {'shot_id': _ID, 'needs': {'type': 'array', 'items': _NEED}}, ['shot_id', 'needs']),
+])
+# B1a 每镜内部时间轴：offset_ms 一律相对镜首；segments 只在显式覆盖时才落盘。
+_PLAN = {'offset_ms': _MS, 'moment_name': {'type': 'string'}, 'description': {'type': 'string'}}
+_ACTIONS.extend([
+    _action('add_timeline_keyframe', {'shot_id': _ID, **_PLAN}, ['shot_id', 'offset_ms']),
+    _action('update_timeline_keyframe', {'shot_id': _ID, 'new_offset_ms': _MS, **_PLAN}, ['shot_id', 'offset_ms']),
+    _action('delete_timeline_keyframe', {'shot_id': _ID, 'offset_ms': _MS}, ['shot_id', 'offset_ms']),
+    _action('set_timeline_segments', {'shot_id': _ID, 'segments': {'type': 'array', 'items': {'type': 'array', 'items': _MS, 'minItems': 2, 'maxItems': 2}}},
+            ['shot_id', 'segments']),
+    # B1c 跨镜衔接：from_shot 为 null 表示取消衔接。
+    _action('set_shot_handoff', {'shot_id': _ID, 'from_shot': _NULL_ID, 'ref_frame': {'type': 'string', 'enum': ['last', 'first']}},
+            ['shot_id', 'from_shot']),
+])
 for _schema in _ACTIONS:
     if _schema['properties']['op']['const'] == 'set_keyframe':
         _schema['oneOf'] = [{'required': ['sketch_path'], 'not': {'required': ['style_path']}},

@@ -265,6 +265,49 @@ def render_camera_guide(layout, view, objects):
     return image
 
 
+def _file_sha256(path, label):
+    """按内容比，不按路径比：同一个文件换名字不算依据变化。"""
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError(f'{label}缺失，请补齐后再生成')
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def frame_diagram(shot, offset_ms):
+    """该时刻已绑定的框图（关键帧草图）哈希；这一帧还没有图就留空。"""
+    frame = next((row for row in shot.get('keyframes') or [] if row.get('offset_ms') == offset_ms), None)
+    sketch = (frame or {}).get('sketch_path')
+    if not sketch:
+        return None
+    return {'frame_id': frame['id'], 'sha256': _file_sha256(sketch, '生成依据框图')}
+
+
+def handoff_reference(board, shot):
+    """衔接帧：把来源镜头的末帧（或首帧）当本镜首帧的参考图。
+
+    来源镜还没出图时不算依据变化，只是这次没有参考图可发；来源图被换了，
+    依据才真的变。
+    """
+    handoff = shot.get('handoff')
+    if not handoff:
+        return None, None
+    source = next((row for row in board['shots'] if row['id'] == handoff['from_shot']), None)
+    if source is None:
+        raise ValueError('衔接帧来源镜头不属于本场')
+    frames = source.get('keyframes') or []
+    side = handoff.get('ref_frame', 'last')
+    frame = (frames[-1] if side == 'last' else frames[0]) if frames else None
+    sketch = (frame or {}).get('sketch_path')
+    return ({'from_shot': source['id'], 'ref_frame': side, 'frame_id': (frame or {}).get('id'),
+             'sha256': _file_sha256(sketch, '衔接帧参考图') if sketch else None},
+            Path(sketch) if sketch else None)
+
+
+def changed_basis_keys(recorded, current):
+    """两个依据差在哪些键上；报错要能让人判断「到底哪儿变了」。"""
+    return [key for key in sorted(set(recorded) | set(current)) if recorded.get(key) != current.get(key)]
+
+
 class StoryboardArtMixin:
     if TYPE_CHECKING:
         # Implemented by the composited storyboard and screenplay Operations.
@@ -278,9 +321,11 @@ class StoryboardArtMixin:
 
     def generate_storyboard_sketch(self, unit_id, shot_id, offset_ms, layout, expected_revision, prompt='', simple_color=False):
         """Generate a descriptive sketch from a private blocking guide; never fall back."""
+        from .storyboard_audio import preview_audio
+        from .storyboard_camera import camera_view
         from .storyboard_sketch_style import sketch_render_instructions
         from .storyboard_style_provider import render_sketch_image
-        from .storyboard_timing import integer
+        from .storyboard_timing import integer, object_states
 
         if not isinstance(prompt, str) or type(simple_color) is not bool:
             raise ValueError('草图提示须为文本，简彩须为布尔值')
@@ -303,26 +348,35 @@ class StoryboardArtMixin:
         basis, references = self._storyboard_sketch_basis(board, shot, offset_ms, context)
         asset_descriptions = [{key: card[key] for key in ('id', 'category', 'title', 'detail', 'prompt') if key in card}
                               for card in basis['assets']]
+        # 提示词照旧用「此刻」的调度、命名时刻与声音节拍：它们该随排演变。
+        # 但它们不进生成依据（见 _storyboard_sketch_basis），否则每调一次调度就判依据失效。
+        action_ms = shot.get('action_start_ms', 0) + offset_ms
+        objects = object_states(board, action_ms)
+        moments = [{key: marker[key] for key in ('id', 'name', 'time_ms')} for marker in board.get('markers', [])]
+        cues = [{key: sound[key] for key in ('id', 'kind', 'label') if key in sound}
+                for sound in preview_audio(board, shot, offset_ms)]
+        camera = camera_view(board, shot, offset_ms, objects)
         text = (
             sketch_render_instructions(basis['sketch_style'], simple_color)
             + '以构图参考确认主体位置和景别，具体人物、物件和动作以正文与调度依据为准。'
             + '\n镜头稿与视觉元素：' + json.dumps({key: basis[key] for key in ('description', 'shot_language', 'visual_elements', 'sound_intents', 'sound_notes')}, ensure_ascii=False)
             + '\n本镜描述：' + shot['title'] + '\n本镜正文：' + json.dumps(basis['blocks'], ensure_ascii=False)
             + '\n创作约定：' + json.dumps(basis['creative_agreement'], ensure_ascii=False)
-            + '\n当时共享调度：' + json.dumps(basis['objects'], ensure_ascii=False)
-            + '\n命名时刻与当前动作时间：' + json.dumps({'action_ms': basis['action_ms'], 'moments': basis['named_moments']}, ensure_ascii=False)
-            + '\n当前声音节拍：' + json.dumps(basis['active_sound_cues'], ensure_ascii=False)
+            + '\n当时共享调度：' + json.dumps(objects, ensure_ascii=False)
+            + '\n命名时刻与当前动作时间：' + json.dumps({'action_ms': action_ms, 'moments': moments}, ensure_ascii=False)
+            + '\n当前声音节拍：' + json.dumps(cues, ensure_ascii=False)
             + '\n只绘制当前时刻：后续命名时刻不得提前显露，声音本身不意味着声源人物必须入画。'
-            + '\n摄影机与投影（仅2.5D近似，不替代姿态、接触与复杂遮挡判断）：' + json.dumps(basis['camera_view'], ensure_ascii=False)
+            + '\n摄影机与投影（仅2.5D近似，不替代姿态、接触与复杂遮挡判断）：' + json.dumps(camera, ensure_ascii=False)
             + '\n关联资产：' + json.dumps(asset_descriptions, ensure_ascii=False)
-            + '\n参考图顺序：首张是构图参考；其后图像为关联资产外观依据，不把参考图布局或文字画进成图。'
+            + '\n参考图顺序：首张是构图参考；其后图像为关联资产外观依据；衔接帧参考图也按外观依据使用，'
+              '不把参考图的布局或文字画进成图。'
             + '\n本次绘制要求：' + prompt
         )
         with tempfile.TemporaryDirectory(prefix='storyboard-sketch-') as temp:
             guide = Path(temp) / 'composition-guide.png'
             output = Path(temp) / 'generated-sketch.png'
-            if shot.get('camera', {}).get('keys') and basis['objects'] and not layout.get('subjects'):
-                render_camera_guide(layout, basis['camera_view'], basis['objects']).save(guide)
+            if shot.get('camera', {}).get('keys') and objects and not layout.get('subjects'):
+                render_camera_guide(layout, camera, objects).save(guide)
             else:
                 render_sketch(layout).save(guide)
             receipt = render_sketch_image(guide, text, output, reference_images=references)
@@ -339,15 +393,22 @@ class StoryboardArtMixin:
             )
 
     def _storyboard_sketch_basis(self, board, shot, offset_ms, context, asset_db=None):
-        from .storyboard_audio import preview_audio
-        from .storyboard_camera import camera_view
-        from .storyboard_sketch_style import current_sketch_style
-        from .storyboard_timing import object_states
+        """出图依据＝只收「人写下的、不随排演漂移」的输入。
 
-        objects = object_states(board, shot.get('action_start_ms', 0) + offset_ms)
-        assets = []
-        references = []
-        for identifier in sorted({row['asset_id'] for row in [*objects, *shot.get('visual_elements', [])] if row.get('asset_id')}):
+        以前这里还带着当时的二维调度（object_states）、机位投影、命名时刻和正在响的
+        声音节拍。它们本来就该跟着排演变，结果每调一次调度或挪一个动作关键点，出图
+        就被判「依据已变化」而拒绝——「出图必被拒」的根源就在这里。
+
+        现在只剩：本镜正文块、创作约定、项目风格、资产卡（含图片哈希）、本帧已有框图
+        哈希、衔接帧引用。这些变了，才真的意味着这张图该重画。
+        """
+        from .storyboard_sketch_style import current_sketch_style
+
+        assets, references = [], []
+        # 资产从静态绑定取（场平面对象 + 视觉元素），不从 object_states 取：位置会漂，asset_id 不会。
+        identifiers = sorted({row['asset_id'] for row in [*board.get('objects', []), *shot.get('visual_elements', [])]
+                              if row.get('asset_id')})
+        for identifier in identifiers:
             if asset_db is None:
                 card = self.get_asset(identifier)
             else:
@@ -355,7 +416,9 @@ class StoryboardArtMixin:
                 if not row:
                     raise ValueError('生成依据资产已删除')
                 card = self._asset_card(json.loads(row[0]))
-            card = {key: value for key, value in card.items() if key != 'revision'}
+            # revision 与 used_by 是给人看的派生信息（谁在用这张卡）：别处多一处绑定就会变，
+            # 留着等于让别的场次把本帧的出图判成失效。
+            card = {key: value for key, value in card.items() if key not in ('revision', 'used_by')}
             for field in ('images', 'reference_images'):
                 for image in card.get(field, []):
                     path = Path(image['path'])
@@ -365,17 +428,16 @@ class StoryboardArtMixin:
                     if path not in references:
                         references.append(path)
             assets.append(card)
-        action_ms = shot.get('action_start_ms', 0) + offset_ms
-        moments = [{key: marker[key] for key in ('id', 'name', 'time_ms')} for marker in board.get('markers', [])]
-        cues = [{key: sound[key] for key in ('id', 'kind', 'label') if key in sound}
-                for sound in preview_audio(board, shot, offset_ms)]
+        diagram = frame_diagram(shot, offset_ms)
+        handoff, handoff_image = handoff_reference(board, shot)
+        if handoff_image is not None and handoff_image not in references:
+            references.append(handoff_image)
         return {'unit_id': board['unit_id'], 'shot_id': shot['id'], 'offset_ms': offset_ms,
                 'sound_notes': shot.get('sound_notes', ''), 'description': shot.get('description', ''), 'shot_language': shot.get('shot_language', ''), 'visual_elements': shot.get('visual_elements', []), 'sound_intents': [row for row in board.get('sound_intents', []) if row['id'] in shot.get('sound_intent_ids', [])],
-                'action_ms': action_ms, 'named_moments': moments, 'active_sound_cues': cues,
                 'body_revision': context['unit']['body_revision'], 'sketch_style': current_sketch_style(self),
                 'blocks': [row for row in context['unit']['blocks'] if row['id'] in shot['source_block_ids']],
                 'creative_agreement': context.get('creative_agreement', {}), 'project_style': context['project_style'],
-                'objects': objects, 'camera_view': camera_view(board, shot, offset_ms, objects), 'assets': assets}, references
+                'assets': assets, 'frame_diagram': diagram, 'handoff': handoff}, references
 
     def export_storyboard_style_package(self, unit_id, shot_id, output_path):
         board = self.read_storyboard(unit_id)

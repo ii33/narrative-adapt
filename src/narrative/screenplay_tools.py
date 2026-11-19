@@ -47,7 +47,7 @@ def register(Tool, register_tool, validate):
 
     add("read_storyboard", "按场读取分镜、静帧、预演帧率和共享二维调度对象/动作轨。毫秒区分剪辑时间、镜内offset_ms和场内动作time_ms；revision用于下一次原子编辑", {
         "unit_id": text | {"required": True}})
-    add("read_storyboard_assets_context", "读取选中镜头及正文、全部资产对象目录，供逐镜分析人物具体形象/物品/场景；不自动建对象或猜测缺失内容", {
+    add("read_storyboard_assets_context", "读取选中镜头及正文、全部资产对象目录，供逐镜分析人物具体形象/物品/场景；不自动建对象或猜测缺失内容。返回的asset_needs是本场需求与两类缺口摘要（需求未落实／引用悬空），只读", {
         "unit_id": text | {"required": True}, "shot_ids": strings | {"required": True, "minItems": 1}})
     add("submit_storyboard_assets", "只保存所选镜头的待确定元素需求，不创建或选择资产。每个visual_elements项仅含kind/name/usage，程序添加未绑定状态。保留所有原已确定资产行，新结果替换原未确定行，不按同名合并。允许空列表；必须覆盖shot_ids恰好一次。资产由用户在列表手动选择或建立。内容问题暂存并局部patch_content_submission修补", {
         "unit_id": text | {"required": True}, "shot_ids": strings | {"required": True, "minItems": 1}, "revision": integer | {"required": True}, "expected_body_revision": integer | {"required": True},
@@ -58,6 +58,18 @@ def register(Tool, register_tool, validate):
         "expected_asset_revision": integer,
         "element_refs": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["shot_id", "index"], "additionalProperties": False,
             "properties": {"shot_id": text, "index": {"type": "integer", "minimum": 0}}}}}, writes=True)
+    need = {"type": "object", "additionalProperties": False, "required": ["kind", "name"],
+            "properties": {"kind": {"type": "string", "enum": ["person", "prop", "location", "material"]},
+                           "name": text, "variant": text, "note": text}}
+    add("read_asset_needs", "只读本场资产需求与缺口：needs每项含scope(unit|shot)/shot_id/kind/name/variant/note/bound_asset_id，dangling列出visual_elements引用悬空（asset_id不存在或资产无参考图），counts给计数。需求与引用分开存，读取不改数据", {
+        "unit_id": text | {"required": True}})
+    add("declare_asset_needs", "声明场级或镜级资产需求（kind=person|prop|location|material、name、可选variant/note），只描述要什么，不建卡、不绑卡、不改visual_elements引用。replace=true（默认）整体替换该范围原需求，false按同对象同形态去重后追加；没给的一侧保持不动。需求落实靠引用：用户在元素列表选资产，或create_missing_storyboard_assets补建", {
+        "unit_id": text | {"required": True}, "revision": integer | {"required": True},
+        "unit_needs": {"type": "array", "items": need, "description": "场级需求；省略表示不改场级"},
+        "shot_needs": {"type": "array", "description": "镜级需求：每项{shot_id, needs}；省略表示不改镜级",
+                       "items": {"type": "object", "additionalProperties": False, "required": ["shot_id", "needs"],
+                                 "properties": {"shot_id": text, "needs": {"type": "array", "items": need}}}},
+        "replace": {"type": "boolean", "description": "默认true整体替换；false追加"}}, writes=True)
     add("check_storyboard", "只读静态检查本场引用、时间、媒体缺失及实际生成依据变化；成功的视频也可需复核。返回影响范围，不改旧图、不自动生成或审批", {
         "unit_id": text | {"required": True}})
     add("preview_storyboard", "只读求指定场剪辑time_ms的镜头、镜内local_ms、共享action_ms、保持的最近静帧和二维对象状态。切点属于下一镜，片尾为末镜末画面；与导演台使用同一时间约定，不写库", {
@@ -69,7 +81,7 @@ def register(Tool, register_tool, validate):
     add("save_storyboard_camera_preset", "将基础运镜参数保存为工程预设。settings含preset、可选amount/start/end机位；不保存场内对象引用", reason | {
         "name": text | {"required": True}, "settings": obj | {"required": True},
         "expected_revision": integer | {"required": True}}, writes=True)
-    add("apply_storyboard_changes", "原子编辑导演台，先read_storyboard取得revision。镜头create_shot(title,duration_ms,source_block_ids,action_start_ms=0)/update_shot(shot_id,...)/move_shot(shot_id,index)/delete_shot；action_ms=action_start_ms+镜内时间，调序不改动作。静帧set_keyframe(shot_id,offset_ms,sketch_path或style_path)/move_keyframe(shot_id,frame_id,offset_ms)/delete_keyframe(shot_id,frame_id)。set_fps(fps整数1..120)。调度create_object(name,kind=person|prop|set,x,y,rotation?,depth?,parent_id?,asset_id?,state?)/update_object(object_id,...)/delete_object(object_id)。位置x/y为0..1场平面，rotation为世界朝向度。set_action_keyframe(object_id,time_ms,x?,y?,rotation?,depth?,state?,interpolation=hold|linear)；move_action_keyframe(object_id,keyframe_id,time_ms)/delete_action_keyframe(object_id,keyframe_id)。interpolation控制到下一点的保持或线性运动，状态离散保持。set_approved(approved)按场定案；已定案须显式解除才能改方案。缩短时先显式调整越界帧，不自动丢弃。", {
+    add("apply_storyboard_changes", "原子编辑导演台，先read_storyboard取得revision。镜头create_shot(title,duration_ms,source_block_ids,action_start_ms=0)/update_shot(shot_id,...)/move_shot(shot_id,index)/delete_shot；action_ms=action_start_ms+镜内时间，调序不改动作。静帧set_keyframe(shot_id,offset_ms,sketch_path或style_path)/move_keyframe(shot_id,frame_id,offset_ms)/delete_keyframe(shot_id,frame_id)。镜内时间轴：add_timeline_keyframe(shot_id,offset_ms,moment_name?,description?)/update_timeline_keyframe(shot_id,offset_ms,new_offset_ms?,moment_name?,description?)/delete_timeline_keyframe(shot_id,offset_ms)；set_timeline_segments(shot_id,segments=[[a,b],...])显式覆盖分段，[]回到相邻关键帧推导；offset_ms均相对镜首，段端点须落在已有关键帧上、单段默认不超过2000ms。跨镜衔接set_shot_handoff(shot_id,from_shot,ref_frame=last|first)，from_shot=null取消。资产需求set_asset_needs(needs)/set_shot_asset_needs(shot_id,needs)只改需求不动引用。set_fps(fps整数1..120)。调度create_object(name,kind=person|prop|set,x,y,rotation?,depth?,parent_id?,asset_id?,state?)/update_object(object_id,...)/delete_object(object_id)。位置x/y为0..1场平面，rotation为世界朝向度。set_action_keyframe(object_id,time_ms,x?,y?,rotation?,depth?,state?,interpolation=hold|linear)；move_action_keyframe(object_id,keyframe_id,time_ms)/delete_action_keyframe(object_id,keyframe_id)。interpolation控制到下一点的保持或线性运动，状态离散保持。set_approved(approved)按场定案；已定案须显式解除才能改方案。缩短时先显式调整越界帧，不自动丢弃。", {
         "unit_id": text | {"required": True}, "revision": integer | {"required": True},
         "changes": {"type": "array", "minItems": 1, "items": storyboard_change_schema(), "required": True}}, writes=True)
 

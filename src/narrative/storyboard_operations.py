@@ -11,6 +11,8 @@ from uuid import uuid4
 
 from PIL import Image
 
+from .asset_needs import gap_view, merge_needs
+from .asset_needs import validate_needs as validate_asset_needs
 from .content_errors import (
     ContentConflictError,
     ContentGuardError,
@@ -21,13 +23,14 @@ from .content_errors import (
 from .graph_store import GraphStore, active_connection, on_rollback
 from .project_package import layout
 from .readable_ids import allocate_id
-from .storyboard_art import StoryboardArtMixin
+from .storyboard_art import StoryboardArtMixin, changed_basis_keys
 from .storyboard_assets import StoryboardAssetsMixin, element_views, validate_elements
 from .storyboard_audio import (
     AUDIO_FIELDS,
     apply_audio,
     audio_conflicts,
     audio_paths,
+    sound_time,
     validate_audio,
 )
 from .storyboard_camera import (
@@ -42,6 +45,20 @@ from .storyboard_panels import StoryboardPanelsMixin, apply_panel, panel_paths, 
 from .storyboard_script import apply_intent, script_fields, validate_script
 from .storyboard_timing import STAGING_FIELDS, apply_staging, preview, validate_timing
 from .storyboard_video import StoryboardVideoMixin, media_paths, validate_media
+
+# 每镜内部时间轴与跨镜衔接：offset_ms 一律相对镜首，躲开「剪辑时间／镜内时间」再混一层。
+TIMELINE_FIELDS = {
+    'add_timeline_keyframe': {'shot_id', 'offset_ms', 'moment_name', 'description'},
+    'update_timeline_keyframe': {'shot_id', 'offset_ms', 'new_offset_ms', 'moment_name', 'description'},
+    'delete_timeline_keyframe': {'shot_id', 'offset_ms'},
+    'set_timeline_segments': {'shot_id', 'segments'},
+    'set_shot_handoff': {'shot_id', 'from_shot', 'ref_frame'},
+}
+HANDOFF_FIELDS = {'from_shot', 'ref_frame'}
+REF_FRAMES = ('last', 'first')
+NEED_FIELDS = {'set_asset_needs': {'needs'}, 'set_shot_asset_needs': {'shot_id', 'needs'}}
+# 单段上限：分镜静帧本来就不该一格里塞满两秒以上的动作。
+DEFAULT_MAX_SEGMENT_MS = 2000
 
 
 def _integer(value, label, minimum=0):
@@ -85,7 +102,7 @@ def _load(db, unit_id, root):
     ).fetchone():
         raise ContentGuardError("请先选择本工程的场次")
     row = db.execute("SELECT value FROM meta WHERE key=?", ("storyboard:" + unit_id,)).fetchone()
-    board = json.loads(row[0]) if row else {"unit_id": unit_id, "revision": 0, "approved": False, "shots": [], "fps": 24, "objects": [], "markers": []}
+    board = json.loads(row[0]) if row else {"unit_id": unit_id, "revision": 0, "approved": False, "shots": [], "fps": 24, "objects": [], "markers": [], "asset_needs": []}
 
     for frame, field in _media_paths(board):
         frame[field] = str(root / frame[field])
@@ -146,6 +163,261 @@ def _set_frame(db, shot, change, approved):
 
 _FIELDS = ACTION_FIELDS
 
+
+def _shot_in_scene(board, identifier):
+    shot = next((row for row in board['shots'] if row['id'] == identifier), None)
+    if shot is None:
+        raise ContentGuardError('指定的镜头不属于本场')
+    return shot
+
+
+def _timeline_plan(shot):
+    """镜内时间轴只存「显式写过的东西」：关键帧计划与分段。
+
+    duration_ms、声音节拍与摄影机关键点都能从既有数据派生（见 timeline_view）。
+    再存一份就会有两套时长，缩镜头时必然打架，所以这里不落盘。
+    """
+    timeline = shot.setdefault('timeline', {})
+    timeline.setdefault('keyframes', [])
+    return timeline
+
+
+def _plan_row(shot, offset_ms):
+    offset = _integer(offset_ms, '关键帧计划位置')
+    row = next((item for item in (shot.get('timeline') or {}).get('keyframes') or [] if item['offset_ms'] == offset), None)
+    if row is None:
+        raise ValueError('此镜没有该时刻的计划关键帧；先 add_timeline_keyframe 再改')
+    return row
+
+
+def apply_timeline(board, change):
+    """镜内时间轴与跨镜衔接的编辑；只写用户显式给的东西，其余交给推导。"""
+    shot = _shot_in_scene(board, change.get('shot_id'))
+    op = change['op']
+    if op == 'set_shot_handoff':
+        source = change.get('from_shot')
+        if source is None:
+            shot.pop('handoff', None)
+            return
+        shot['handoff'] = {'from_shot': source, 'ref_frame': change.get('ref_frame', 'last')}
+        return
+    timeline = _timeline_plan(shot)
+    if op == 'add_timeline_keyframe':
+        offset = _integer(change.get('offset_ms'), '关键帧计划位置')
+        if any(row['offset_ms'] == offset for row in timeline['keyframes']):
+            raise ValueError('该时刻已有计划关键帧；改命名或描述用 update_timeline_keyframe')
+        timeline['keyframes'].append({'offset_ms': offset, 'moment_name': change.get('moment_name', ''),
+                                      'description': change.get('description', '')})
+        timeline['keyframes'].sort(key=lambda row: row['offset_ms'])
+        return
+    if op == 'delete_timeline_keyframe':
+        timeline['keyframes'].remove(_plan_row(shot, change.get('offset_ms')))
+        return
+    if op == 'set_timeline_segments':
+        segments = change.get('segments')
+        if not isinstance(segments, list):
+            raise ValueError('分段须为[a,b]区间列表；空列表表示回到关键帧推导')
+        for row in segments:
+            if not isinstance(row, list) or len(row) != 2:
+                raise ValueError('分段须为[a,b]两元素区间')
+        if segments:
+            timeline['segments'] = [[row[0], row[1]] for row in segments]
+        else:
+            # 显式清空＝交还给推导，而不是「存了一张空分段表」（那等于整镜没有时间轴）。
+            timeline.pop('segments', None)
+        return
+    row = _plan_row(shot, change.get('offset_ms'))
+    if 'moment_name' in change:
+        row['moment_name'] = change['moment_name']
+    if 'description' in change:
+        row['description'] = change['description']
+    if 'new_offset_ms' in change:
+        offset = _integer(change['new_offset_ms'], '关键帧计划位置')
+        if any(item is not row and item['offset_ms'] == offset for item in timeline['keyframes']):
+            raise ValueError('该时刻已有计划关键帧，不能把两条计划并成一条')
+        row['offset_ms'] = offset
+        timeline['keyframes'].sort(key=lambda item: item['offset_ms'])
+
+
+def _max_segment_ms(board):
+    """单段上限可配：场级 timeline_max_segment_ms 覆盖默认 2000ms。"""
+    limit = board.get('timeline_max_segment_ms', DEFAULT_MAX_SEGMENT_MS)
+    if type(limit) is not int or not 1 <= limit <= 600000:
+        raise ValueError('单段上限须为1至600000的整数毫秒')
+    return limit
+
+
+def _shot_aspect(shot):
+    """画幅只认镜头字段；老工程没有这个字段，就不校验。"""
+    for field in ('aspect_ratio', 'frame_aspect'):
+        value = shot.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _check_aspect(row, aspect):
+    if not aspect:
+        return
+    for field in ('aspect_ratio', 'frame_aspect'):
+        if row.get(field) and row[field] != aspect:
+            raise ValueError('同一镜头的画幅须与镜头字段一致，不能在一镜里换画幅')
+
+
+def _validate_segments(segments, duration, anchors, limit, shot):
+    if not isinstance(segments, list):
+        raise ValueError('分段须为[a,b]区间列表')
+    previous = None
+    for row in segments:
+        if not isinstance(row, list) or len(row) != 2:
+            raise ValueError('分段须为[a,b]两元素区间')
+        start = _integer(row[0], '分段起点')
+        end = _integer(row[1], '分段终点')
+        if start >= end:
+            raise ValueError(f'分段{start}..{end}ms的起点须小于终点')
+        if end > duration:
+            raise ValueError(f'分段{start}..{end}ms超出镜头{shot["id"]}时长{duration}ms')
+        if end - start > limit:
+            raise ValueError(f'分段{start}..{end}ms超过单段上限{limit}ms')
+        for edge in (start, end):
+            if edge not in anchors:
+                raise ValueError(f'分段端点{edge}ms必须落在已有关键帧上')
+        if previous is not None and start < previous:
+            raise ValueError('分段须按时间顺序且不能重叠')
+        previous = end
+
+
+def validate_handoff(board, shot):
+    handoff = shot.get('handoff')
+    if handoff is None:
+        return
+    if not isinstance(handoff, dict) or set(handoff) != HANDOFF_FIELDS:
+        raise ValueError('衔接帧须含from_shot与ref_frame')
+    source = handoff['from_shot']
+    if not isinstance(source, str) or not source:
+        raise ValueError('衔接帧来源须为镜头编号；取消衔接用from_shot=null')
+    if source == shot['id']:
+        raise ValueError('衔接帧不能指向本镜自己')
+    if not any(row['id'] == source for row in board['shots']):
+        raise ValueError('衔接帧来源镜头不属于同一场')
+    if handoff['ref_frame'] not in REF_FRAMES:
+        raise ValueError('衔接帧只取last（前一镜末帧）或first（前一镜首帧）')
+
+
+def validate_timeline(board):
+    """只查数据合法性：越界、段长上限、端点、重叠、画幅一致，不猜创作意图。"""
+    limit = _max_segment_ms(board)
+    for shot in board['shots']:
+        duration = _integer(shot.get('duration_ms'), '镜头时长', 1)
+        aspect = _shot_aspect(shot)
+        anchors = {_integer(frame['offset_ms'], '关键帧位置') for frame in shot.get('keyframes') or []}
+        timeline = shot.get('timeline')
+        if timeline is not None:
+            # 读视图会把 duration_ms/sound_cues/camera_keys 贴在同一个对象上；校验只认存储字段，
+            # 这样拿读视图再校验（预览、检查）不会因为派生字段而误判。
+            if not isinstance(timeline, dict) or set(timeline) - {'keyframes', 'segments', 'duration_ms', 'sound_cues', 'camera_keys'}:
+                raise ValueError('镜内时间轴只保存关键帧计划与显式分段')
+            plan = timeline.get('keyframes', [])
+            if not isinstance(plan, list):
+                raise ValueError('关键帧计划须为列表')
+            offsets = set()
+            for row in plan:
+                if (not isinstance(row, dict) or set(row) - {'offset_ms', 'moment_name', 'description'}
+                        or 'offset_ms' not in row):
+                    raise ValueError('关键帧计划须含offset_ms，可选moment_name与description')
+                offset = _integer(row['offset_ms'], '关键帧计划位置')
+                if offset > duration:
+                    raise ValueError(f'关键帧计划位置{offset}ms超出镜头{shot["id"]}时长{duration}ms')
+                if offset in offsets:
+                    raise ValueError('同一镜头的关键帧计划时刻不能重复')
+                offsets.add(offset)
+                for field in ('moment_name', 'description'):
+                    if field in row and not isinstance(row[field], str):
+                        raise ValueError('时刻命名与描述须为文本')
+                _check_aspect(row, aspect)
+            anchors |= offsets
+            if 'segments' in timeline:
+                _validate_segments(timeline['segments'], duration, anchors, limit, shot)
+        validate_handoff(board, shot)
+
+
+def derive_segments(offsets, duration):
+    """相邻关键帧成段：缺省覆盖整镜，首尾补到0与时长，免得留下没人管的空档。"""
+    points = sorted({offset for offset in offsets if 0 <= offset <= duration})
+    if not points or points[0] != 0:
+        points.insert(0, 0)
+    if points[-1] != duration:
+        points.append(duration)
+    return [[start, end] for start, end in zip(points, points[1:], strict=False) if end > start]
+
+
+def timeline_view(board, shot):
+    """读视图：老数据没有 timeline 时按 duration_ms 与现有关键帧推导，不迁移也不改写存储。"""
+    duration = shot['duration_ms']
+    stored = shot.get('timeline') if isinstance(shot.get('timeline'), dict) else {}
+    plan = [{'offset_ms': row['offset_ms'], 'moment_name': row.get('moment_name', ''),
+             'description': row.get('description', '')} for row in stored.get('keyframes') or []]
+    if not plan:
+        # 没有关键帧计划就看静帧：老场次只有关键帧，照样能说出「这一镜内部有几段」。
+        plan = sorted(({'offset_ms': frame['offset_ms'], 'moment_name': '', 'description': ''}
+                       for frame in shot.get('keyframes') or []), key=lambda row: row['offset_ms'])
+    segments = stored.get('segments')
+    if segments is None:
+        segments = derive_segments([row['offset_ms'] for row in plan], duration)
+    cues = []
+    for sound in shot.get('sounds') or []:
+        try:
+            offset = sound_time(board, shot, sound)
+        except (ValueError, TypeError):
+            offset = None
+        cues.append({'sound_id': sound['id'], 'offset_ms': offset, 'kind': sound.get('kind'),
+                     'label': sound.get('label', '')})
+    cues.sort(key=lambda row: (row['offset_ms'] is None, row['offset_ms'] or 0))
+    keys = [{'keyframe_id': row['id'], 'offset_ms': row['offset_ms']}
+            for row in (shot.get('camera') or {}).get('keys') or []]
+    keys.sort(key=lambda row: row['offset_ms'])
+    return {'duration_ms': duration, 'keyframes': plan,
+            'segments': [[row[0], row[1]] for row in segments],
+            'sound_cues': cues, 'camera_keys': keys}
+
+
+def _timeline_derived(shot):
+    """这一段是显式存的还是推导出来的；界面要据此提示「恢复推导」。"""
+    stored = shot.get('timeline') if isinstance(shot.get('timeline'), dict) else {}
+    return {'keyframes': not (stored.get('keyframes') or []), 'segments': 'segments' not in stored}
+
+
+def apply_timeline_views(board):
+    """把派生视图贴到读结果上；存储里的 board 不动，老数据因此保持原样。"""
+    board.setdefault('asset_needs', [])
+    for shot in board['shots']:
+        shot.setdefault('asset_needs', [])
+        shot.setdefault('handoff', None)
+        derived = _timeline_derived(shot)
+        shot['timeline'] = timeline_view(board, shot)
+        shot['timeline_derived'] = derived
+    return board
+
+
+def strip_timeline_views(board):
+    """预览要在原始计划上做算术：先摘掉推导出来的部分，否则一编辑就把推导值当显式值写回。"""
+    for shot in board['shots']:
+        derived = shot.pop('timeline_derived', None)
+        timeline = shot.get('timeline')
+        if not isinstance(timeline, dict):
+            continue
+        if not derived:
+            for key in ('duration_ms', 'sound_cues', 'camera_keys'):
+                timeline.pop(key, None)
+            continue
+        if derived.get('keyframes'):
+            timeline.pop('keyframes', None)
+        if derived.get('segments'):
+            timeline.pop('segments', None)
+        if not timeline:
+            shot.pop('timeline')
+    return board
+
 def _apply(db, board, change, block_ids):
     raw_op = change.get('op') if isinstance(change, dict) else None
     if board['approved'] and raw_op != 'set_approved' and not (raw_op == 'set_keyframe' and 'style_path' in change):
@@ -162,6 +434,17 @@ def _apply(db, board, change, block_ids):
         return
     if op in {"create_sound_intent", "update_sound_intent", "delete_sound_intent"}:
         apply_intent(board, change, lambda prefix: allocate_id(db, "storyboard", prefix))
+        return
+    if op in TIMELINE_FIELDS:
+        apply_timeline(board, change)
+        return
+    if op in NEED_FIELDS:
+        # 需求与引用分开存：这里只碰需求，visual_elements 的 asset_id 一律不动。
+        if op == 'set_asset_needs':
+            board['asset_needs'] = validate_asset_needs(change.get('needs'), ['asset_needs'])
+        else:
+            shot = _shot_in_scene(board, change.get('shot_id'))
+            shot['asset_needs'] = validate_asset_needs(change.get('needs'), ['shots', board['shots'].index(shot), 'asset_needs'])
         return
     if op in AUDIO_FIELDS:
         apply_audio(board, change, lambda prefix: allocate_id(db, "storyboard", prefix))
@@ -235,7 +518,70 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
         with self._store.connect() as db:
             if not db.in_transaction:
                 db.execute("BEGIN")
-            return element_views(_load(db, unit_id, layout(self._store.path).material / "storyboard"), self.get_asset)
+            return self._board_view(_load(db, unit_id, layout(self._store.path).material / "storyboard"), self.get_asset)
+
+    @staticmethod
+    def _board_view(board, lookup):
+        """读视图＝元素视图＋镜内时间轴／衔接／需求的派生形状；存储本身不动。"""
+        return apply_timeline_views(element_views(board, lookup))
+
+    def read_storyboard_assets_context(self, unit_id, shot_ids):
+        """资产分析上下文＋缺口摘要。
+
+        为什么在这里覆盖：缺口视图属于需求层（asset_needs.py），资产模块本身正在另一路改动，
+        在导演台的组合 MRO 里补一层比改对方文件更安全。
+        """
+        context = super().read_storyboard_assets_context(unit_id, shot_ids)
+        context['asset_needs'] = gap_view(self.read_storyboard(unit_id), self.get_asset)
+        return context
+
+    def read_asset_needs(self, unit_id):
+        """只读：本场需求、已落实的绑定、引用悬空与计数。"""
+        return gap_view(self.read_storyboard(unit_id), self.get_asset)
+
+    @content_write
+    def declare_asset_needs(self, unit_id, revision, unit_needs=None, shot_needs=None, replace=True):
+        """声明场级／镜级资产需求；需求只描述「要什么」，从不自动建卡或绑卡。
+
+        replace=True（默认）时，给出的列表整体替换该范围原有需求；replace=False 时按
+        同对象同形态去重后追加。没给的那一侧保持不动。
+        """
+        if type(replace) is not bool:
+            raise ValueError('replace须为布尔值：true整体替换，false追加')
+        if unit_needs is None and shot_needs is None:
+            raise ValueError('请提供unit_needs（场级）或shot_needs（镜级）')
+        board = self.read_storyboard(unit_id)
+        if type(revision) is not int or revision != board['revision']:
+            raise ContentConflictError('分镜已修改，请刷新后重试')
+        if board.get('approved'):
+            raise ContentGuardError('请先解除定案再修改资产需求')
+        changes = []
+        if unit_needs is not None:
+            rows = validate_asset_needs(unit_needs, ['unit_needs'])
+            if not replace:
+                rows = merge_needs(validate_asset_needs(board.get('asset_needs') or []), rows)
+            changes.append({'op': 'set_asset_needs', 'needs': rows})
+        if shot_needs is not None:
+            if not isinstance(shot_needs, list):
+                raise ValueError('shot_needs须为[{shot_id, needs}]列表')
+            shots = {shot['id']: shot for shot in board['shots']}
+            seen = set()
+            for index, entry in enumerate(shot_needs):
+                if not isinstance(entry, dict) or set(entry) != {'shot_id', 'needs'}:
+                    raise ValueError('shot_needs每项须含shot_id与needs')
+                identifier = entry['shot_id']
+                if not isinstance(identifier, str) or identifier not in shots:
+                    raise ValueError('镜级需求的目标镜头不属于本场')
+                if identifier in seen:
+                    raise ValueError('同一镜头只能声明一次；重复目标请合并成一个列表')
+                seen.add(identifier)
+                rows = validate_asset_needs(entry['needs'], ['shot_needs', index, 'needs'])
+                if not replace:
+                    rows = merge_needs(validate_asset_needs(shots[identifier].get('asset_needs') or []), rows)
+                changes.append({'op': 'set_shot_asset_needs', 'shot_id': identifier, 'needs': rows})
+        written = self._write_storyboard(unit_id, revision, changes)
+        written['asset_needs_gap'] = gap_view(written, self.get_asset)
+        return written
 
     def check_storyboard(self, unit_id):
         from .storyboard_review import check_storyboard
@@ -248,6 +594,8 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
         validate_audio(board, check_media=False)
         validate_script(board, self.get_asset, {row['id']: row for row in self.read_script_unit_context(unit_id)['unit']['blocks']})
         validate_timing(board)
+        # 校验只认存储里的显式分段：读视图的分段是推导出来的，端点不必落在关键帧上。
+        validate_timeline(strip_timeline_views(board))
         return preview(board, time_ms)
 
     def preview_storyboard_changes(self, unit_id, revision, changes):
@@ -259,8 +607,12 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
             raise ValueError('请提供待预览变更')
         allowed = {'update_marker', 'delete_marker', 'update_shot', 'move_shot', 'move_keyframe', 'delete_keyframe',
                    'update_object', 'set_camera_overlays', 'move_action_keyframe', 'delete_action_keyframe', 'bind_keyframe_marker',
-                   'bind_action_keyframe_marker', 'move_camera_keyframe', 'delete_camera_keyframe'}
-        board = deepcopy(original)
+                   'bind_action_keyframe_marker', 'move_camera_keyframe', 'delete_camera_keyframe',
+                   'add_timeline_keyframe', 'update_timeline_keyframe', 'delete_timeline_keyframe', 'set_timeline_segments',
+                   'set_shot_handoff', 'set_asset_needs', 'set_shot_asset_needs'}
+        board = strip_timeline_views(deepcopy(original))
+        # 编辑与比较都在原始计划上做；派生字段最后再贴回返回值，免得被当成已存字段。
+        strip_timeline_views(original)
         conflicts = []
         with self._store.connect() as db:
             blocks = {row[0] for row in db.execute('SELECT id FROM script_blocks WHERE unit_id=?', (unit_id,))}
@@ -278,6 +630,7 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
                 validate_audio(board, check_media=False)
                 validate_script(board, self.get_asset, {row['id']: row for row in self.read_script_unit_context(unit_id)['unit']['blocks']})
                 validate_timing(board)
+                validate_timeline(board)
         except (ValueError, TypeError) as error:
             conflicts.append({'code': 'invalid_storyboard_change', 'message': str(error)})
         old_shots = {row['id']: row for row in original['shots']}
@@ -296,7 +649,7 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
                         affected_frames.append({'shot_id': shot['id'], 'frame_id': frame['id'], 'offset_ms': frame['offset_ms']})
         return {'unit_id': unit_id, 'revision': revision, 'valid': not conflicts, 'conflicts': conflicts,
                 'affected_shots': affected_shots, 'affected_frames': affected_frames, 'affected_objects': affected_objects,
-                'preview': board if not conflicts else None}
+                'preview': apply_timeline_views(board) if not conflicts else None}
 
     def load_storyboard_camera_presets(self):
         with self._store.connect() as db:
@@ -434,7 +787,9 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
                 current_basis, _ = self._storyboard_sketch_basis(
                     board, shot, sketch_basis['offset_ms'], self.read_script_unit_context(unit_id), asset_db)
                 if current_basis != sketch_basis:
-                    raise ContentConflictError('生成期间正文、创作约定或资产依据已变化，请重新生成')
+                    # 报错要说出「具体哪个键变了」：模型与用户据此判断该重画还是该回退。
+                    raise ContentConflictError('生成期间出图依据已变化，请重新生成（变化的依据字段：'
+                                               + '、'.join(changed_basis_keys(sketch_basis, current_basis)) + '）')
             if media_patch is not None:
                 media_shot = next((shot for shot in board['shots'] if shot['id'] == media_patch['shot_id']), None)
                 if media_shot is None:
@@ -458,7 +813,12 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
                     'simple_color': sketch_receipt['simple_color'], 'provider': sketch_receipt['provider'].get('provider'),
                     'job_id': sketch_receipt['provider'].get('job_id'), 'body_revision': sketch_basis['body_revision'],
                     'asset_ids': [row['id'] for row in sketch_basis['assets']]}
-                generated_frame['sketch_basis_hash'] = sketch_signature(sketch_basis)
+                # 签名按写入后的依据算：框图哈希此刻已经是刚绑上的新图，check_storyboard 重算才
+                # 对得上；请求时的依据（旧框图）只留在审计里说明「当时依据是什么」。
+                settled_basis, _ = self._storyboard_sketch_basis(
+                    board, generated_shot, sketch_basis['offset_ms'],
+                    self.read_script_unit_context(unit_id), asset_db)
+                generated_frame['sketch_basis_hash'] = sketch_signature(settled_basis)
             if media_audit is not None and media_audit.get('panel_generation'):
                 generation = media_audit['panel_generation']
                 generated_panel = next(panel for shot in board['shots'] for panel in shot.get('panels', []) if panel['id'] == generation['panel_id'])
@@ -470,6 +830,7 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
             validate_audio(board)
             validate_script(board, asset_lookup, {row['id']: row for row in self.read_script_unit_context(unit_id)['unit']['blocks']})
             validate_timing(board, asset_lookup)
+            validate_timeline(board)
             validate_media(board)
             validate_panels(board)
             board["revision"] += 1
@@ -523,4 +884,5 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
             if active_connection(self._store.path) is None:
                 db.commit()
             rollback.pop_all()
-            return element_views(board, asset_lookup)
+            return self._board_view(board, asset_lookup)
+
