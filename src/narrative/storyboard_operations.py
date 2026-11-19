@@ -24,6 +24,16 @@ from .graph_store import GraphStore, active_connection, on_rollback
 from .previs_tools import StoryboardPrevisMixin
 from .project_package import layout
 from .readable_ids import allocate_id
+from .segment_motion import (
+    DEFAULT_MAX_SEGMENT_MS,
+    derive_segment,
+    derive_segments,
+    segment_prompt,
+    segment_views,
+    segments_of,
+    validate_segment,
+    validate_segment_motions,
+)
 from .storyboard_art import StoryboardArtMixin, changed_basis_keys
 from .storyboard_assets import StoryboardAssetsMixin, element_views, validate_elements
 from .storyboard_audio import (
@@ -71,8 +81,9 @@ LAYOUT_FIELDS = {
     'clear_keyframe_layouts': {'shot_id'},
 }
 NEED_FIELDS = {'set_asset_needs': {'needs'}, 'set_shot_asset_needs': {'shot_id', 'needs'}}
-# 单段上限：分镜静帧本来就不该一格里塞满两秒以上的动作。
-DEFAULT_MAX_SEGMENT_MS = 2000
+# 分段运镜：只存人给的那几个字段（kind/speed/notes）。主体位移、景别差与机位位移都由前后
+# 两帧的框图现算（见 segment_motion），落库就等于存了第二份会过期的真相。
+MOTION_FIELDS = {'set_segment_motion': {'shot_id', 'from_ms', 'to_ms', 'camera_move', 'notes'}}
 
 
 def _integer(value, label, minimum=0):
@@ -290,6 +301,45 @@ def _max_segment_ms(board):
     return limit
 
 
+def _segment_pairs(shot):
+    """该镜的分段（毫秒区间）：显式覆盖优先，否则按已有帧推导（与读视图同一份口径）。"""
+    return [tuple(row) for row in segments_of(shot)]
+
+
+def apply_segment_motion(board, change):
+    """分段运镜标注：只写人给的那几项（kind/speed/notes），派生字段一律现算不落库。
+
+    为什么要求「必须是已有的段」：运镜是两帧之间的差别，挂在一条不存在的区间上的标注
+    谁也读不到——它既不会出现在读视图里，也不会进任何一次生成，写进去就是坏数据。
+    """
+    shot = _shot_in_scene(board, change.get('shot_id'))
+    start = _integer(change.get('from_ms'), '分段起点')
+    end = _integer(change.get('to_ms'), '分段终点')
+    if (start, end) not in _segment_pairs(shot):
+        raise ValueError(f'{start}..{end}ms不是镜头{shot["id"]}的分段；先确定关键帧，或 set_timeline_segments')
+    camera_move, notes = change.get('camera_move'), change.get('notes')
+    row = {'from_ms': start, 'to_ms': end}
+    if camera_move is not None:
+        if not isinstance(camera_move, dict):
+            raise ValueError('camera_move须为对象，只放kind与speed')
+        row['camera_move'] = {key: camera_move[key] for key in ('kind', 'speed') if key in camera_move}
+    if notes is not None:
+        row['notes'] = notes
+    # 校验在写之前：非法种类/速度不该等到下一次 read 才被发现。
+    validate_segment(row, _max_segment_ms(board))
+    rows = [item for item in shot.get('segment_motions') or []
+            if (item.get('from_ms'), item.get('to_ms')) != (start, end)]
+    # 空对象/空串不算标注：camera_move 与 notes 都没给就是「取消这一段的标注」，
+    # 而不是存一行空标注——两种状态分开存，读的人就不用再猜「空是真没填还是填了空」。
+    if row.get('camera_move') or (row.get('notes') or '').strip():
+        rows.append(row)
+    rows.sort(key=lambda item: item['from_ms'])
+    if rows:
+        shot['segment_motions'] = rows
+    else:
+        shot.pop('segment_motions', None)
+
+
 def _shot_aspect(shot):
     """画幅只认镜头字段；老工程没有这个字段，就不校验。"""
     for field in ('aspect_ratio', 'frame_aspect'):
@@ -381,17 +431,9 @@ def validate_timeline(board):
             anchors |= offsets
             if 'segments' in timeline:
                 _validate_segments(timeline['segments'], duration, anchors, limit, shot)
+        # 运镜标注挂在段上（shot['segment_motions']）：它的合法性依赖分段，所以和分段一起查。
+        validate_segment_motions(shot, limit)
         validate_handoff(board, shot)
-
-
-def derive_segments(offsets, duration):
-    """相邻关键帧成段：缺省覆盖整镜，首尾补到0与时长，免得留下没人管的空档。"""
-    points = sorted({offset for offset in offsets if 0 <= offset <= duration})
-    if not points or points[0] != 0:
-        points.insert(0, 0)
-    if points[-1] != duration:
-        points.append(duration)
-    return [[start, end] for start, end in zip(points, points[1:], strict=False) if end > start]
 
 
 def timeline_view(board, shot):
@@ -443,6 +485,9 @@ def apply_timeline_views(board):
         # 存储里它挂在 shot['layouts'][时刻] 上，这里是它的读视图（深拷贝，改不到存储）。
         for row in shot['timeline']['keyframes']:
             row['layout'] = layout_at(shot, row['offset_ms'])
+        # 每段附带运动推导：段是「两帧之间」，差量就挂在段上——界面画变速、助手核对、
+        # 生成任务拼提示词，读到的都是这一份，不各自再算一遍。
+        shot['segments'] = segment_views(board, shot)
     return board
 
 
@@ -450,6 +495,8 @@ def strip_timeline_views(board):
     """预览要在原始计划上做算术：先摘掉推导出来的部分，否则一编辑就把推导值当显式值写回。"""
     for shot in board['shots']:
         derived = shot.pop('timeline_derived', None)
+        # 分段清单和它上面挂的运动都是推导出来的，不是存储字段。
+        shot.pop('segments', None)
         timeline = shot.get('timeline')
         if not isinstance(timeline, dict):
             continue
@@ -518,6 +565,9 @@ def _apply(db, board, change, block_ids):
         return
     if op in LAYOUT_FIELDS:
         apply_layout(board, change)
+        return
+    if op in MOTION_FIELDS:
+        apply_segment_motion(board, change)
         return
     if op in NEED_FIELDS:
         # 需求与引用分开存：这里只碰需求，visual_elements 的 asset_id 一律不动。
@@ -643,6 +693,30 @@ class StoryboardOperationsMixin(StoryboardPrevisMixin, StoryboardAssetsMixin, St
         return {'unit_id': unit_id, 'shot_id': shot_id, 'revision': board['revision'],
                 'keyframe_offsets': [row['offset_ms'] for row in shot['timeline']['keyframes']],
                 'layouts': rows, 'count': len(rows)}
+
+    def read_segment_motion(self, unit_id, shot_id, from_ms, to_ms):
+        """只读：某一段的运动推导、校验问题与它对应的视频提示词。
+
+        派生值不落库，所以这里每次都现算：同一段读两次的结果只应因为框图或机位变了而变。
+        校验问题与一致性警告分开给（``warnings`` 里带 code）：前者是「这段数据不成立」，
+        后者是「标注的运镜和框图对不上」，处理方式不一样，不能混成一句。
+
+        ``prompt`` 里的官方对齐句用本段长度当请求时长（这里还不知道真要与服务要多长）；
+        真正发请求时 build_task 会用 constraints.duration_ms 重算那一行。
+        """
+        board = self.read_storyboard(unit_id)
+        shot = _shot_in_scene(board, shot_id)
+        motion = derive_segment(board, shot, _integer(from_ms, '分段起点'), _integer(to_ms, '分段终点'))
+        limit = _max_segment_ms(board)
+        warnings = list(motion.get('warnings') or [])
+        try:
+            validate_segment(motion, limit)
+        except ValueError as error:
+            warnings.append({'code': 'INVALID_SEGMENT', 'message': str(error)})
+        return {'unit_id': unit_id, 'shot_id': shot_id, 'revision': board['revision'],
+                'from_ms': _integer(from_ms, '分段起点'), 'to_ms': _integer(to_ms, '分段终点'),
+                'duration_limit_ms': limit, 'motion': motion,
+                'prompt': segment_prompt(motion, 'video'), 'warnings': warnings}
 
     def run_generation_task(self, unit_id, revision, kind, shot_id, offset_ms, prompt='', layout=None, moment=None,
                             constraints=None):
@@ -808,7 +882,7 @@ class StoryboardOperationsMixin(StoryboardPrevisMixin, StoryboardAssetsMixin, St
                    'bind_action_keyframe_marker', 'move_camera_keyframe', 'delete_camera_keyframe',
                    'add_timeline_keyframe', 'update_timeline_keyframe', 'delete_timeline_keyframe', 'set_timeline_segments',
                    'set_shot_handoff', 'set_asset_needs', 'set_shot_asset_needs',
-                   'set_keyframe_layout', 'clear_keyframe_layouts'}
+                   'set_keyframe_layout', 'clear_keyframe_layouts', 'set_segment_motion'}
         board = strip_timeline_views(deepcopy(original))
         # 编辑与比较都在原始计划上做；派生字段最后再贴回返回值，免得被当成已存字段。
         strip_timeline_views(original)

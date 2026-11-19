@@ -27,6 +27,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from .segment_motion import segment_at, segment_prompt
 from .storyboard_layout import layout_at, normalize_layout
 
 KINDS = ('sketch', 'style', 'video')
@@ -197,12 +198,32 @@ def _expect(kind, expect):
     return result
 
 
+def _motion_prompt(motion, prompt, *, duration_ms=None, pictures=2):
+    """视频提示词：官方对齐句＋四段推导在前，人工补充在后并声明优先。
+
+    为什么人工放最后而不是让它盖掉机器段：机器段是从前后两帧框图量出来的差量（谁往哪走、
+    变大还是变小），人工写的是意图；冲突时以人为准，但不能因此把量出来的事实从提示词里删掉
+    ——否则复盘时说不清「这一版到底交代了什么」。所以两段都留，位置说明优先级。
+
+    ``duration_ms`` 是这次请求要生成的时长：官方要求对齐句里的 ``S.SS`` 与请求时长一致，
+    所以用 ``constraints.duration_ms``（不是镜长）来写；``pictures`` 决定用 FL2VA 还是 I2VA
+    那句对齐句——只有一张风格帧时不能凭空写 Picture 2。
+    """
+    machine = segment_prompt(motion, 'video', duration_ms=duration_ms, pictures=pictures)
+    if not prompt.strip():
+        return machine
+    return machine + '\n人工补充（与上面的程序推导冲突时以这里为准）：' + prompt.strip()
+
+
 def build_task(kind, *, shot_id, offset_ms, board, layout=None, moment=None, assets=None,
                style=None, constraints=None, expect=None, prompt=''):
     """组装任务包；只读 board，不联网、不落盘。
 
     ``prompt`` 是本次的补充要求（可为空）。任务包里没有正文字段：正文、创作约定与
     资产说明由调用方通过 ``style``/``assets`` 带进来，这里不猜。
+
+    只有 video 带 ``motion``：视频是「首帧→尾帧」的一段过渡，运动是它的输入之一；
+    草图与风格帧是静态图，带上运镜只会让模型把运动画进这一帧里。
     """
     if kind not in KINDS:
         raise TaskInputError('生成类型须为' + '、'.join(KINDS))
@@ -217,10 +238,18 @@ def build_task(kind, *, shot_id, offset_ms, board, layout=None, moment=None, ass
     if not isinstance(prompt, str):
         raise TaskInputError('本次补充要求须为文本')
     box = normalize_layout(layout, shot_id=shot['id'], offset_ms=offset) if layout is not None else layout_at(shot, offset)
-    return {'kind': kind, 'shot_id': shot['id'], 'offset_ms': offset, 'layout': box,
+    task = {'kind': kind, 'shot_id': shot['id'], 'offset_ms': offset, 'layout': box,
             'moment': _moment(shot, offset, moment), 'assets': _assets(assets, shot, board),
             'style': _style(style), 'constraints': _constraints(kind, shot, constraints, offset),
             'expect': _expect(kind, expect), 'prompt': prompt}
+    if kind == 'video':
+        # 段按 offset_ms 定位：视频的 offset 通常就是段起点；推导是纯函数，这里重算一次
+        # 就不会依赖调用方是否先过一遍读视图。
+        task['motion'] = segment_at(board, shot, offset)
+        task['prompt'] = _motion_prompt(task['motion'], prompt,
+                                        duration_ms=task['constraints']['duration_ms'],
+                                        pictures=2 if task['constraints'].get('last_frame') else 1)
+    return task
 
 
 def assets_from_cards(cards):
@@ -270,7 +299,10 @@ def task_prompt(task):
                   }[task['kind']])
     lines.append('参考图只作外观与构图依据，不把参考图的文字、标签或运动箭头画进成图。')
     if task['prompt']:
-        lines.append('本次补充要求：' + task['prompt'])
+        # video 的 prompt 已经是「四段机器推导＋人工补充」：换个标题，别把它标成「补充要求」，
+        # 否则读回执的人会以为运动是这次临时加的，而它其实是这一段本身的差量。
+        lines.append(('运动衔接（首尾帧之间这一段）：' if 'motion' in task else '本次补充要求：')
+                     + task['prompt'])
     return '\n'.join(lines)
 
 

@@ -3,6 +3,7 @@ import json
 from copy import deepcopy
 from typing import Any
 
+from .segment_motion import CAMERA_MOVES, CAMERA_SPEEDS
 from .storyboard_camera import EASINGS, POSE_FIELDS, PRESETS
 from .storyboard_layout import KINDS as LAYOUT_KINDS
 
@@ -138,6 +139,18 @@ _ACTIONS.extend([
             ['shot_id', 'offset_ms', 'layout']),
     _action('clear_keyframe_layouts', {'shot_id': _ID}, ['shot_id']),
 ])
+# B2b 分段运镜：运动在段之间，只发布人给的那两项（kind/speed）与一句备注；
+# 主体位移、方向、景别差与机位位移全部由前后两帧框图现算，不接受模型填数字。
+_SEGMENT_MOVE = {'type': 'object', 'additionalProperties': False,
+                 'properties': {'kind': {'type': 'string', 'enum': list(CAMERA_MOVES)},
+                                'speed': {'type': 'string', 'enum': list(CAMERA_SPEEDS)}},
+                 'description': '运镜种类与速度都可省；都不给＝这一段按框图推导，不声明运镜'}
+_ACTIONS.append(_action('set_segment_motion', {
+    'shot_id': _ID, 'from_ms': _MS, 'to_ms': _MS,
+    'camera_move': _SEGMENT_MOVE | {'type': ['object', 'null'],
+                                    'description': '传 null 或空对象＝取消这一段的运镜标注'},
+    'notes': {'type': 'string', 'description': '人工备注，进视频提示词的「环境」一段'}},
+    ['shot_id', 'from_ms', 'to_ms']))
 for _schema in _ACTIONS:
     if _schema['properties']['op']['const'] == 'set_keyframe':
         _schema['oneOf'] = [{'required': ['sketch_path'], 'not': {'required': ['style_path']}},
