@@ -7,8 +7,8 @@ import QtQuick.Window
 // Shell with three modes:
 //   launcher  — project list (the entry point)
 //   workspace — the open project: navigation, pages, status bar
-//   settings  — global defaults (appearance, harness profile, MCP), one page
-//               reached from either of the other two and returning to it
+//   settings  — 全局默认值（外观、harness 渠道、MCP、技能）与本工程的设置，
+//               同一页里的两组，由导航最后那一项「设置」进出
 // Pages own their state and subscribe to the bridge themselves.
 ApplicationWindow {
     id: app
@@ -101,20 +101,30 @@ ApplicationWindow {
         {key: "assets", label: "资产", hint: "形象、物品与视觉设定"},
         {key: "screenplay", label: "剧本", hint: "选段、场表与正文"},
         {key: "storyboard", label: "分镜稿", hint: "分镜文字、图格与导出"},
-        // 镜头表夹在分镜稿与导演台之间：先按场排镜（分镜稿），再逐镜看状态（镜头表），
-        // 最后进导演台调调度。图标借用分镜稿那一档——NavigationIcon 里还没有它自己的
-        // 画法，而逐镜看的就是同一批分镜格。
+        // 镜头表夹在分镜稿与预演之间：先按场排镜（分镜稿），再逐镜看状态（镜头表），
+        // 再看三维预演摆成什么样，最后进导演台调调度。图标借用分镜稿那一档——
+        // NavigationIcon 里还没有它自己的画法，而逐镜看的就是同一批分镜格。
         {key: "shot_table", label: "镜头表", hint: "逐镜制作与状态", icon: "storyboard"},
-        {key: "director", label: "导演台", hint: "调度、机位与动态预演"},
+        // 预演进导演台之前（先看效果，再定调度）。
         {key: "previs", label: "预演", hint: "三维预演工作区"},
+        {key: "director", label: "导演台", hint: "调度、机位与动态预演"},
         {key: "screenplay_structure", label: "结构", hint: "集、幕与段落"},
         {key: "static_check", label: "静态检查", hint: "约束与问题定位"},
-        {key: "project_settings", label: "工程设置", hint: "提取粒度与模型"}
+        // 设置是导航里的最后一项（原来「工程设置」的位置）：工程内只留这一个入口，
+        // 进去以后才分「全局」与「本工程」两组。它不是工作区的一页，所以没有对应的
+        // Loader 位置：点它走 openSettings 换 mode，不切 currentPage。
+        // 图标借 NavigationIcon 里现成的齿轮画法（project_settings 那一档）。
+        {key: "settings", label: "设置", hint: "全局与本工程设置", icon: "project_settings"}
     ]
 
     function goTo(key) {
         currentPage = key
     }
+
+    // 导航里哪一项算「当前」：设置打开时高亮「设置」这一项，其余时候按页面算。
+    // 单独一列而不是就地比较 currentPage——设置不是页面位置（currentPage 不变），
+    // 直接比较会让「设置」永远不高亮，点开了也看不出自己在哪。
+    readonly property string navSelection: app.mode === "settings" ? "settings" : app.currentPage
 
     // -- 页面按需创建 ---------------------------------------------------
     // 打开工程只建当前这一页，其余等第一次进入再实例化：原文、分镜这类页面
@@ -163,8 +173,9 @@ ApplicationWindow {
         markPageVisited(currentPage)
     }
 
-    // 设置页的两个入口（启动页按钮、工作区导航底部按钮）都走这里：来源页记在
-    // modeBeforeSettings 里，closeSettings 才知道该回哪一页。
+    // 工程内的唯一设置入口是导航列表里最后那一项「设置」，启动页上另有一个；
+    // 两处都走这里：来源页记在 modeBeforeSettings 里，设置页据此决定默认分组
+    // （本工程 / 外观），closeSettings 也据此知道该回哪一页。
     function openSettings() {
         if (mode !== "settings") modeBeforeSettings = mode
         mode = "settings"
@@ -372,7 +383,7 @@ ApplicationWindow {
                             color: app.theme.line
                         }
 
-                        ScrollView {id:navScroll;contentWidth:availableWidth;Layout.fillWidth:true;Layout.fillHeight:true;clip:true
+                        ScrollView {id:navScroll;objectName:"navigationScroll";contentWidth:availableWidth;Layout.fillWidth:true;Layout.fillHeight:true;clip:true
                             ColumnLayout {width:navScroll.availableWidth;spacing:4
                         Repeater {
                             model: app.navItems
@@ -385,11 +396,11 @@ ApplicationWindow {
                                 Rectangle {
                                     anchors.fill: parent
                                     radius: 6
-                                    color: app.currentPage === modelData.key
+                                    color: app.navSelection === modelData.key
                                         ? app.theme.accentSoft : "transparent"
                                 }
                                 // 图标默认按导航键名画；个别页面没有自己的画法时用 icon 指定借哪一档。
-                                NavigationIcon {name:modelData.icon||modelData.key;ink:app.currentPage===modelData.key?app.theme.accent:app.theme.ink;width:24;height:24;anchors.verticalCenter:parent.verticalCenter;x:app.navigationCollapsed?(parent.width-width)/2:10}
+                                NavigationIcon {name:modelData.icon||modelData.key;ink:app.navSelection===modelData.key?app.theme.accent:app.theme.ink;width:24;height:24;anchors.verticalCenter:parent.verticalCenter;x:app.navigationCollapsed?(parent.width-width)/2:10}
                                 Column {
                                     visible:!app.navigationCollapsed
                                     anchors.left: parent.left
@@ -398,10 +409,10 @@ ApplicationWindow {
                                     spacing: 1
                                     Label {
                                         text: modelData.label
-                                        color: app.currentPage === modelData.key
+                                        color: app.navSelection === modelData.key
                                             ? app.theme.accent : app.theme.ink
                                         font.pixelSize: 14
-                                        font.weight: app.currentPage === modelData.key
+                                        font.weight: app.navSelection === modelData.key
                                             ? Font.DemiBold : Font.Normal
                                     }
                                     Label {
@@ -416,7 +427,10 @@ ApplicationWindow {
                                     id:navMouse;hoverEnabled:true
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: app.goTo(modelData.key)
+                                    // 设置不是一个页面位置，而是换 mode 打开设置页；
+                                    // 其余项才是「切到这一页」。
+                                    onClicked: modelData.key === "settings"
+                                        ? app.openSettings() : app.goTo(modelData.key)
                                 }
                             }
                         }
@@ -424,24 +438,9 @@ ApplicationWindow {
                             }
                         }
 
-
-                        // 设置入口放在导航底部：上面是「这个工程有哪些页面」，下面这块
-                        // （设置、工程路径、版本）都是「这台机器 / 这个工程的身份」，
-                        // 放进页面列表里会让人以为设置也是某一页。
-                        Button {
-                            objectName: "navigationSettingsButton"
-                            Layout.fillWidth: true
-                            flat: true
-                            // 收起状态只剩一条窄栏：中文两字在 11px 下仍塞得下，
-                            // 不必再画一个齿轮图标（导航图标没有“设置”这一档）。
-                            text: "设置"
-                            font.pixelSize: app.navigationCollapsed ? 11 : 13
-                            implicitWidth: app.navigationCollapsed ? 40 : 150
-                            ToolTip.visible: hovered
-                            ToolTip.text: "设置"
-                            onClicked: app.openSettings()
-                        }
-
+                        // 设置入口不在这里：它是导航列表的最后一项（navItems 的
+                        // settings），和「这个工程有哪些页面」并排，只是点它进的是设置页。
+                        // 这一块剩下的是「这台机器 / 这个工程的身份」：路径与版本。
                         Label {
                             Layout.fillWidth: true
                             visible:!app.navigationCollapsed
@@ -519,6 +518,9 @@ ApplicationWindow {
                         SplitView.fillWidth: true
                         SplitView.minimumWidth: 520
                         SplitView.fillHeight: true
+                        // 页面位置 = navItems 里这一页的下标。navItems 末尾的「设置」
+                        // 没有对应的 Loader：它换的是 mode，currentPage 从不等于
+                        // "settings"，所以这里永远只会落到前面那些页的位置上。
                         currentIndex: {
                             for (var i = 0; i < app.navItems.length; ++i)
                                 if (app.navItems[i].key === app.currentPage) return i
@@ -534,11 +536,10 @@ ApplicationWindow {
                         Loader { active: app.pageVisited("screenplay") || app.currentPage === "screenplay"; sourceComponent: screenplayPageComponent }
                         Loader { active: app.pageVisited("storyboard") || app.currentPage === "storyboard"; sourceComponent: storyboardPageComponent }
                         Loader { id: shotTableLoader; active: app.pageVisited("shot_table") || app.currentPage === "shot_table"; sourceComponent: shotTablePageComponent }
-                        Loader { active: app.pageVisited("director") || app.currentPage === "director"; sourceComponent: directorPageComponent }
                         Loader { active: app.pageVisited("previs") || app.currentPage === "previs"; sourceComponent: previsPageComponent }
+                        Loader { active: app.pageVisited("director") || app.currentPage === "director"; sourceComponent: directorPageComponent }
                         Loader { active: app.pageVisited("screenplay_structure") || app.currentPage === "screenplay_structure"; sourceComponent: structurePageComponent }
                         Loader { active: app.pageVisited("static_check") || app.currentPage === "static_check"; sourceComponent: staticCheckPageComponent }
-                        Loader { active: app.pageVisited("project_settings") || app.currentPage === "project_settings"; sourceComponent: projectSettingsPageComponent }
                     }
                     }
                 }
@@ -604,8 +605,9 @@ ApplicationWindow {
             }
 
             // -- settings -----------------------------------------------
-            // 全局设置独立成一页：从启动页或工作区进来，返回时由 closeSettings
-            // 回到进来的那一页（工程仍开着就从工作区回去，不会丢现场）。
+            // 设置单独成一页，里面再分「全局」（外观 / 模型渠道 / MCP / 技能）与
+            // 「本工程」（工程设置 / 关于）两组。从启动页或工作区进来，返回时由
+            // closeSettings 回到进来的那一页（工程仍开着就从工作区回去，不会丢现场）。
             SettingsPage { id: settingsPage; app: app }
         }
 
@@ -627,7 +629,6 @@ ApplicationWindow {
     Component { id: previsPageComponent; DirectorWorkspacePage { app: windowRoot } }
     Component { id: structurePageComponent; ScreenplayStructurePage { app: windowRoot } }
     Component { id: staticCheckPageComponent; StaticCheckPage { app: windowRoot } }
-    Component { id: projectSettingsPageComponent; ProjectSettingsPage { app: windowRoot } }
 
 
     // 启动页与设置页的窗口按钮与拖动区：浮在内容之上，不占布局（放在 StackLayout 里会被当成新的一页）。

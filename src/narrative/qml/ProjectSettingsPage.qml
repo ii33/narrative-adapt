@@ -8,6 +8,10 @@ Item {
 
     objectName: "projectSettingsPage"
     property var app
+    // 这一页现在只作为设置页里的「工程设置」一节出现（整页嵌进去，控件与保存逻辑
+    // 仍是这一份）。嵌入时要把自己的页头收起来：标题与右上角窗口按钮是「独立一页」
+    // 才需要的东西，落在设置页的卡片里会重复一份。
+    property bool embedded: false
     readonly property var t: app.theme
     property var profile: ({})
     property var draft: ({})
@@ -66,8 +70,11 @@ Item {
         {key:"temperature", label:"温度（空为服务默认）", name:"projectTemperature", type:"number"}
     ]
     function load() {
-        if (app.mode === "workspace") {
-            var path = app.project.path || ""
+        // 嵌进设置页以后，mode 是 "settings" 而不是 "workspace"：不能再靠 mode 判断
+        // 有没有工程，只认当前工程路径。没开工程就什么都不读，空工程态点进这一节
+        // 也不会去打 bridge 报一串「请先打开图项目」。
+        var path = app.project && app.project.path ? app.project.path : ""
+        if (path.length > 0) {
             if (path !== boundProjectPath) {
                 boundProjectPath = path
                 projectNameDraft = app.project.title || ""
@@ -158,7 +165,7 @@ Item {
         id: settingsScroll
         objectName:"projectSettingsScroll"
         anchors.fill: parent
-        anchors.margins: 12
+        anchors.margins: page.embedded ? 0 : 12
         contentWidth: availableWidth
         ColumnLayout {
         SubmissionFeedback{state:contentSubmission}
@@ -167,6 +174,9 @@ Item {
             spacing: 12
             RowLayout {
                 Layout.fillWidth: true
+                // 嵌入式不画自己的页头：设置页里已经有「本工程 · 工程设置」这个分组，
+                // 再摆一个同名的标题加窗口按钮就是两份。独立打开时仍然照旧。
+                visible: !page.embedded
                 // 这一页整体在 ScrollView 里，内容比视口窄一条滚动条；
                 // 把这部分补回来，右上角那组控件才和其它页停在同一位置。
                 Layout.rightMargin: -(settingsScroll.width - settingsScroll.availableWidth)

@@ -2,9 +2,14 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// 独立设置页：全局默认值（外观 / 主框构 / 模型渠道 / MCP 服务器 / 技能）集中在这里。
+// 独立设置页：一页里两层设置——
+//   全局：外观 / 主框构 / 模型渠道 / MCP 服务器 / 技能（这台机器上的默认值）
+//   本工程：工程设置（提取粒度、模型、提示词与密钥）/ 关于
 // 启动页此前右半边就是这一整块设置区；拆出来后启动页只剩工程列表，
 // 两处界面各自变简单：找工程的人不被设置占掉一半宽度，改设置的人不用先看工程。
+//
+// 「工程设置」不再是工作区里的一页：它整页嵌进这里（embedded），
+// 于是工程内只剩导航底部那一个「设置」入口。
 //
 // 从启动页或工作区都能进来，回哪一页由 Main.qml 记住（openSettings/closeSettings），
 // 这一页只负责把「返回」交回去，不自己猜目标。
@@ -52,24 +57,67 @@ Item {
     }
 
     // -- 分组导航 --------------------------------------------------------
-    // 导航清单与右侧 StackLayout 的下标一一对应：加一块内容就在两处各加一项，
-    // 顺序错位会让「点外观、改模型」这种静默错误重新出现。
-    readonly property var sections: [
+    // 两组分开声明：上面是这台机器的全局默认值，下面是当前工程的设置。
+    // sections 是两组按顺序拼起来的扁平清单，它的顺序必须与右侧 StackLayout 的
+    // 声明顺序一一对应——错位会让「点外观、改模型」这种静默错误重新出现，
+    // 所以顺序只有这一处真相，导航与内容都从它派生。
+    readonly property var globalSections: [
         {key: "appearance", label: "外观", hint: "深浅色与主框构"},
         {key: "model", label: "模型渠道", hint: "所有工程的默认值"},
         {key: "mcp", label: "MCP 服务器", hint: "外部工具服务器"},
-        {key: "skill", label: "技能", hint: "可保存的作业说明"},
+        {key: "skill", label: "技能", hint: "可保存的作业说明"}
+    ]
+    readonly property var projectSections: [
+        // 没有打开工程时这一节点不可点：它读写的都是当前工程的配置，空工程态点进去
+        // 只会报一串「请先打开图项目」。hint 换成一句原因，说明为什么点不了。
+        {key: "project_settings", label: "工程设置", hint: "提取粒度与模型", disabledHint: "先打开工程"},
         {key: "about", label: "关于", hint: "版本与配置文件"}
     ]
+    readonly property var sections: globalSections.concat(projectSections)
+
+    // 导航列表按「分组标题 + 该组各项」摊平后交给一个 Repeater：标题行不可点，
+    // 两种行只差高度与是否可点，不必为两组各写一份 delegate。
+    readonly property var navEntries: {
+        var entries = []
+        var groups = [
+            {group: "global", label: "全局", items: globalSections},
+            {group: "project", label: "本工程", items: projectSections}
+        ]
+        for (var g = 0; g < groups.length; ++g) {
+            entries.push({group: groups[g].group, label: groups[g].label})
+            for (var i = 0; i < groups[g].items.length; ++i)
+                entries.push({section: groups[g].items[i]})
+        }
+        return entries
+    }
+
     property int sectionIndex: 0
 
+    // 工程设置只对当前打开的工程有意义；没有工程时这一节点禁用而不是藏起来——
+    // 藏起来使用者会以为设置页里根本没有这一项。
+    readonly property bool projectSettingsAvailable: !!(app.project && app.project.path)
+
+    function sectionAvailable(key) {
+        return key !== "project_settings" || projectSettingsAvailable
+    }
+
+    function indexOfSection(key) {
+        for (var i = 0; i < sections.length; ++i)
+            if (sections[i].key === key) return i
+        return -1
+    }
+
     function selectSection(key) {
-        for (var i = 0; i < sections.length; ++i) {
-            if (sections[i].key === key) {
-                sectionIndex = i
-                return
-            }
-        }
+        var index = indexOfSection(key)
+        if (index < 0 || !sectionAvailable(key)) return
+        sectionIndex = index
+    }
+
+    // 打开来源决定默认分组：从工作区点进来（导航底部那个「设置」）通常是要改当前工程的
+    // 粒度或模型，先落在「工程设置」；从启动页进来还没有工程，只能落在全局的「外观」。
+    function defaultSectionKey() {
+        return app.modeBeforeSettings === "workspace" && projectSettingsAvailable
+            ? "project_settings" : "appearance"
     }
 
     // -- 模型渠道：载入 / 表单 ⇄ 值 --------------------------------------
@@ -83,7 +131,12 @@ Item {
     // 页面常驻在 StackLayout 里，只有真正露出来（visible）时才去读磁盘：
     // 启动时不打开设置，就不该为它做一次配置读取；每次进来也顺手刷新一遍，
     // 免得显示的是上次进来时的旧值（手改过配置文件时尤其明显）。
-    onVisibleChanged: if (visible) page.load()
+    // 默认分组也在这里定：每次进来都按来源回到该看的那一组，
+    // 而不是上次离开时停在哪。
+    onVisibleChanged: if (visible) {
+        page.load()
+        page.sectionIndex = page.indexOfSection(page.defaultSectionKey())
+    }
 
     function applyProfile(p) {
         profile = p || ({})
@@ -195,7 +248,7 @@ Item {
                     color: t.ink
                 }
                 Label {
-                    text: "全局默认值：没有单独配置的工程都沿用这里的值。"
+                    text: "全局设置是这台机器的默认值，本工程设置只影响当前工程。"
                     color: t.muted
                     font.pixelSize: 12
                 }
@@ -223,21 +276,49 @@ Item {
                     spacing: 4
 
                     Repeater {
-                        model: page.sections
+                        // 模型是摊平后的 navEntries：分组标题行也走同一个 delegate，
+                        // 靠 modelData.section 是否存在区分标题与可点的分组。
+                        model: page.navEntries
                         delegate: Item {
+                            id: navEntry
                             required property var modelData
-                            required property int index
+                            readonly property var section: modelData.section === undefined
+                                ? null : modelData.section
+                            readonly property bool available: navEntry.section
+                                ? page.sectionAvailable(navEntry.section.key) : false
 
-                            objectName: "settingsSectionNav_" + modelData.key
+                            objectName: navEntry.section
+                                ? "settingsSectionNav_" + navEntry.section.key
+                                : "settingsGroupRow_" + modelData.group
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 46
+                            Layout.preferredHeight: navEntry.section ? 46 : 28
+                            // 第二组前面留一段距离：两组是一层区分，不能连成一片。
+                            Layout.topMargin: navEntry.section ? 0
+                                : (modelData.group === "project" ? 10 : 2)
+
+                            Label {
+                                objectName: navEntry.section ? "" : "settingsGroupLabel_" + modelData.group
+                                visible: !navEntry.section
+                                anchors.left: parent.left
+                                anchors.leftMargin: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                // 标题行才有文字；分组项那一行这个 Label 是隐藏的，
+                                // 所以只读有 label 的一侧，别让 undefined 落到 text 上。
+                                text: navEntry.section ? "" : (navEntry.modelData.label || "")
+                                color: page.t.muted
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                            }
 
                             Rectangle {
+                                visible: !!navEntry.section
                                 anchors.fill: parent
                                 radius: 6
-                                color: page.sectionIndex === index ? t.accentSoft : "transparent"
+                                color: navEntry.section && page.sectionIndex === page.indexOfSection(navEntry.section.key)
+                                    ? page.t.accentSoft : "transparent"
                             }
                             Column {
+                                visible: !!navEntry.section
                                 anchors.left: parent.left
                                 anchors.leftMargin: 12
                                 anchors.right: parent.right
@@ -245,25 +326,34 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 spacing: 1
                                 Label {
-                                    text: modelData.label
-                                    color: page.sectionIndex === index ? t.accent : t.ink
+                                    text: navEntry.section ? navEntry.section.label : ""
+                                    color: !navEntry.available ? page.t.muted
+                                        : page.sectionIndex === page.indexOfSection(navEntry.section.key)
+                                            ? page.t.accent : page.t.ink
                                     font.pixelSize: 14
-                                    font.weight: page.sectionIndex === index
+                                    font.weight: navEntry.available && page.sectionIndex === page.indexOfSection(navEntry.section.key)
                                         ? Font.DemiBold : Font.Normal
                                 }
                                 Label {
-                                    text: modelData.hint
-                                    color: t.muted
+                                    objectName: navEntry.section ? "settingsSectionHint_" + navEntry.section.key : ""
+                                    text: navEntry.section
+                                        ? (navEntry.available ? navEntry.section.hint
+                                            : (navEntry.section.disabledHint || navEntry.section.hint))
+                                        : ""
+                                    color: page.t.muted
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
                                     width: parent.width
                                 }
                             }
                             MouseArea {
-                                objectName: "settingsSectionHit_" + modelData.key
+                                objectName: navEntry.section ? "settingsSectionHit_" + navEntry.section.key : ""
                                 anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: page.sectionIndex = index
+                                // 无工程时「工程设置」不可点：禁掉命中区而不是只把字染灰，
+                                // 否则点了没反应又切不过去，看起来像界面卡住。
+                                enabled: navEntry.available
+                                cursorShape: navEntry.available ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: page.sectionIndex = page.indexOfSection(navEntry.section.key)
                             }
                         }
                     }
@@ -530,6 +620,21 @@ Item {
                         SkillSettingsPanel {
                             anchors.fill: parent
                             app: page.app
+                        }
+                    }
+
+                    // -- 本工程 · 工程设置：整页嵌进 ProjectSettingsPage ----------------
+                    // 不复制它的控件：这一节只是把那一页放进来，字段、密钥校验与保存
+                    // 逻辑都还是 ProjectSettingsPage 里那一份。embedded 让它收起自己
+                    // 的页头（标题 + 窗口按钮），在这里就是设置页里的一节内容。
+                    // 容器留着 objectName：测试与截图靠它定位「本工程」这一组。
+                    Item {
+                        objectName: "settingsProjectSection"
+
+                        ProjectSettingsPage {
+                            anchors.fill: parent
+                            app: page.app
+                            embedded: true
                         }
                     }
 

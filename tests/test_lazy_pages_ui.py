@@ -60,21 +60,23 @@ def test_opening_a_project_only_creates_the_current_page(tmp_path, monkeypatch):
     with workspace_shell(tmp_path, monkeypatch) as ui:
         assert ui['page']('browsePage') is not None
         # 其余页面等第一次进入再实例化：打开工程不该把分镜、原文这些重页面全建一遍。
+        # 工程设置不在这张清单里：它已经并进设置页（设置页常驻 StackLayout，
+        # 那一节随设置页一起建好），不再是工作区里按需创建的一页。
         for name in ('sourcePage', 'storyboardPage', 'screenplayPage', 'assetsPage',
-                     'projectSettingsPage', 'staticCheckPage'):
+                     'staticCheckPage'):
             assert ui['page'](name) is None, name
 
 
 def test_page_is_created_when_first_visited_and_kept(tmp_path, monkeypatch):
     with workspace_shell(tmp_path, monkeypatch) as ui:
         window = ui['window']
-        window.setProperty('currentPage', 'project_settings')
-        ui['settle'](lambda: ui['page']('projectSettingsPage') is not None)
-        assert ui['page']('projectSettingsPage') is not None
+        window.setProperty('currentPage', 'shot_table')
+        ui['settle'](lambda: ui['page']('shotTablePage') is not None)
+        assert ui['page']('shotTablePage') is not None
         window.setProperty('currentPage', 'browse')
         ui['settle']()
         # 离开后保留：再次进入不重建，页面里的状态不会丢。
-        assert ui['page']('projectSettingsPage') is not None
+        assert ui['page']('shotTablePage') is not None
 
 
 def test_long_source_renders_only_the_current_window(tmp_path, monkeypatch):
