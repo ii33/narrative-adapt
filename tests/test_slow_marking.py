@@ -40,6 +40,8 @@ EXCEPTIONS = {
     "test_screenplay_source_outputs.py": "docx/pypdf 仅导出格式校验，样例很小（单例 <8s）",
     "test_previs_host.py": "PIL 只用来生成最小 PNG 校验抓帧落盘，不跑真实预演页（单例 <8s）",
     "test_segment_motion.py": "PIL 只用来生成占位帧图，主体是运动差量与提示词断言（单例 <8s）",
+    "test_asset_pipeline.py": "PIL 只用来生成占位图做产物可读性校验，主体是文字稿与任务组装（单例 <8s）",
+    "test_lighting.py": "PIL 不参与断言，仅为跟随 storyboard_art 的导入面（单例 <8s）",
 }
 
 
