@@ -15,7 +15,11 @@ import pytest
 
 pytestmark = pytest.mark.ui
 
-BUILTIN_NAMES = ["分场与分镜", "人物一致性检查", "外部工具调用规范"]
+# 内置技能：三条作业说明 + 三条生成工作流（顺序与 skills.BUILTIN_SKILLS 一致）。
+BUILTIN_NAMES = ["分场与分镜", "人物一致性检查", "外部工具调用规范",
+                 "素描（FLUX 3 Klein）", "风格化（Krea 2 风格参考）", "首尾帧短片（MiniMax H3）"]
+# 声明了 workflow 的那三条：它们的正文是「怎么喂框图/参考图/首尾帧」，不点名任何工具。
+GENERATION_NAMES = BUILTIN_NAMES[3:]
 
 
 def _value(item, name):
@@ -62,9 +66,9 @@ def _evaluate(item, expression):
 
 def write_user_skill(path: Path, name: str, summary: str = "一句话摘要",
                      instructions: str = "先读清单，再逐条核对。", families=None,
-                     tools=None, enabled: bool = True) -> Path:
+                     tools=None, enabled: bool = True, replaces: str | None = None) -> Path:
     """按磁盘格式直接造一条用户技能：面板要能读的就是这份 JSON。"""
-    payload = {"version": 1, "skills": [{
+    row = {
         "name": name,
         "summary": summary,
         "instructions": instructions,
@@ -73,8 +77,11 @@ def write_user_skill(path: Path, name: str, summary: str = "一句话摘要",
         "enabled": enabled,
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z",
-    }]}
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    }
+    if replaces:
+        row["replaces"] = replaces
+    path.write_text(json.dumps({"version": 1, "skills": [row]}, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8")
     return path
 
 
@@ -110,6 +117,10 @@ def skill_shell(tmp_path, monkeypatch):
     engine.load(QUrl.fromLocalFile(str(QML_PATH)))
     assert engine.rootObjects(), "Main.qml 没有加载出来"
     window = engine.rootObjects()[0]
+    # 面板多了「内置提示词」一块，技能列表变短了：把测试窗口放大到 1200 高，
+    # 让内置六行 + 用户行全部落在视口里——点击是按坐标点的，被裁掉的行点不到。
+    # 真实窗口尺寸由 Main.qml 决定，不受这里影响。
+    window.resize(1440, 1200)
     page = window.findChild(object, "settingsPage")
     panel = page.findChild(object, "skillSettingsPanel")
     assert panel is not None, "设置页里没有技能面板"
@@ -182,16 +193,20 @@ def skill_shell(tmp_path, monkeypatch):
         bridge.close()
 
 
-def test_panel_lists_three_builtin_skills_and_they_are_read_only(tmp_path, monkeypatch):
+def test_panel_lists_builtin_skills_and_they_are_read_only(tmp_path, monkeypatch):
     with skill_shell(tmp_path, monkeypatch) as ui:
         ui["show_panel"]()
         rows = ui["rows"]()
         assert [row["name"] for row in rows] == BUILTIN_NAMES
         assert all(row["builtin"] is True for row in rows)
-        # 内置技能自己就能打开工具：列表上「会打开 N 个工具」这一列不是装饰。
-        assert all(row["opens"]["resolved_tools"] for row in rows)
+        # 前三条（作业说明型）自己就能打开工具：列表上「会打开 N 个工具」这一列不是装饰。
+        assert all(row["opens"]["resolved_tools"] for row in rows[:3])
+        # 后三条（生成型）只声明工作流，不点名工具：列表上要写明它们会改什么。
+        assert all(row["opens"]["resolved_tools"] == [] for row in rows[3:])
+        assert [row["workflow"]["kind"] for row in rows[3:]] == ["sketch", "style", "video"]
         assert _value(ui["panel"], "loadError") == ""
         assert _value(ui["panel"], "configPath").endswith("skills.json")
+        assert "工作流：sketch／flux3-image-klein" in _evaluate(ui["panel"], "groupsText(skills[3])")
         # 编辑器的可选项来自注册表，和「有没有已保存的技能」无关。
         assert len(_value(ui["panel"], "families")) > 0
         assert len(_value(ui["panel"], "tools")) > 0
@@ -200,8 +215,8 @@ def test_panel_lists_three_builtin_skills_and_they_are_read_only(tmp_path, monke
         # 所以 tooltip 能解释「为什么不能改」。
         for name in ("skillRowEditHit", "skillRowDeleteHit"):
             hits = ui["row_items"](name)
-            assert len(hits) == 3
-            assert [item.property("enabled") for item in hits] == [False, False, False]
+            assert len(hits) == len(BUILTIN_NAMES)
+            assert [item.property("enabled") for item in hits] == [False] * len(BUILTIN_NAMES)
         assert "随程序发布" in _evaluate(ui["panel"], "rowEditTip(skills[0])")
         assert "随程序发布" in _evaluate(ui["panel"], "rowDeleteTip(skills[0])")
         # 非内置的提示语不该带这句，否则等于把「只读」说成了通用规则。
@@ -213,6 +228,66 @@ def test_panel_lists_three_builtin_skills_and_they_are_read_only(tmp_path, monke
         ui["settle"]()
         assert ui["editor"]().property("opened") is False
         assert ui["errors"] == []
+
+
+def test_builtin_prompts_are_listed_and_copyable_as_a_skill_draft(tmp_path, monkeypatch):
+    """「内置提示词」区：17 条都能看到、被覆盖时点名覆盖者、能复制成草稿。"""
+    from narrative.prompt_defaults import DEFAULT_PROMPTS
+
+    keys = list(DEFAULT_PROMPTS)
+    config = write_user_skill(tmp_path / "skills.json", "改写写作要求", summary="按我的顺序写",
+                              instructions="按我给的顺序写。", replaces="writing")
+    with skill_shell(tmp_path, monkeypatch) as ui:
+        ui["show_panel"]()
+        panel = ui["panel"]
+        rows = _value(panel, "promptKeys") or []
+        assert len(rows) == 17
+        assert [row["key"] for row in rows] == keys  # 顺序沿用提示词文件的声明顺序
+        by_key = {row["key"]: row for row in rows}
+        # 被覆盖的那条点名道姓说是谁在生效；其余仍是内置原文。
+        assert by_key["writing"]["replaced_by"] == "改写写作要求"
+        assert by_key["writing"]["source"] == "skill"
+        assert by_key["system"]["replaced_by"] is None
+
+        # 界面上 17 行都在（ScrollView + Repeater：没有虚拟化，能直接数出来）。
+        assert len(ui["row_items"]("skillPromptRow")) == 17
+        statuses = ui["row_items"]("skillPromptStatus")
+        assert len(statuses) == 17
+        assert "改写写作要求" in statuses[keys.index("writing")].property("text")
+        assert "内置生效" in statuses[keys.index("system")].property("text")
+
+        # 草稿由桥给出：当前生效全文 + 默认 replaces = 该键；此时还没落盘。
+        draft = ui["bridge"].duplicatePromptAsSkill("extraction")
+        assert draft["ok"] is True and draft["draft"]["replaces"] == "extraction"
+        assert draft["draft"]["instructions"].startswith("按用户指定的范围和当前工程粒度提取")
+
+        # 点「复制成我的技能」：打开编辑器并预填，草稿不写文件。
+        _click(ui, ui["row_items"]("skillPromptCopyHit")[keys.index("system")])
+        ui["wait"](lambda: ui["editor"]().property("opened"), "「复制成我的技能」没有打开编辑器")
+        assert _value(panel, "draftOriginal") == ""  # 新建，不是修改已有技能
+        assert _value(panel, "draftReplaces") == "system"
+        assert _value(panel, "draftName") == "协作者系统提示·我的改法"
+        assert _value(panel, "draftInstructions").startswith("你是当前叙事工程的协作者")
+        assert panel.findChild(object, "skillReplaces").property("text") == "system"
+        payload = json.loads(config.read_text(encoding="utf-8"))
+        assert [row["name"] for row in payload["skills"]] == ["改写写作要求"]
+
+        # 保存草稿：replaces 要真的写进文件（桥把这一栏透传给内核），
+        # 之后那条提示词位就显示被它覆盖了。
+        ui["save_editor"]()
+        ui["wait_changed"]()
+        payload = json.loads(config.read_text(encoding="utf-8"))
+        saved = {row["name"]: row for row in payload["skills"]}
+        assert saved["协作者系统提示·我的改法"]["replaces"] == "system"
+        assert saved["改写写作要求"]["replaces"] == "writing"
+        rows = {row["key"]: row for row in _value(panel, "promptKeys")}
+        assert rows["system"]["replaced_by"] == "协作者系统提示·我的改法"
+
+        # 未知键：错误就地显示，编辑器不再开一次。
+        ui["bridge"].duplicatePromptAsSkill("no_such_key")
+        ui["wait"](lambda: ui["errors"], "未知提示词键没有被拒绝")
+        kind, message = ui["errors"][-1]
+        assert kind == "skill" and "不存在的提示词条目" in message
 
 
 def test_new_skill_appears_in_list_file_and_shows_opens_preview(tmp_path, monkeypatch):
@@ -234,7 +309,7 @@ def test_new_skill_appears_in_list_file_and_shows_opens_preview(tmp_path, monkey
         ui["wait_changed"]()
 
         rows = ui["rows"]()
-        assert len(rows) == 4
+        assert len(rows) == len(BUILTIN_NAMES) + 1
         created = rows[-1]
         assert created["name"] == "场表速查"
         assert created["builtin"] is False
@@ -256,9 +331,9 @@ def test_editing_summary_is_written_back(tmp_path, monkeypatch):
         ui["show_panel"]()
         assert ui["rows"]()[-1]["name"] == "场表速查"
 
-        # 内置三条在前、用户技能在最后：点最后一行那个「编辑」。
+        # 内置六条在前、用户技能在最后：点最后一行那个「编辑」。
         edits = ui["row_items"]("skillRowEditHit")
-        assert len(edits) == 4
+        assert len(edits) == len(BUILTIN_NAMES) + 1
         _click(ui, edits[-1])
         ui["wait"](lambda: ui["editor"]().property("opened"), "行内「编辑」没有打开编辑器")
         # 名称是身份：编辑已有技能时只读，改不了（内核也没有改名接口）。
@@ -283,9 +358,9 @@ def test_disable_switch_takes_effect(tmp_path, monkeypatch):
     with skill_shell(tmp_path, monkeypatch) as ui:
         ui["show_panel"]()
         switches = ui["row_items"]("skillRowEnabled")
-        assert len(switches) == 4
-        # 内置三行的开关是禁用的：内核拒绝改内置技能，界面先别给机会。
-        assert [item.property("enabled") for item in switches[:3]] == [False, False, False]
+        assert len(switches) == len(BUILTIN_NAMES) + 1
+        # 内置行的开关是禁用的：内核拒绝改内置技能，界面先别给机会。
+        assert [item.property("enabled") for item in switches[:-1]] == [False] * len(BUILTIN_NAMES)
         assert switches[-1].property("checked") is True
 
         _click(ui, switches[-1])
@@ -306,8 +381,8 @@ def test_delete_user_skill_succeeds_and_builtin_is_refused(tmp_path, monkeypatch
     with skill_shell(tmp_path, monkeypatch) as ui:
         ui["show_panel"]()
         deletes = ui["row_items"]("skillRowDeleteHit")
-        assert len(deletes) == 4
-        assert [item.property("enabled") for item in deletes[:3]] == [False, False, False]
+        assert len(deletes) == len(BUILTIN_NAMES) + 1
+        assert [item.property("enabled") for item in deletes[:-1]] == [False] * len(BUILTIN_NAMES)
 
         _click(ui, deletes[-1])
         ui["wait_changed"]()
@@ -322,7 +397,7 @@ def test_delete_user_skill_succeeds_and_builtin_is_refused(tmp_path, monkeypatch
         kind, message = ui["errors"][-1]
         assert kind == "skill"
         assert "内置" in message and "不可删除" in message
-        # 被拒之后列表原样：内置三条都还在。
+        # 被拒之后列表原样：内置六条都还在。
         assert [row["name"] for row in ui["rows"]()] == BUILTIN_NAMES
 
 

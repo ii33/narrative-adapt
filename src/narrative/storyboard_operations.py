@@ -662,7 +662,10 @@ class StoryboardOperationsMixin(StoryboardPrevisMixin, StoryboardAssetsMixin, St
             raise ContentConflictError('分镜已修改，请刷新后重试')
         shot = _shot_in_scene(board, shot_id)
         offset = _integer(offset_ms, '镜内位置')
-        if offset not in {row['offset_ms'] for row in shot['timeline']['keyframes']}:
+        # 显式计划与静帧都算有效帧：读视图把两者并进时间轴，任务包也按这个口径收，
+        # 这里再只认计划就会出现「set_keyframe 建过帧却被说不存在」的自相矛盾。
+        offsets = generation_task._frame_offsets(shot)
+        if offset not in offsets:
             raise ValueError('该时刻还没有关键帧；先用 set_keyframe 建帧或 add_timeline_keyframe 建立计划')
         # 定案前后能改什么由既有规则决定：草图要解除定案，风格帧要已定案。先查，
         # 免得白跑一次生成再被拒。

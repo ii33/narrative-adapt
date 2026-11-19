@@ -25,6 +25,7 @@ from . import (
     project_catalog,
     project_package,
     project_removal,
+    prompt_registry,
     providers,
     runtime_security,
     skills,
@@ -199,6 +200,40 @@ def _skill_names(value: object, label: str) -> list[str]:
         raise ValueError(f"{label} 须为名称数组")
     rows = [str(item).strip() for item in value if str(item).strip()]
     return list(dict.fromkeys(rows))
+
+
+def _skill_text(value: object, label: str) -> str | None:
+    """界面传回来的文本字段（可能是 QJSValue 里的 undefined）：空串原样保留。
+
+    空串在 ``skills`` 内核里是「显式清空」的意思（`replaces` 传空串=改回纯附加说明），
+    所以这里不能把空串折成 None——None 表示「没传，不动这个字段」。
+    """
+    if value is None:
+        return None
+    if hasattr(value, "toVariant"):
+        value = value.toVariant()
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{label} 须为文本")
+    return value
+
+
+def _skill_mapping(value: object, label: str) -> dict | None:
+    """界面传回来的对象（``workflow``）：QJSValue 折成 dict，形状校验交给内核。
+
+    界面不做第二套白名单：`_clean_workflow` 是唯一口径，写错了在哪里报都一个说法。
+    空对象原样保留（``{}`` 在 ``update_skill`` 里是「清空工作流声明」）。
+    """
+    if value is None:
+        return None
+    if hasattr(value, "toVariant"):
+        value = value.toVariant()
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} 须为 JSON 对象，例如 {{\"kind\": \"sketch\", \"model\": \"...\"}}")
+    return dict(value)
 
 
 def _skill_opens(families: list[str], tools: list[str]) -> dict:
@@ -843,6 +878,10 @@ class NativeBridge(QObject):
         """
         from . import tool_api
 
+        # 内置提示词位先算好（只读、不落盘）：它不受「用户技能文件读不读得出来」影响，
+        # 面板的「内置提示词」区必须照常列出 17 条，才能让人看到哪条被谁覆盖了。
+        # list_prompt_keys 自己容错（坏文件时 replaced_by 全为 None），不在这里抛。
+        prompt_keys = prompt_registry.list_prompt_keys()
         snapshot: dict[str, Any] = {
             "ok": True,
             "path": str(skills.default_path()),
@@ -853,6 +892,11 @@ class NativeBridge(QObject):
             "families": sorted(skills.known_families()),
             "tools": sorted(skills.known_tools()),
             "skills": [],
+            # 内置提示词位（key/label/description/version/replaced_by/source）：
+            # 「复制成我的技能」的入口就从这份清单来。
+            "prompt_keys": prompt_keys,
+            # 技能文件坏掉时提示词位全部回落到内置；原因在这里说一次，面板显示一行。
+            "prompt_problem": prompt_registry.skill_problem() or "",
         }
         try:
             rows = skills.load_skills()
@@ -871,6 +915,59 @@ class NativeBridge(QObject):
         except ValueError as exc:
             return {"resolved_tools": [], "problem": str(exc)}
 
+    @Slot(str, result="QVariantMap")
+    def duplicatePromptAsSkill(self, key: str) -> dict:
+        """把某条内置提示词**当前生效**的全文预填成一条新技能草稿（不落盘）。
+
+        面板的「复制成我的技能」用它：返回的 ``draft`` 直接灌进编辑器，用户改完点保存
+        才走 ``saveSkill``。默认 ``replaces`` 就指向这个键——复制出来的技能如果不顶替
+        任何提示词，就只是一段没人会加载的说明，这个动作等于白做。
+
+        预填的是**当前生效**全文（可能已经是被某条技能改写过的版本），不是 `DEFAULT_PROMPTS`
+        里那份：用户看到的要是他此刻真正在用的文本，否则「改一处措辞」就变成了「回到出厂」。
+        """
+        name = str(key or "").strip()
+        try:
+            resolved = prompt_registry.resolve_prompt(name)
+        except ValueError as exc:
+            # 未知键：内核的报错已经列出全部可选键，直接摆到面板上。
+            self.errorOccurred.emit("skill", str(exc))
+            return {"ok": False, "error": str(exc)}
+        entry = DEFAULT_PROMPTS.get(name) or {}
+        label = str(entry.get("label") or name)
+        text = resolved.get("text") or ""
+        draft = {
+            # original 为空 = 新建；名字是身份，复制出来的草稿用「标签·我的改法」，
+            # 撞名时内核会在保存那一步说清楚（可以在这之前改成别的名字）。
+            "original": "",
+            "name": f"{label}·我的改法"[:64],
+            "summary": f"顶替内置提示词「{label}」，按我的写法生效。"[:200],
+            "instructions": text,
+            "families": [],
+            "tools": [],
+            "enabled": True,
+            "replaces": name,
+        }
+        result: dict[str, Any] = {
+            "ok": True,
+            "key": name,
+            "label": label,
+            "draft": draft,
+            # 来源：builtin 表示抄的是内置原文，skill 表示当前生效的文本已经来自某条技能。
+            "source": resolved.get("source"),
+            "overridden_by": resolved.get("overridden_by"),
+        }
+        if resolved.get("ignored"):
+            # 同键还有别的技能：解析只认最近更新的那条，被忽略的也要说出来。
+            result["ignored"] = resolved["ignored"]
+        if resolved.get("problem"):
+            result["problem"] = resolved["problem"]
+        if not text:
+            # 生效文本为空（覆盖它的技能正文是空的）时复制不出正文：说清楚，别让编辑器
+            # 打开一片空白却不解释。
+            result["problem"] = "这条提示词当前生效的文本为空（顶替它的技能正文为空）；编辑器里需要自己写一段。"
+        return result
+
     @Slot("QVariantMap")
     def saveSkill(self, row: dict) -> None:
         """新建或修改一条技能。``original`` 为已保存的名字时走修改，否则走新建。
@@ -886,6 +983,13 @@ class NativeBridge(QObject):
                 raise skills.SkillError("enabled 须为布尔值（界面上就是那个启用开关的状态）")
             families = _skill_names(data.get("families"), "families")
             tools = _skill_names(data.get("tools"), "tools")
+            # replaces / workflow 只在界面**明确带了这个键**时才传给内核：
+            # 传 None 在内核里表示「不动这个字段」（行内启用开关回传整行时用的就是这个语义，
+            # 不能因为没带 workflow 就把已有声明清空）；带空串/空对象才是显式清空。
+            replaces = (_skill_text(data["replaces"], "replaces")
+                        if "replaces" in data else None)
+            workflow = (_skill_mapping(data["workflow"], "workflow")
+                        if "workflow" in data else None)
             if original:
                 skill = skills.update_skill(
                     original,
@@ -894,10 +998,13 @@ class NativeBridge(QObject):
                     families=families,
                     tools=tools,
                     enabled=enabled,
+                    replaces=replaces,
+                    workflow=workflow,
                 )
             else:
                 skill = skills.create_skill(data.get("name"), data.get("summary"),
-                                            data.get("instructions"), families, tools)
+                                            data.get("instructions"), families, tools,
+                                            replaces=replaces, workflow=workflow)
                 # 内核新建一律从「启用」开始；编辑器里没勾启用时在同一份提交里补一步
                 # 停用，仍然交给内核写盘——界面不自己拼一个 Skill 直接覆盖整表。
                 if enabled is False:

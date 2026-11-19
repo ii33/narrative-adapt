@@ -18,6 +18,12 @@ ColumnLayout {
     readonly property var t: app ? app.theme : bridge.theme
 
     property var skills: []
+    // 内置提示词位（来自 bridge.skills() 的 prompt_keys）：key/label/description/version/
+    // replaced_by/source。它们随程序发布、只读，面板只负责列出来并给一个「复制成我的技能」
+    // 的入口——想改措辞的做法是复制一份再改，而不是就地改内置文本。
+    property var promptKeys: []
+    // 技能文件读不出来时提示词位全部回落到内置：原因显示一行，不整块藏起来。
+    property string promptProblem: ""
     // 编辑器的可选项：业务组名与工具名都是注册表的静态事实，不受现有技能影响。
     property var families: []
     property var tools: []
@@ -44,6 +50,10 @@ ColumnLayout {
     property bool draftEnabled: true
     property var draftFamilies: []
     property var draftTools: []
+    // 这条技能的正文顶替哪段内置提示词（键名）；空串 = 只是附加说明。
+    // 从「内置提示词」区复制出来的草稿默认就指回那个键——不顶替任何提示词的副本
+    // 只会是一段没人加载的说明，复制这个动作就白做了。
+    property string draftReplaces: ""
     // 额外工具的搜索词：可选工具有一百多个，全铺开没人找得到。
     property string toolQuery: ""
     // 「会打开哪些工具」预览：由桥解析（解析口径只写一份），界面不自己算。
@@ -63,6 +73,8 @@ ColumnLayout {
     function reload() {
         var snapshot = bridge.skills()
         panel.skills = snapshot.skills || []
+        panel.promptKeys = snapshot.prompt_keys || []
+        panel.promptProblem = snapshot.prompt_problem || ""
         panel.families = snapshot.families || []
         panel.tools = snapshot.tools || []
         panel.configPath = snapshot.path || ""
@@ -93,7 +105,19 @@ ColumnLayout {
         var tools = skill.tools || []
         if (families.length > 0) parts.push("业务组：" + families.join("、"))
         if (tools.length > 0) parts.push("额外工具：" + tools.join("、"))
+        // 顶替提示词与生成工作流都是「这条技能会改什么」：列表一行说清楚，
+        // 否则只能打开编辑器才知道它是不是替换了系统提示词。
+        if (skill.replaces) parts.push("替换提示词：" + skill.replaces)
+        var workflow = skill.workflow
+        if (workflow && workflow.kind)
+            parts.push("工作流：" + workflow.kind + "／" + (workflow.model || "未声明模型"))
         return parts.length > 0 ? parts.join("；") : "不点名任何业务组或工具"
+    }
+
+    // 提示词位的当前状态：谁覆盖了它，或者内置仍是生效的那一份。
+    function promptStatus(row) {
+        if (row && row.replaced_by) return "被「" + row.replaced_by + "」覆盖"
+        return "内置生效（版本 " + ((row && row.version) || "1") + "）"
     }
 
     // 内置技能的提示气泡非读不可：按钮置灰之后，用户更需要知道「为什么不能改」。
@@ -122,10 +146,42 @@ ColumnLayout {
         panel.draftEnabled = true
         panel.draftFamilies = []
         panel.draftTools = []
+        panel.draftReplaces = ""
         panel.toolQuery = ""
         panel.keepDraft = false
         panel.fillFields()
         editor.open()
+    }
+
+    // 把一份草稿（新建技能、或从内置提示词复制出来的）灌进编辑器。
+    // 只有新建才走这里：已有技能走 openEditor，名称是身份、不能改。
+    function applyDraft(draft) {
+        draft = draft || ({})
+        panel.editing = -1
+        panel.draftOriginal = ""
+        panel.draftName = draft.name || ""
+        panel.draftSummary = draft.summary || ""
+        panel.draftInstructions = draft.instructions || ""
+        panel.draftEnabled = draft.enabled !== false
+        panel.draftFamilies = (draft.families || []).slice()
+        panel.draftTools = (draft.tools || []).slice()
+        panel.draftReplaces = draft.replaces || ""
+        panel.toolQuery = ""
+        panel.keepDraft = false
+        panel.fillFields()
+        editor.open()
+    }
+
+    // 「复制成我的技能」：草稿由桥生成（当前生效全文 + 默认 replaces），这里不落盘——
+    // 用户改完点保存才写进技能文件。
+    function copyPromptAsSkill(key) {
+        var result = bridge.duplicatePromptAsSkill(key)
+        // 未知键之类的问题已由桥发 errorOccurred，面板那条消息会显示原因；这里不再开编辑器。
+        if (!result || result.ok !== true) return
+        panel.applyDraft(result.draft)
+        panel.messageIsError = false
+        panel.message = "已复制提示词「" + result.label + "」为草稿（替换 " + result.key
+            + "）；改完点保存才写进技能文件。"
     }
 
     function openEditor(index) {
@@ -140,6 +196,7 @@ ColumnLayout {
         panel.draftEnabled = skill.enabled !== false
         panel.draftFamilies = (skill.families || []).slice()
         panel.draftTools = (skill.tools || []).slice()
+        panel.draftReplaces = skill.replaces || ""
         panel.toolQuery = ""
         panel.keepDraft = false
         panel.fillFields()
@@ -158,6 +215,7 @@ ColumnLayout {
         nameField.text = panel.draftName
         summaryField.text = panel.draftSummary
         instructionsArea.text = panel.draftInstructions
+        replacesField.text = panel.draftReplaces
         enabledBox.checked = panel.draftEnabled
         toolQueryField.text = panel.toolQuery
         panel.refreshPreview()
@@ -231,7 +289,10 @@ ColumnLayout {
             instructions: panel.draftInstructions.trim(),
             families: (panel.draftFamilies || []).slice(),
             tools: (panel.draftTools || []).slice(),
-            enabled: panel.draftEnabled
+            enabled: panel.draftEnabled,
+            // 空串 = 明确「不替换任何提示词」（桥会把它传给内核当清空语义）；
+            // 不带这个键则表示「没动过」，那时内核保留已有声明。
+            replaces: (panel.draftReplaces || "").trim()
         }
     }
 
@@ -550,9 +611,153 @@ ColumnLayout {
                     font.pixelSize: 11
                     text: panel.loadError.length > 0
                         ? "技能文件读不出来，先按上面的错误改好它。"
-                        : "还没有可显示的技能。内置技能随程序发布，正常情况下至少有三条；"
-                            + "一条也没有说明技能文件被清空了，可以在这里新建一条，"
-                            + "或把备份 skills.json.bak 放回来。"
+                        : "还没有可显示的技能。内置技能随程序发布，正常情况下至少六条"
+                            + "（三条作业说明 + 三条生成工作流）；一条也没有说明技能文件被清空了，"
+                            + "可以在这里新建一条，或把备份 skills.json.bak 放回来。"
+                }
+            }
+        }
+    }
+
+    // -- 内置提示词：可见、可复制 ---------------------------------------------
+    // 17 条内置提示词随程序发布、只读。想改措辞的做法是复制一份再改：这里列出每一条
+    // 现在是谁在生效（内置还是某条技能覆盖），并给一个「复制成我的技能」的入口。
+    // 用 ScrollView + Column + Repeater（而不是 ListView）：17 行不多，全部实例化之后
+    // 面板与测试都能直接数出「17 条」，不必滚动才看见。
+    Rectangle {
+        objectName: "skillPromptPanel"
+        Layout.fillWidth: true
+        Layout.preferredHeight: 196
+        color: panel.t.card
+        border.color: panel.t.line
+        radius: panel.t.radius
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 8
+            spacing: 4
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                Label {
+                    text: "内置提示词"
+                    font.pixelSize: 13
+                    font.weight: Font.DemiBold
+                    color: panel.t.ink
+                }
+                Label {
+                    objectName: "skillPromptCount"
+                    text: panel.promptKeys.length + " 条"
+                    color: panel.t.muted
+                    font.pixelSize: 11
+                }
+                Item { Layout.fillWidth: true }
+                Label {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignRight
+                    text: "复制出来的技能可以改；内置原文一个字符都不动"
+                    color: panel.t.muted
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                }
+            }
+            Label {
+                objectName: "skillPromptHint"
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: panel.t.muted
+                font.pixelSize: 10
+                text: "「替换提示词」指这条技能的正文顶替哪一段内置提示词。同一个键有多条时，"
+                    + "最近更新的那条生效；停用或删除它就自动回落到内置。"
+            }
+            Label {
+                objectName: "skillPromptProblem"
+                Layout.fillWidth: true
+                visible: text.length > 0
+                text: panel.promptProblem
+                color: panel.t.bad
+                font.pixelSize: 10
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+            }
+
+            ScrollView {
+                id: promptScroll
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                // 提示词名是单列竖排：横向滚动条只会和竖条互相挤。
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                Column {
+                    width: promptScroll.availableWidth
+                    spacing: 2
+
+                    Repeater {
+                        model: panel.promptKeys
+
+                        delegate: Rectangle {
+                            id: promptRow
+                            required property var modelData
+
+                            objectName: "skillPromptRow"
+                            width: promptScroll.availableWidth
+                            height: 22
+                            radius: 4
+                            color: promptHover.hovered ? panel.t.accentSoft : "transparent"
+
+                            HoverHandler { id: promptHover }
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 6
+                                anchors.rightMargin: 4
+                                spacing: 8
+
+                                Label {
+                                    objectName: "skillPromptLabel"
+                                    text: promptRow.modelData.label
+                                    color: panel.t.ink
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
+                                    Layout.maximumWidth: 200
+                                }
+                                Label {
+                                    objectName: "skillPromptKey"
+                                    text: promptRow.modelData.key
+                                    color: panel.t.muted
+                                    font.pixelSize: 10
+                                    elide: Text.ElideRight
+                                    Layout.maximumWidth: 140
+                                }
+                                Label {
+                                    // 谁在生效：内置原文，还是某条技能覆盖了它（点名道姓，
+                                    // 用户才知道该去改哪一条）。
+                                    objectName: "skillPromptStatus"
+                                    Layout.fillWidth: true
+                                    text: panel.promptStatus(promptRow.modelData)
+                                    color: promptRow.modelData.replaced_by ? panel.t.warn : panel.t.muted
+                                    font.pixelSize: 10
+                                    elide: Text.ElideRight
+                                }
+                                Label {
+                                    objectName: "skillPromptCopy_" + promptRow.modelData.key
+                                    text: "复制成我的技能"
+                                    color: panel.t.accent
+                                    font.pixelSize: 11
+                                    font.underline: true
+                                    MouseArea {
+                                        objectName: "skillPromptCopyHit"
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: panel.copyPromptAsSkill(promptRow.modelData.key)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -645,6 +850,25 @@ ColumnLayout {
                             objectName: "skillEnabled"
                             text: "启用的技能才能在会话里被加载"
                             onToggled: panel.draftEnabled = enabledBox.checked
+                        }
+
+                        Label { text: "替换提示词"; color: panel.t.muted; font.pixelSize: 12 }
+                        TextField {
+                            id: replacesField
+                            objectName: "skillReplaces"
+                            Layout.fillWidth: true
+                            placeholderText: "提示词条目名，例如 extraction；留空 = 只附加说明"
+                            onTextEdited: panel.draftReplaces = text
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.columnSpan: 2
+                            wrapMode: Text.Wrap
+                            color: panel.t.muted
+                            font.pixelSize: 10
+                            text: "填了条目名，这条技能的正文就顶替那一段内置提示词（同键多条时最近更新的生效，"
+                                + "停用或删除即回落内置）；留空表示它只是附加说明，不改任何提示词。"
+                                + "从「内置提示词」区复制出来的草稿已经填好这一栏。"
                         }
                     }
 

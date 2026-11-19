@@ -4,7 +4,8 @@
 助手需要的却是同一份「这次生成的输入」。把三件事拆开——
 
 * ``build_task``：组装任务包（纯数据，不联网、不读工程文件）；
-* ``select_skill``：按技能声明选一条，选不到就报清楚，不猜默认；
+* ``select_skill``：按技能声明选一条——用户启用的同 kind 技能优先，没有就回落到内置
+  生成技能（回执里标 ``skill.builtin=true``）；两边都没有才报错，不猜第三个默认；
 * ``execute``：按 kind 调现有 provider，产出回执。
 
 ——失败时就能说清是「技能缺失」「输入不合法」还是「服务失败」：前两类在 build/select
@@ -275,10 +276,20 @@ def task_prompt(task):
 
 # ------------------------------------------------------------------ 技能
 def select_skill(kind, skills=None):
-    """在「已启用且 workflow.kind 匹配」的技能里取最近更新的一条。
+    """在「已启用且 workflow.kind 匹配」的技能里选一条：用户技能优先，没有就回落到内置。
 
-    找不到就抛错并列出当前启用的生成技能：这条链路不猜默认技能，因为不同技能对应
-    不同模型与许可（付费/本地），猜错就是替用户花钱或换模型。
+    优先级只有两层，理由各不相同：
+
+    * 用户技能内部取**最近更新**的一条——他改完一条就期望生效（与 `prompt_registry`
+      的 `replaces` 同一口径）。
+    * 用户一条都没有（或都停用了）时用内置生成技能（`skills.BUILTIN_GENERATION_SKILLS`，
+      文档里的三条：FLUX 3 Klein 素描、Krea 2 风格化、MiniMax H3 首尾帧）。开箱就能跑，
+      而不是让人先猜该建什么技能。内置是「默认」不是「最高优先」：只要用户声明了同 kind
+      的启用技能，一律以用户的为准，不拿内置去比时间戳（内置没有时间戳，比出来只会是
+      用户的、但那样规则就变成「依赖时间戳顺序」这种说不清的东西了）。
+
+    两边都找不到才报错并列出当前启用的生成技能：这条链路不猜第三个默认，因为不同技能
+    对应不同模型与许可（付费/本地），猜错就是替用户花钱或换模型。
     """
     if kind not in KINDS:
         raise TaskInputError('生成类型须为' + '、'.join(KINDS))
@@ -288,11 +299,17 @@ def select_skill(kind, skills=None):
     declared = [row for row in skills if isinstance(getattr(row, 'workflow', None), dict) and row.workflow]
     enabled = [row for row in declared if getattr(row, 'enabled', True)]
     matches = [row for row in enabled if row.workflow.get('kind') == kind]
-    if not matches:
-        available = '、'.join(f'{row.name}（{row.workflow.get("kind")}）' for row in enabled) or '无'
-        raise TaskInputError(f'没有可用于{kind}生成的技能：请在技能里声明 workflow.kind={kind} 并启用；'
-                             f'当前启用的生成技能：{available}')
-    return max(matches, key=lambda row: (getattr(row, 'updated_at', '') or '', getattr(row, 'created_at', '') or ''))
+    custom = [row for row in matches if not getattr(row, 'builtin', False)]
+    if custom:
+        return max(custom, key=lambda row: (getattr(row, 'updated_at', '') or '',
+                                            getattr(row, 'created_at', '') or ''))
+    if matches:
+        # 只剩内置：同一 kind 目前只声明了一条，取声明顺序里的第一条（`max` 在这里
+        # 没有意义：内置没有时间戳，比出来的先后只是列表顺序，明说更不容易被误读）。
+        return matches[0]
+    available = '、'.join(f'{row.name}（{row.workflow.get("kind")}）' for row in enabled) or '无'
+    raise TaskInputError(f'没有可用于{kind}生成的技能：请在技能里声明 workflow.kind={kind} 并启用；'
+                         f'当前启用的生成技能：{available}')
 
 
 # ------------------------------------------------------------------ 执行
@@ -301,13 +318,14 @@ def _stamp():
 
 
 @contextmanager
-def _workflow_override(kind, workflow, warnings):
+def _workflow_override(kind, workflow, warnings, *, builtin=False):
     """把技能里的 workflow_file 透给现有 provider。
 
     现有 provider 只认环境变量（``NARRATIVE_COMFY_SKETCH_WORKFLOW`` /
     ``NARRATIVE_COMFY_WORKFLOW``），所以这里临时设置、退出还原——能生效就生效，
     不能（视频走 HTTP 服务、文件不存在、没有通道的 params）就记 warning，
-    不假装用上了，也不在本阶段重写工作流系统。
+    不假装用上了，也不在本阶段重写工作流系统。``builtin`` 只影响 warning 的措辞：
+    内置技能缺文件是「程序没带」，用户技能缺文件是「你没写」。
     """
     params = workflow.get('params')
     if params:
@@ -317,6 +335,15 @@ def _workflow_override(kind, workflow, warnings):
                          'params': deepcopy(params)})
     workflow_file = workflow.get('workflow_file')
     if not workflow_file:
+        # 内置生成技能里有一条（Krea 2 风格化）还没有随程序发布的工作流文件。缺声明本身
+        # 不是错误——很多用户技能也走 provider 默认流程——但**内置**这一条缺了要说出来：
+        # 否则用户看到「内置技能跑通了」，会以为它用的是文档里那个工作流。
+        # 只对 sketch/style 报：视频走 HTTP 服务，本来就不读工作流文件（见下面那条分支）。
+        if builtin and kind in ('sketch', 'style'):
+            warnings.append({'code': 'WORKFLOW_FILE_ABSENT',
+                             'message': '这条内置生成技能没有随程序发布工作流文件，本轮用 provider 的默认工作流；'
+                                        '想指定文件请在技能里写 workflow.workflow_file',
+                             'kind': kind})
         yield
         return
     variable = {'sketch': 'NARRATIVE_COMFY_SKETCH_WORKFLOW', 'style': 'NARRATIVE_COMFY_WORKFLOW'}.get(kind)
@@ -328,6 +355,11 @@ def _workflow_override(kind, workflow, warnings):
         yield
         return
     path = Path(workflow_file)
+    if not path.is_absolute():
+        # 相对路径就是「随程序发布的工作流文件」：内置技能写的是
+        # "workflows/storyboard_flux_klein.json"，按包目录解析而不是按进程 CWD——
+        # 用户从哪个目录启动程序都该拿到同一份。自己写绝对路径的照原样用。
+        path = Path(__file__).parent / path
     if not path.is_file():
         warnings.append({'code': 'WORKFLOW_FILE_MISSING',
                          'message': f'技能里的 workflow_file 不存在（{path.name}），本轮改用默认工作流',
@@ -442,7 +474,8 @@ def execute(task, skill, *, work_dir=None, credentials=None):
     warnings = []
     output = folder / f'{kind}.png'
     references = tuple(task['style']['references'])
-    with _workflow_override(kind, workflow, warnings):
+    builtin = bool(getattr(skill, 'builtin', False))
+    with _workflow_override(kind, workflow, warnings, builtin=builtin):
         if kind == 'sketch':
             from .storyboard_style_provider import render_sketch_image
             guide = folder / 'guide.png'
@@ -461,7 +494,11 @@ def execute(task, skill, *, work_dir=None, credentials=None):
     return {'task': task,
             'skill': {'name': getattr(skill, 'name', ''), 'model': workflow.get('model', ''),
                       'license': workflow.get('license', ''),
-                      'expectations': deepcopy(workflow.get('expectations') or {})},
+                      'expectations': deepcopy(workflow.get('expectations') or {}),
+                      # 内置 = 用户没启用同 kind 的技能，这段是用程序自带的默认生成技能跑的。
+                      # 回执里必须标出来：界面与助手要能分清「用户配的」和「默认的」，
+                      # 否则换个机器/换个人就说不清这条结果到底按谁的许可与模型出的。
+                      'builtin': builtin},
             'provider_receipt': receipt, 'warnings': warnings,
             'started_at': started, 'finished_at': _stamp(),
             # 绑定要在临时目录被回收之前完成；视频没有本地新图，这里是 None。

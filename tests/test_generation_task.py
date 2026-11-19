@@ -167,7 +167,17 @@ def test_video_task_derives_endpoints_from_style_frames(scene, tmp_path):
 
 
 # ------------------------------------------------------------------ 技能选择
-def test_select_skill_reports_what_is_available(tmp_path):
+def test_select_skill_falls_back_to_builtin_generation_skills(tmp_path, monkeypatch):
+    """没有用户技能时不是报错：内置三条就是开箱即用的默认（回执里会标 builtin）。"""
+    for kind in generation_task.KINDS:
+        picked = select_skill(kind)
+        assert picked.builtin is True and picked.workflow['kind'] == kind
+    assert select_skill('sketch').name == '素描（FLUX 3 Klein）'
+    assert select_skill('sketch').workflow['model'] == 'flux3-image-klein'
+    assert select_skill('video').workflow['model'] == 'MiniMax-H3'
+
+    # 连内置都被裁掉（例如打包漏了技能模块）才报错，并把当前启用的生成技能列出来。
+    monkeypatch.setattr('narrative.skills.BUILTIN_SKILLS', ())
     with pytest.raises(TaskInputError) as error:
         select_skill('sketch')
     assert '没有可用于sketch生成的技能' in str(error.value) and '无' in str(error.value)
@@ -187,10 +197,15 @@ def test_select_skill_takes_the_most_recently_updated_and_skips_disabled(tmp_pat
           skill('风格帧', 'style', stamp='2026-04-01T00:00:00Z'))
     assert select_skill('sketch').name == '新草图'
     assert select_skill('style').name == '风格帧'
-    # 没声明 workflow 的技能不算生成技能。
+    # 用户技能一律压过内置：同 kind 只要有启用的一条，就不会去用默认那条。
+    assert select_skill('sketch').builtin is False and select_skill('style').builtin is False
+
+    # 用户的同 kind 技能全停用 = 回到内置默认，而不是报错。
+    write(tmp_path / 'skills.json', skill('停用草图', 'sketch', enabled=False))
+    assert select_skill('sketch').builtin is True
+    # 没声明 workflow 的技能不算生成技能，也不会顶替内置。
     write(tmp_path / 'skills.json', Skill(name='纯说明', summary='s', instructions='i'))
-    with pytest.raises(TaskInputError, match='没有可用于style生成'):
-        select_skill('style')
+    assert select_skill('style').builtin is True
 
 
 # ------------------------------------------------------------------ 执行器
@@ -210,7 +225,9 @@ def test_execute_returns_receipt_and_passes_what_it_can(monkeypatch, tmp_path):
     receipt = execute(task, picked, work_dir=tmp_path / 'out')
     assert set(receipt) == {'task', 'skill', 'provider_receipt', 'warnings', 'started_at', 'finished_at',
                             'output_path'}
-    assert receipt['skill'] == {'name': '草图', 'model': 'stub-model', 'license': '', 'expectations': {}}
+    # 用户技能跑出来的回执标 builtin=false：界面与助手要能分清「用户配的」和「默认的」。
+    assert receipt['skill'] == {'name': '草图', 'model': 'stub-model', 'license': '',
+                                'expectations': {}, 'builtin': False}
     assert receipt['provider_receipt']['job_id'] == 'job-9'
     assert receipt['started_at'].endswith('Z') and receipt['finished_at'].endswith('Z')
     assert Path(receipt['output_path']).is_file() and calls[0]['guide_exists']
@@ -219,6 +236,44 @@ def test_execute_returns_receipt_and_passes_what_it_can(monkeypatch, tmp_path):
     assert {row['code'] for row in receipt['warnings']} == {'WORKFLOW_PARAMS_UNSUPPORTED'}
     assert calls[0]['workflow'] == str(workflow_file)
     assert os.environ.get('NARRATIVE_COMFY_SKETCH_WORKFLOW') is None
+
+
+def test_execute_marks_builtin_and_resolves_the_shipped_workflow(monkeypatch, tmp_path):
+    """回落用内置技能跑：回执标 builtin=true，随程序发布的工作流文件真的生效。"""
+    calls = []
+    fake_sketch(monkeypatch, calls=calls)
+    monkeypatch.delenv('NARRATIVE_COMFY_SKETCH_WORKFLOW', raising=False)
+    picked = select_skill('sketch')
+    assert picked.builtin is True
+    task = {'kind': 'sketch', 'shot_id': 'shot-1', 'offset_ms': 0, 'layout': None, 'moment': {},
+            'assets': [], 'style': {'text': '木刻', 'references': []},
+            'constraints': {'duration_ms': 2000, 'source_image': None},
+            'expect': {}, 'prompt': ''}
+    receipt = execute(task, picked, work_dir=tmp_path / 'builtin')
+    assert receipt['skill']['builtin'] is True
+    assert receipt['skill']['name'] == '素描（FLUX 3 Klein）'
+    assert receipt['skill']['model'] == 'flux3-image-klein'
+    assert receipt['skill']['license'].startswith('FLUX Kommunity')
+    assert receipt['skill']['expectations'] == {'aspect_from_shot': True, 'reference_images_max': 10}
+    # 相对路径按包目录解析：随程序发布的那份文件被设进了环境变量，退出即还原。
+    assert calls[0]['workflow'].endswith(str(Path('workflows') / 'storyboard_flux_klein.json'))
+    assert os.environ.get('NARRATIVE_COMFY_SKETCH_WORKFLOW') is None
+    # 文件存在、也没有 params：这一轮没有「声明了却没生效」的字段。
+    assert receipt['warnings'] == []
+
+
+def test_execute_builtin_style_reports_the_absent_workflow_file(monkeypatch, tmp_path):
+    """Krea 2 那条还没带工作流文件：缺声明是已知状态，要在 warnings 里说出来。"""
+    fake_style(monkeypatch)
+    source = tmp_path / 'sketch.png'
+    source.write_bytes(b'placeholder')
+    task = {'kind': 'style', 'shot_id': 'shot-1', 'offset_ms': 0, 'layout': None, 'moment': {},
+            'assets': [], 'style': {'text': '木刻', 'references': []},
+            'constraints': {'duration_ms': 2000, 'source_image': str(source)},
+            'expect': {}, 'prompt': ''}
+    receipt = execute(task, select_skill('style'), work_dir=tmp_path / 'builtin-style')
+    assert receipt['skill']['builtin'] is True and receipt['skill']['model'] == 'krea-2'
+    assert [row['code'] for row in receipt['warnings']] == ['WORKFLOW_FILE_ABSENT']
 
 
 def test_execute_rejects_a_skill_of_another_kind(monkeypatch, tmp_path):
@@ -284,9 +339,22 @@ def test_run_generation_task_failure_keeps_the_old_image(scene, monkeypatch, tmp
     assert before['shots'][0]['keyframes'][0]['sketch_path'] == first['output_path']
 
 
-def test_run_generation_task_explains_missing_skill(scene, monkeypatch):
+def test_run_generation_task_falls_back_to_the_builtin_skill(scene, monkeypatch):
+    """工具链路同样回落：用户没配技能时用内置素描，结果照常绑定并标 builtin。"""
     ops, unit, shot, board = scene
     fake_sketch(monkeypatch)
+    result = run(ops, unit, 'sketch', shot)
+    assert result['skill']['builtin'] is True
+    assert result['skill']['name'] == '素描（FLUX 3 Klein）'
+    assert result['bound_to'] == 'keyframe_sketch' and Path(result['output_path']).is_file()
+    assert result['warnings'] == []
+
+
+def test_run_generation_task_explains_when_no_skill_declares_the_kind(scene, monkeypatch):
+    ops, unit, shot, board = scene
+    fake_sketch(monkeypatch)
+    # 内置技能被裁掉、用户也没配：这才是「技能缺失」，错误要说清可选什么。
+    monkeypatch.setattr('narrative.skills.BUILTIN_SKILLS', ())
     before = ops.read_storyboard(unit)
     with pytest.raises(TaskInputError, match='没有可用于sketch生成的技能'):
         run(ops, unit, 'sketch', shot)

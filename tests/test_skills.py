@@ -10,12 +10,14 @@ import pytest
 
 from narrative import skills, tool_api
 from narrative.skills import (
+    BUILTIN_GENERATION_SKILLS,
     BUILTIN_SKILLS,
     LOAD_TOOL_NAME,
     MANAGE_TOOL_NAMES,
     MAX_INSTRUCTIONS_CHARS,
     SCOPE,
     SKILL_TOOL_NAMES,
+    WORKFLOW_KINDS,
     Skill,
     SkillError,
 )
@@ -195,13 +197,66 @@ def test_builtin_skills_are_read_only():
 def test_builtin_skills_reference_real_tools_and_families():
     known_families = skills.known_families()
     known_tools = skills.known_tools()
-    assert len(BUILTIN_SKILLS) == 3
+    # 内置 = 三条作业说明 + 三条生成工作流（内置生成技能随程序发布，开箱就能跑）。
+    assert len(BUILTIN_SKILLS) == 6
+    assert len(BUILTIN_GENERATION_SKILLS) == 3
     for skill in BUILTIN_SKILLS:
         assert skill.builtin and skill.enabled
         assert set(skill.families) <= known_families, skill.name
         assert set(skill.tools) <= known_tools, skill.name
         # 正文要写成给模型的作业说明，而不是给用户看的文案。
         assert len(skill.instructions) > 300 and "##" in skill.instructions
+
+
+def test_builtin_generation_skills_declare_the_documented_workflows():
+    """三条内置生成技能的 `workflow` 形状与 docs/SKILLS.md 的表一致。"""
+    by_kind = {skill.workflow["kind"]: skill for skill in BUILTIN_GENERATION_SKILLS}
+    assert set(by_kind) == {"sketch", "style", "video"}
+    assert set(by_kind) <= set(WORKFLOW_KINDS)
+    for skill in BUILTIN_GENERATION_SKILLS:
+        workflow = skill.workflow
+        # 生成技能不改提示词：它的正文是给模型看的作业说明，不是提示词替换。
+        assert skill.replaces is None, skill.name
+        assert isinstance(workflow["model"], str) and workflow["model"].strip()
+        # 许可必须写明来源与「商用待确认」这类结论：界面与回执都靠它提醒风险。
+        assert "待确认" in workflow["license"], skill.name
+        assert isinstance(workflow["expectations"], dict) and workflow["expectations"]
+
+    sketch = by_kind["sketch"].workflow
+    assert sketch["model"] == "flux3-image-klein"
+    assert sketch["workflow_file"] == "workflows/storyboard_flux_klein.json"
+    assert sketch["expectations"] == {"aspect_from_shot": True, "reference_images_max": 10}
+    # 相对路径按包目录解析，所以这条文件必须真的在包里：缺了执行器只能记 WORKFLOW_FILE_MISSING。
+    assert (Path(skills.__file__).parent / sketch["workflow_file"]).is_file()
+
+    style = by_kind["style"].workflow
+    assert style["model"] == "krea-2"
+    assert style["expectations"] == {"uses_style_reference": True}
+    # 还没有对应的工作流文件就先留空：执行器会记 warning，而不是假装用上了。
+    assert "workflow_file" not in style
+
+    video = by_kind["video"].workflow
+    assert video["model"] == "MiniMax-H3"
+    assert video["expectations"] == {"modes": ["endpoints"], "max_segment_ms": 2000,
+                                     "resolution": ["768P", "2K"]}
+    # 声明的分辨率必须是视频服务真的接受的：名单在内核里不另写一份，直接核对 provider。
+    from narrative import storyboard_video_provider as video_provider
+
+    assert video["model"] in video_provider.MODELS
+    for resolution in video["expectations"]["resolution"]:
+        video_provider.validate_options(video["model"], resolution, 5000)  # 不抛即合法
+
+
+def test_builtin_generation_skills_are_read_only_and_cannot_be_shadowed():
+    for skill in BUILTIN_GENERATION_SKILLS:
+        assert skills.get_skill(skill.name).builtin is True
+        with pytest.raises(SkillError, match="只读"):
+            skills.update_skill(skill.name, summary="改摘要")
+        with pytest.raises(SkillError, match="不可删除"):
+            skills.delete_skill(skill.name, confirm=True)
+        # 用户不能另建一条同名技能顶替内置：否则「删哪一条」就说不清了。
+        with pytest.raises(SkillError, match="内置技能名"):
+            make_skill(skill.name, workflow={"kind": skill.workflow["kind"], "model": "m"})
 
 
 # -------------------------------------------------------------- 工具链路

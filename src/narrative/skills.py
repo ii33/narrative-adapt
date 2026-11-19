@@ -183,7 +183,8 @@ def _now() -> str:
 # 内置技能写成像给模型布置作业的说明：直接说「先调用哪个工具、看到什么再往下走、
 # 什么不算完成」。它们引用的是本工程真实存在的工具名与业务组（tests/test_skills.py
 # 有一条守卫用例核对这一点），所以改工具名时这条用例会先叫。
-BUILTIN_SKILLS: tuple[Skill, ...] = (
+# 内置的「作业说明型」技能：只给步骤，不声明生成工作流。
+_INSTRUCTION_SKILLS: tuple[Skill, ...] = (
     Skill(
         name="分场与分镜",
         summary="把已入库的剧情排成场表、写成正文，再拆成分镜",
@@ -264,6 +265,119 @@ BUILTIN_SKILLS: tuple[Skill, ...] = (
 - 外部工具不属于任何业务页，也不受页面目标限制；但仍然只做本次任务授权的动作。""",
     ),
 )
+
+# 内置生成技能：把「用哪个模型、哪份工作流、许可怎么说、期望什么输入输出」写进代码，
+# 让开箱就有一条能跑的生成链路，而不是让每个用户先猜一遍该建什么技能。
+#
+# 为什么用技能表达而不是再写一份配置表：生成链路（`generation_task`）本来就按
+# 「已启用且 workflow.kind 匹配的技能」选，内置技能和用户技能走同一个入口，落地只
+# 需要一条回落规则（用户没有就用自己的）——不需要第二套默认真相。
+#
+# `expectations` 是**声明**不是开关：运行器这一轮没实现的字段会在回执 warnings 里说明，
+# 不假装用上了（见 docs/SKILLS.md「生成技能」）。
+BUILTIN_GENERATION_SKILLS: tuple[Skill, ...] = (
+    Skill(
+        name="素描（FLUX 3 Klein）",
+        summary="用 FLUX 3 Klein 把框图生成为描述型工作分镜（素描稿）",
+        families=[],
+        tools=[],
+        builtin=True,
+        workflow={
+            "kind": "sketch",
+            "model": "flux3-image-klein",
+            "license": "FLUX Kommunity License（商用条款待确认）",
+            "workflow_file": "workflows/storyboard_flux_klein.json",
+            "expectations": {"aspect_from_shot": True, "reference_images_max": 10},
+        },
+        instructions="""# 素描（FLUX 3 Klein）
+
+这条技能声明的是描述型工作分镜的生成工作流：kind=sketch、模型 flux3-image-klein、
+许可 FLUX Kommunity License（商用条款待确认）。它是交给运行器的作业单，不是让人照着画。
+
+## 怎么跑
+- 一次只做一个关键帧：先 read_storyboard 取 revision，确认该镜在 offset_ms 已有 keyframe（没有就先 set_keyframe），再调 run_generation_task(kind='sketch', ...)。
+- layout 省略时用该帧已存的框图；要改构图就显式带 layout。不要用文字描述「再往左一点」——运行器只认框图里的机位与 bbox。
+- prompt 只写本次补充要求（光线、天气、道具细节），不要重复剧情：视点与调度由正文依据与框图决定。
+- 画幅来自镜头属性（expectations.aspect_from_shot），不要在 prompt 里另写比例或分辨率。
+
+## 参考图怎么排
+- 参考图只作外观依据：资产卡图在前、风格参考在后，最多 10 张（expectations.reference_images_max）。
+- 超出的先保住人物与关键道具，其余用 style.text 说明；参考图里的文字、标签与运动箭头不进成图。
+
+## 失败怎么办
+- 报「没有可用于sketch生成的技能」：这条内置技能被停用了；说清现状，不要换别的模型猜着跑。
+- 报输入错误（还没有关键帧、本场已定案）：按提示补齐后重试，不要换个 kind 绕过规则。
+- 报服务失败（ComfyUI 连不上、超时）：原样转述并保留旧图；回执 warnings 会说明哪些字段这轮没生效，不要声称已经用上了。
+- 不要用几何绘制或本地贴图顶替生成结果：成图必须来自模型，失败就是不绑定。""",
+    ),
+    Skill(
+        name="风格化（Krea 2 风格参考）",
+        summary="用 Krea 2 把已定案的素描草图转成带项目风格的最终画面",
+        families=[],
+        tools=[],
+        builtin=True,
+        workflow={
+            "kind": "style",
+            "model": "krea-2",
+            "license": "Krea 2（年营收门槛，商用待确认）",
+            "expectations": {"uses_style_reference": True},
+        },
+        instructions="""# 风格化（Krea 2 风格参考）
+
+kind=style、模型 krea-2、许可 Krea 2（年营收门槛，商用待确认）。它把已定案的素描草图
+转成最终画面：构图不动，用项目风格与风格参考图定调。
+
+## 怎么跑
+- 先定案本场分镜，再确认该时刻已有草图（sketch_path）：缺草图先 set_keyframe 绑定，不要直接生成。
+- 项目风格（创作约定）必须先填：它是转图的主依据，空着会被拒绝。
+- 调 run_generation_task(kind='style')；prompt 只补本次要求（色调、质感、光线），不重述剧情与构图。
+- 保留视点、构图、轮廓、调度与主光方向：这是转图，不是重画。
+
+## 参考图怎么排
+- style.references 按「项目风格参考在前、资产外观图在后」排（expectations.uses_style_reference）。
+- 只借调性，不照抄别人镜头里的具体调度；参考图里的文字、标签、运动箭头不进成图。
+
+## 失败怎么办
+- 这条技能没有随程序发布工作流文件：回执里会出现 WORKFLOW_FILE_UNUSED / WORKFLOW_FILE_MISSING 一类 warning，说明本轮走服务默认流程——这是已知状态，不是静默成功。
+- 输入错误（未定案、缺草图、项目风格为空）：按提示补齐再重试，不要用 sketch 顶替风格帧。
+- 服务失败：原样转述并保留旧图；风格帧不覆盖已绑定的草图。""",
+    ),
+    Skill(
+        name="首尾帧短片（MiniMax H3）",
+        summary="用 MiniMax H3 的首尾帧模式，把本镜风格帧生成一段连贯动画",
+        families=[],
+        tools=[],
+        builtin=True,
+        workflow={
+            "kind": "video",
+            "model": "MiniMax-H3",
+            "license": "MiniMax 商用条款待确认",
+            "expectations": {"modes": ["endpoints"], "max_segment_ms": 2000,
+                             "resolution": ["768P", "2K"]},
+        },
+        instructions="""# 首尾帧短片（MiniMax H3）
+
+kind=video、模型 MiniMax-H3、许可 MiniMax 商用条款待确认。本轮只接首尾帧模式
+（expectations.modes）；参考运动模式需要现成草图动画，不在范围内。
+
+## 怎么跑
+- 先给本镜生成风格帧：首帧是最早那张风格帧，末帧是最后一张；一张都没有就先去做风格帧。
+- 分辨率只有 768P 与 2K（expectations.resolution），时长用 constraints.duration_ms 显式传，
+  单段不超过 2000ms（expectations.max_segment_ms）；更长的动作拆成多段，每段各有首尾帧。
+- 提交前确认视频服务与密钥已配置：密钥只用于提交，不进回执。
+- prompt 只写动作因果、揭露顺序与停顿，不新增独立剧情：时长不够就减镜头，不为填满时长加戏。
+
+## 失败怎么办
+- 报「本阶段视频生成只接首尾帧」：说明参考运动模式不可用，回到风格帧方案，不要伪造运动输入。
+- 报模型不在可选名单：workflow.model 写错了；按错误里列出的模型改，不要改内核名单。
+- 提交成功但任务失败：回执里已有 task_id，按它查状态后如实汇报，不要重投一次当作已完成。
+- 视频这一轮不读 ComfyUI 工作流文件：warnings 会说明 workflow_file 未生效，别声称用了它。""",
+    ),
+)
+
+# 对外的内置技能清单：说明型在前、生成型在后。顺序即界面与模型看到的顺序，也是
+# 同一 kind 有多条内置技能时的优先顺序（`generation_task.select_skill` 取先声明的那条）。
+BUILTIN_SKILLS: tuple[Skill, ...] = (*_INSTRUCTION_SKILLS, *BUILTIN_GENERATION_SKILLS)
 
 _BUILTIN_KEYS = frozenset(skill.name.casefold() for skill in BUILTIN_SKILLS)
 

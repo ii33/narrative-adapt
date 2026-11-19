@@ -102,7 +102,7 @@ def check_storyboard(ops, board):
                 try:
                     basis, _ = ops._storyboard_sketch_basis(resolved, shot, frame['offset_ms'], context)
                     if sketch_signature(basis) != frame['sketch_basis_hash']:
-                        issue('sketch_basis_changed', '草图关联正文、创作约定、调度、摄影机或资产依据已变化', severity='warning', shot=shot, frame=frame)
+                        issue('sketch_basis_changed', '草图关联正文、创作约定、项目风格、资产卡、框图或衔接帧已变化', severity='warning', shot=shot, frame=frame)
                 except (OSError, ValueError, TypeError, KeyError) as error:
                     issue('sketch_basis_unavailable', error, shot=shot, frame=frame)
         from .storyboard_panels import panel_generation_basis
