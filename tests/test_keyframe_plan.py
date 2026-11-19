@@ -41,6 +41,12 @@ def raw_board(ops, unit):
         return json.loads(db.execute("SELECT value FROM meta WHERE key=?", ("storyboard:" + unit,)).fetchone()[0])
 
 
+def plan(timeline):
+    """只核对时间轴计划字段：读视图的每一行还带 layout（B2 的框图，没有就是 None），
+    那是另一层数据，不该混进「计划里存了什么」的断言。"""
+    return [{key: value for key, value in row.items() if key != 'layout'} for row in timeline['keyframes']]
+
+
 def test_timeline_plan_round_trip_and_shape(board):
     ops, unit, b = board
     shot = b['shots'][0]['id']
@@ -51,9 +57,9 @@ def test_timeline_plan_round_trip_and_shape(board):
         {'op': 'set_timeline_segments', 'shot_id': shot, 'segments': [[0, 1200], [1200, 3000]]}])
     timeline = written['shots'][0]['timeline']
     assert timeline['duration_ms'] == 3000
-    assert timeline['keyframes'] == [{'offset_ms': 0, 'moment_name': '起手', 'description': '甲抬头'},
-                                     {'offset_ms': 1200, 'moment_name': '递伞', 'description': ''},
-                                     {'offset_ms': 3000, 'moment_name': '', 'description': ''}]
+    assert plan(timeline) == [{'offset_ms': 0, 'moment_name': '起手', 'description': '甲抬头'},
+                              {'offset_ms': 1200, 'moment_name': '递伞', 'description': ''},
+                              {'offset_ms': 3000, 'moment_name': '', 'description': ''}]
     assert timeline['segments'] == [[0, 1200], [1200, 3000]]
     assert written['shots'][0]['timeline_derived'] == {'keyframes': False, 'segments': False}
     # 声音节拍与摄影机关键点按镜内顺序列出（引用，不复制结构）。
@@ -73,13 +79,13 @@ def test_timeline_plan_round_trip_and_shape(board):
          'moment_name': '递伞到手', 'description': '手指接触'},
         {'op': 'add_timeline_keyframe', 'shot_id': shot, 'offset_ms': 2400},
         {'op': 'set_timeline_segments', 'shot_id': shot, 'segments': [[0, 900], [900, 2400], [2400, 3000]]}])
-    assert renamed['shots'][0]['timeline']['keyframes'][1] == {'offset_ms': 900, 'moment_name': '递伞到手',
-                                                               'description': '手指接触'}
+    assert plan(renamed['shots'][0]['timeline'])[1] == {'offset_ms': 900, 'moment_name': '递伞到手',
+                                                       'description': '手指接触'}
     cleared = apply(ops, unit, [{'op': 'delete_timeline_keyframe', 'shot_id': shot, 'offset_ms': 900},
                                 {'op': 'delete_timeline_keyframe', 'shot_id': shot, 'offset_ms': 2400},
                                 {'op': 'delete_timeline_keyframe', 'shot_id': shot, 'offset_ms': 3000},
                                 {'op': 'set_timeline_segments', 'shot_id': shot, 'segments': []}])
-    assert cleared['shots'][0]['timeline']['keyframes'] == [{'offset_ms': 0, 'moment_name': '起手', 'description': '甲抬头'}]
+    assert plan(cleared['shots'][0]['timeline']) == [{'offset_ms': 0, 'moment_name': '起手', 'description': '甲抬头'}]
     assert cleared['shots'][0]['timeline_derived'] == {'keyframes': False, 'segments': True}
     assert cleared['shots'][0]['timeline']['segments'] == [[0, 3000]]
 
@@ -178,8 +184,8 @@ def test_old_data_without_timeline_derives_from_keyframes_without_migration(boar
     view = ops.read_storyboard(unit)['shots'][0]
     assert view['timeline_derived'] == {'keyframes': True, 'segments': True}
     # 关键帧计划与分段都按现有关键帧与镜头时长推导。
-    assert view['timeline']['keyframes'] == [{'offset_ms': 0, 'moment_name': '', 'description': ''},
-                                             {'offset_ms': 1000, 'moment_name': '', 'description': ''}]
+    assert plan(view['timeline']) == [{'offset_ms': 0, 'moment_name': '', 'description': ''},
+                                      {'offset_ms': 1000, 'moment_name': '', 'description': ''}]
     assert view['timeline']['segments'] == [[0, 1000], [1000, 3000]]
     assert view['timeline']['duration_ms'] == 3000
     # 读多少次都不改存储：老数据保持原样。
@@ -256,7 +262,7 @@ def test_tool_schema_exposes_timeline_and_handoff_ops(board):
         {'op': 'set_timeline_segments', 'shot_id': first, 'segments': [[0, 500]]},
         {'op': 'set_shot_handoff', 'shot_id': second, 'from_shot': first, 'ref_frame': 'last'},
         {'op': 'set_asset_needs', 'needs': [{'kind': 'prop', 'name': '伞', 'variant': '折叠'}]}]}, project=entry)
-    assert written['shots'][0]['timeline']['keyframes'][-1] == {'offset_ms': 500, 'moment_name': '抬手', 'description': ''}
+    assert plan(written['shots'][0]['timeline'])[-1] == {'offset_ms': 500, 'moment_name': '抬手', 'description': ''}
     assert written['shots'][1]['handoff'] == {'from_shot': first, 'ref_frame': 'last'}
     assert written['asset_needs'] == [{'kind': 'prop', 'name': '伞', 'variant': '折叠'}]
 

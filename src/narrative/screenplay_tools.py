@@ -45,8 +45,10 @@ def register(Tool, register_tool, validate):
 
     add("read_storyboard_usage_tips", "只读内置空间布局生图使用技巧：FLUX区域表与参考图、Qwen圈选及ChatGPT的已测用法和限制；无需选择场，不生成图片、不修改工程或模型配置", {})
 
-    add("read_storyboard", "按场读取分镜、静帧、预演帧率和共享二维调度对象/动作轨。毫秒区分剪辑时间、镜内offset_ms和场内动作time_ms；revision用于下一次原子编辑", {
+    add("read_storyboard", "按场读取分镜、静帧、预演帧率和共享二维调度对象/动作轨。毫秒区分剪辑时间、镜内offset_ms和场内动作time_ms；revision用于下一次原子编辑。每镜timeline.keyframes[i].layout是该帧框图（没有则null）", {
         "unit_id": text | {"required": True}})
+    add("read_storyboard_layout", "只读某镜全部框图与哈希：每项offset_ms＋hash＋layout（camera机位、objects的归一化bbox[x0,y0,x1,y1]与景深、unmet_needs、source）。供界面画近似previs与助手核对这一帧该有什么；不修改任何数据", {
+        "unit_id": text | {"required": True}, "shot_id": text | {"required": True}})
     add("read_storyboard_assets_context", "读取选中镜头及正文、全部资产对象目录，供逐镜分析人物具体形象/物品/场景；不自动建对象或猜测缺失内容。返回的asset_needs是本场需求与两类缺口摘要（需求未落实／引用悬空），只读", {
         "unit_id": text | {"required": True}, "shot_ids": strings | {"required": True, "minItems": 1}})
     add("submit_storyboard_assets", "只保存所选镜头的待确定元素需求，不创建或选择资产。每个visual_elements项仅含kind/name/usage，程序添加未绑定状态。保留所有原已确定资产行，新结果替换原未确定行，不按同名合并。允许空列表；必须覆盖shot_ids恰好一次。资产由用户在列表手动选择或建立。内容问题暂存并局部patch_content_submission修补", {
@@ -81,7 +83,7 @@ def register(Tool, register_tool, validate):
     add("save_storyboard_camera_preset", "将基础运镜参数保存为工程预设。settings含preset、可选amount/start/end机位；不保存场内对象引用", reason | {
         "name": text | {"required": True}, "settings": obj | {"required": True},
         "expected_revision": integer | {"required": True}}, writes=True)
-    add("apply_storyboard_changes", "原子编辑导演台，先read_storyboard取得revision。镜头create_shot(title,duration_ms,source_block_ids,action_start_ms=0)/update_shot(shot_id,...)/move_shot(shot_id,index)/delete_shot；action_ms=action_start_ms+镜内时间，调序不改动作。静帧set_keyframe(shot_id,offset_ms,sketch_path或style_path)/move_keyframe(shot_id,frame_id,offset_ms)/delete_keyframe(shot_id,frame_id)。镜内时间轴：add_timeline_keyframe(shot_id,offset_ms,moment_name?,description?)/update_timeline_keyframe(shot_id,offset_ms,new_offset_ms?,moment_name?,description?)/delete_timeline_keyframe(shot_id,offset_ms)；set_timeline_segments(shot_id,segments=[[a,b],...])显式覆盖分段，[]回到相邻关键帧推导；offset_ms均相对镜首，段端点须落在已有关键帧上、单段默认不超过2000ms。跨镜衔接set_shot_handoff(shot_id,from_shot,ref_frame=last|first)，from_shot=null取消。资产需求set_asset_needs(needs)/set_shot_asset_needs(shot_id,needs)只改需求不动引用。set_fps(fps整数1..120)。调度create_object(name,kind=person|prop|set,x,y,rotation?,depth?,parent_id?,asset_id?,state?)/update_object(object_id,...)/delete_object(object_id)。位置x/y为0..1场平面，rotation为世界朝向度。set_action_keyframe(object_id,time_ms,x?,y?,rotation?,depth?,state?,interpolation=hold|linear)；move_action_keyframe(object_id,keyframe_id,time_ms)/delete_action_keyframe(object_id,keyframe_id)。interpolation控制到下一点的保持或线性运动，状态离散保持。set_approved(approved)按场定案；已定案须显式解除才能改方案。缩短时先显式调整越界帧，不自动丢弃。", {
+    add("apply_storyboard_changes", "原子编辑导演台，先read_storyboard取得revision。镜头create_shot(title,duration_ms,source_block_ids,action_start_ms=0)/update_shot(shot_id,...)/move_shot(shot_id,index)/delete_shot；action_ms=action_start_ms+镜内时间，调序不改动作。静帧set_keyframe(shot_id,offset_ms,sketch_path或style_path)/move_keyframe(shot_id,frame_id,offset_ms)/delete_keyframe(shot_id,frame_id)。镜内时间轴：add_timeline_keyframe(shot_id,offset_ms,moment_name?,description?)/update_timeline_keyframe(shot_id,offset_ms,new_offset_ms?,moment_name?,description?)/delete_timeline_keyframe(shot_id,offset_ms)；set_timeline_segments(shot_id,segments=[[a,b],...])显式覆盖分段，[]回到相邻关键帧推导；offset_ms均相对镜首，段端点须落在已有关键帧上、单段默认不超过2000ms。跨镜衔接set_shot_handoff(shot_id,from_shot,ref_frame=last|first)，from_shot=null取消。框图set_keyframe_layout(shot_id,offset_ms,layout)——layout须整体给出camera/objects/unmet_needs，null清除该帧；clear_keyframe_layouts(shot_id)清该镜全部；offset_ms须是该镜时间轴上已存在的关键帧，objects的bbox为归一化画面坐标[x0,y0,x1,y1]（0..1、原点左上、x0<x1且y0<y1），depth为景深米，hash由程序重算。资产需求set_asset_needs(needs)/set_shot_asset_needs(shot_id,needs)只改需求不动引用。set_fps(fps整数1..120)。调度create_object(name,kind=person|prop|set,x,y,rotation?,depth?,parent_id?,asset_id?,state?)/update_object(object_id,...)/delete_object(object_id)。位置x/y为0..1场平面，rotation为世界朝向度。set_action_keyframe(object_id,time_ms,x?,y?,rotation?,depth?,state?,interpolation=hold|linear)；move_action_keyframe(object_id,keyframe_id,time_ms)/delete_action_keyframe(object_id,keyframe_id)。interpolation控制到下一点的保持或线性运动，状态离散保持。set_approved(approved)按场定案；已定案须显式解除才能改方案。缩短时先显式调整越界帧，不自动丢弃。", {
         "unit_id": text | {"required": True}, "revision": integer | {"required": True},
         "changes": {"type": "array", "minItems": 1, "items": storyboard_change_schema(), "required": True}}, writes=True)
 
@@ -105,6 +107,12 @@ def register(Tool, register_tool, validate):
     add("render_storyboard_style", "将本场定案草图按项目风格送入本机 ComfyUI，取得实际生成图片并绑定同一关键帧。每次调用生成一张图。", {
         "unit_id": text | {"required": True}, "shot_id": text | {"required": True},
         "frame_id": text | {"required": True}, "expected_revision": integer | {"required": True}}, writes=True)
+    add("run_generation_task", "按技能声明的生成工作流执行一次真实生成并绑定：kind=sketch（草图，须先解除定案）|style（风格帧，须已定案且该帧已有草图）|video（本阶段只接首尾帧）。先read_storyboard取revision，offset_ms须是该镜已有关键帧；layout省略用该帧已存框图。技能按「已启用且workflow.kind匹配、最近更新」选取，找不到就报错并列出可用技能，不猜默认。失败不绑定并保留旧图；错误分别说明技能缺失、输入不合法或服务失败。返回任务包、技能、provider回执摘要与warnings", {
+        "unit_id": text | {"required": True}, "revision": integer | {"required": True},
+        "kind": {"type": "string", "enum": ["sketch", "style", "video"], "required": True},
+        "shot_id": text | {"required": True}, "offset_ms": integer | {"required": True},
+        "prompt": text, "layout": {"type": ["object", "null"], "description": "省略用该帧已存框图"},
+        "moment": obj, "constraints": obj | {"description": "可选覆盖aspect/resolution/duration_ms/first_frame/last_frame"}}, writes=True)
     add("export_storyboard_script", "独立导出本场文字或图文分镜稿；指定新文件，不覆盖现有稿件。", {
         "unit_id": text | {"required": True}, "format": {"type": "string", "enum": ["text", "html", "pdf"], "required": True},
         "path": text | {"required": True}, "illustrated": {"type": "boolean"}, "annotated": {"type": "boolean"}}, writes=True)

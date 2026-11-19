@@ -274,12 +274,22 @@ def _file_sha256(path, label):
 
 
 def frame_diagram(shot, offset_ms):
-    """该时刻已绑定的框图（关键帧草图）哈希；这一帧还没有图就留空。"""
+    """该时刻的框图依据：框图哈希为主，已绑定草图文件的哈希另记一栏。
+
+    `frame_id` 用「镜号@时刻」这种可读身份，而不是数据库分配的帧编号：框图可以先于
+    草图存在（先排构图、后出图），那时还没有帧编号；可读身份两个阶段都稳定。
+    两者都没有就返回 None——这一帧还没有任何可视依据。
+    """
+    from .storyboard_layout import layout_at, layout_hash
+
+    layout = layout_at(shot, offset_ms)
     frame = next((row for row in shot.get('keyframes') or [] if row.get('offset_ms') == offset_ms), None)
     sketch = (frame or {}).get('sketch_path')
-    if not sketch:
+    if layout is None and not sketch:
         return None
-    return {'frame_id': frame['id'], 'sha256': _file_sha256(sketch, '生成依据框图')}
+    return {'frame_id': f"{shot['id']}@{offset_ms}",
+            'sha256': layout_hash(layout) if layout is not None else _file_sha256(sketch, '生成依据框图'),
+            'sketch_sha256': _file_sha256(sketch, '生成依据草图') if sketch else None}
 
 
 def handoff_reference(board, shot):

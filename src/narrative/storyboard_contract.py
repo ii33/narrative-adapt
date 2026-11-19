@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any
 
 from .storyboard_camera import EASINGS, POSE_FIELDS, PRESETS
+from .storyboard_layout import KINDS as LAYOUT_KINDS
 
 _ID = {'type': 'string', 'minLength': 1}
 _MS = {'type': 'integer', 'minimum': 0}
@@ -112,6 +113,31 @@ _ACTIONS.extend([
     _action('set_shot_handoff', {'shot_id': _ID, 'from_shot': _NULL_ID, 'ref_frame': {'type': 'string', 'enum': ['last', 'first']}},
             ['shot_id', 'from_shot']),
 ])
+# B2 框图：挂在已有关键帧上的结构化构图（归一化 bbox＋机位＋景深），
+# 形状与校验都在 storyboard_layout；这里只发布给模型看的闭集形状。
+_LAYOUT_CAMERA = {'type': 'object', 'additionalProperties': False,
+                  'properties': {'x': {'type': 'number'}, 'y': {'type': 'number'}, 'z': {'type': 'number'},
+                                 'yaw': {'type': 'number'}, 'pitch': {'type': 'number', 'minimum': -90, 'maximum': 90},
+                                 'lens_mm': {'type': 'number', 'exclusiveMinimum': 0},
+                                 'framing': {'type': 'string', 'minLength': 1}}}
+_LAYOUT_OBJECT = {'type': 'object', 'additionalProperties': False, 'required': ['asset_id', 'bbox', 'depth', 'kind'],
+                  'properties': {'asset_id': _ID,
+                                 'bbox': {'type': 'array', 'minItems': 4, 'maxItems': 4,
+                                          'items': {'type': 'number', 'minimum': 0, 'maximum': 1}},
+                                 'depth': {'type': 'number'},
+                                 'kind': {'type': 'string', 'enum': list(LAYOUT_KINDS)}}}
+_LAYOUT = {'type': ['object', 'null'],
+           'properties': {'shot_id': _ID, 'offset_ms': _MS, 'camera': _LAYOUT_CAMERA,
+                          'objects': {'type': 'array', 'items': _LAYOUT_OBJECT},
+                          'unmet_needs': {'type': 'array', 'items': _NEED},
+                          'source': {'type': 'string', 'enum': ['previs', 'manual']},
+                          'hash': {'type': 'string'}},
+           'description': 'layout=null 清除该帧框图。bbox 为归一化画面坐标[x0,y0,x1,y1]（0..1，原点左上，须x0<x1、y0<y1）；depth 为相对镜头的景深（米）；hash 由程序重算，不用填'}
+_ACTIONS.extend([
+    _action('set_keyframe_layout', {'shot_id': _ID, 'offset_ms': _MS, 'layout': _LAYOUT},
+            ['shot_id', 'offset_ms', 'layout']),
+    _action('clear_keyframe_layouts', {'shot_id': _ID}, ['shot_id']),
+])
 for _schema in _ACTIONS:
     if _schema['properties']['op']['const'] == 'set_keyframe':
         _schema['oneOf'] = [{'required': ['sketch_path'], 'not': {'required': ['style_path']}},
@@ -140,6 +166,9 @@ def validate_action_shape(change):
             example[key] = field['enum'][0] if 'enum' in field else True if field.get('type') == 'boolean' else max(field.get('minimum', 0), 0) if field.get('type') == 'integer' else key.replace('_id', '-1')
         if op == 'set_keyframe':
             example['sketch_path'] = 'C:/images/sketch.png'
+        if op == 'set_keyframe_layout':
+            # layout 是嵌套对象，通用示例会把它填成字符串；给一个能直接照着写的空框图。
+            example['layout'] = {'camera': {'framing': 'medium'}, 'objects': [], 'unmet_needs': []}
         problems = []
         if extras:
             problems.append('多余字段：' + '、'.join(sorted(extras)))

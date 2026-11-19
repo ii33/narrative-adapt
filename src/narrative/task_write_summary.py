@@ -101,7 +101,8 @@ def _changes(tool, args, result):
         return changes
     if tool in {'apply_storyboard_changes', 'submit_storyboard_assets', 'generate_storyboard_sketch', 'generate_storyboard_panel', 'generate_storyboard_panels', 'render_storyboard_style',
                 'set_storyboard_animation', 'attach_storyboard_video', 'detach_storyboard_video',
-                'prepare_storyboard_video', 'submit_storyboard_video', 'refresh_storyboard_video'}:
+                'prepare_storyboard_video', 'submit_storyboard_video', 'refresh_storyboard_video',
+                'run_generation_task', 'read_storyboard_layout', 'set_keyframe_layout'}:
         add('saved', 'storyboard', args.get('unit_id'))
     elif tool in {'render_storyboard_animatic', 'export_storyboard_panel', 'export_storyboard_script'}:
         add('saved', 'file', row={'name': result.get('path') or result.get('output_path', '')})

@@ -41,6 +41,14 @@ from .storyboard_camera import (
     validate_camera,
 )
 from .storyboard_contract import ACTION_FIELDS, validate_action_shape
+from .storyboard_layout import (
+    drop_layout,
+    layout_at,
+    move_layout,
+    normalize_layout,
+    store_layout,
+    validate_layouts,
+)
 from .storyboard_panels import StoryboardPanelsMixin, apply_panel, panel_paths, validate_panels
 from .storyboard_script import apply_intent, script_fields, validate_script
 from .storyboard_timing import STAGING_FIELDS, apply_staging, preview, validate_timing
@@ -56,6 +64,11 @@ TIMELINE_FIELDS = {
 }
 HANDOFF_FIELDS = {'from_shot', 'ref_frame'}
 REF_FRAMES = ('last', 'first')
+# B2 框图：整体写入／清除，挂在该镜已有关键帧的时刻上（见 storyboard_layout）。
+LAYOUT_FIELDS = {
+    'set_keyframe_layout': {'shot_id', 'offset_ms', 'layout'},
+    'clear_keyframe_layouts': {'shot_id'},
+}
 NEED_FIELDS = {'set_asset_needs': {'needs'}, 'set_shot_asset_needs': {'shot_id', 'needs'}}
 # 单段上限：分镜静帧本来就不该一格里塞满两秒以上的动作。
 DEFAULT_MAX_SEGMENT_MS = 2000
@@ -211,7 +224,10 @@ def apply_timeline(board, change):
         timeline['keyframes'].sort(key=lambda row: row['offset_ms'])
         return
     if op == 'delete_timeline_keyframe':
-        timeline['keyframes'].remove(_plan_row(shot, change.get('offset_ms')))
+        row = _plan_row(shot, change.get('offset_ms'))
+        timeline['keyframes'].remove(row)
+        # 框图不独立存在：关键帧没了，它的框图一起走，免得留一帧谁也读不到的孤儿数据。
+        drop_layout(shot, row['offset_ms'])
         return
     if op == 'set_timeline_segments':
         segments = change.get('segments')
@@ -235,8 +251,34 @@ def apply_timeline(board, change):
         offset = _integer(change['new_offset_ms'], '关键帧计划位置')
         if any(item is not row and item['offset_ms'] == offset for item in timeline['keyframes']):
             raise ValueError('该时刻已有计划关键帧，不能把两条计划并成一条')
+        previous = row['offset_ms']
         row['offset_ms'] = offset
         timeline['keyframes'].sort(key=lambda item: item['offset_ms'])
+        # 框图跟着它的关键帧走，否则改个时刻就把构图丢了。
+        move_layout(shot, previous, offset)
+
+
+def apply_layout(board, change):
+    """框图的整体写入／清除。
+
+    框图是「那一帧的构图」，不是独立对象：时刻必须已经是该镜时间轴上的关键帧，
+    否则它既不会出现在读视图里，也不会进任何一帧的出图依据——写进去就是坏数据。
+    """
+    shot = _shot_in_scene(board, change.get('shot_id'))
+    if change['op'] == 'clear_keyframe_layouts':
+        shot.pop('layouts', None)
+        return
+    offset = _integer(change.get('offset_ms'), '框图所在的镜内时刻')
+    timeline = shot.get('timeline') if isinstance(shot.get('timeline'), dict) else {}
+    frames = {row['offset_ms'] for row in timeline.get('keyframes') or []}
+    frames |= {frame['offset_ms'] for frame in shot.get('keyframes') or []}
+    if offset not in frames:
+        raise ValueError('框图必须挂在该镜已存在的关键帧上；先用 add_timeline_keyframe 或 set_keyframe 建立该时刻')
+    layout = change.get('layout')
+    if layout is None:
+        drop_layout(shot, offset)
+        return
+    store_layout(shot, normalize_layout(layout, shot_id=shot['id'], offset_ms=offset))
 
 
 def _max_segment_ms(board):
@@ -396,6 +438,10 @@ def apply_timeline_views(board):
         derived = _timeline_derived(shot)
         shot['timeline'] = timeline_view(board, shot)
         shot['timeline_derived'] = derived
+        # 框图随关键帧一起返回：界面要按帧画近似 previs，助手要核对这一帧该有什么。
+        # 存储里它挂在 shot['layouts'][时刻] 上，这里是它的读视图（深拷贝，改不到存储）。
+        for row in shot['timeline']['keyframes']:
+            row['layout'] = layout_at(shot, row['offset_ms'])
     return board
 
 
@@ -406,6 +452,11 @@ def strip_timeline_views(board):
         timeline = shot.get('timeline')
         if not isinstance(timeline, dict):
             continue
+        # layout 是读视图字段（框图存在 shot['layouts'] 里，不挂在计划行上）：
+        # 不摘掉的话，validate_timeline 会把派生形状当成已存字段而拒绝。
+        for row in timeline.get('keyframes') or []:
+            if isinstance(row, dict):
+                row.pop('layout', None)
         if not derived:
             for key in ('duration_ms', 'sound_cues', 'camera_keys'):
                 timeline.pop(key, None)
@@ -417,6 +468,32 @@ def strip_timeline_views(board):
         if not timeline:
             shot.pop('timeline')
     return board
+
+def _provider_summary(receipt):
+    """回执摘要：原始请求/响应留在审计里，这里只给可核对的身份与产物字段。"""
+    keep = ('provider', 'job_id', 'workflow_file', 'workflow_sha256', 'output_file', 'output_sha256',
+            'input_image_count', 'usage', 'task_id', 'request_sha256', 'model', 'resolution')
+    return {key: receipt[key] for key in keep if key in receipt} if isinstance(receipt, dict) else {}
+
+
+def _video_generation_row(shot, task, receipt, basis_hash, prompt_text):
+    """把一次已提交的视频任务写成既有片段回执（shot['generations']）里的一行。
+
+    形状对齐 prepare_storyboard_video 写的那一行：之后 refresh_storyboard_video 能按
+    同一份记录查询、下载、复核依据是否过期，不需要另造一套回执表。
+    """
+    provider = receipt['provider_receipt']
+    images = [path for path in (task['constraints'].get('first_frame'), task['constraints'].get('last_frame')) if path]
+    return {'id': f'{shot["id"]}-generation-{len(shot.get("generations", [])) + 1}',
+            'mode': 'endpoints', 'model': provider.get('model'), 'resolution': provider.get('resolution'),
+            'duration_ms': task['constraints']['duration_ms'], 'prompt': prompt_text,
+            'inputs': [{'kind': 'style', 'path': path} for path in images],
+            'basis_hash': basis_hash, 'base_url': provider.get('base_url'), 'key_env': provider.get('key_env'),
+            'status': 'submitted', 'provider_task_id': provider.get('task_id'),
+            'provider_response': provider.get('response'), 'usage': None,
+            'request_path': provider.get('request_path'), 'request_sha256': provider.get('request_sha256'),
+            'generated_by': {'skill': receipt['skill']['name'], 'kind': 'video'}}
+
 
 def _apply(db, board, change, block_ids):
     raw_op = change.get('op') if isinstance(change, dict) else None
@@ -437,6 +514,9 @@ def _apply(db, board, change, block_ids):
         return
     if op in TIMELINE_FIELDS:
         apply_timeline(board, change)
+        return
+    if op in LAYOUT_FIELDS:
+        apply_layout(board, change)
         return
     if op in NEED_FIELDS:
         # 需求与引用分开存：这里只碰需求，visual_elements 的 asset_id 一律不动。
@@ -494,13 +574,21 @@ def _apply(db, board, change, block_ids):
         frame = next((f for f in shot["keyframes"] if f["id"] == change.get("frame_id")), None)
         if frame is None:
             raise ContentGuardError("指定的关键帧不属于此镜头")
+        # 有显式时间轴计划时，那个时刻的主人是计划行；只有「时间轴由静帧推导」的老场次，
+        # 静帧自己才是锚点，这时框图得跟着它走，否则就成一帧谁也读不到的孤儿数据。
+        planned = frame["offset_ms"] in {row['offset_ms'] for row in (shot.get('timeline') or {}).get('keyframes') or []}
+        previous = frame["offset_ms"]
         if op == "move_keyframe":
             if frame.get("marker_id"):
                 raise ValueError("此帧绑定命名时刻，请移动标记或先解除绑定")
             frame["offset_ms"] = _integer(change.get("offset_ms"), "关键帧位置")
             shot["keyframes"].sort(key=lambda row: row["offset_ms"])
+            if not planned:
+                move_layout(shot, previous, frame["offset_ms"])
         else:
             shot["keyframes"].remove(frame)
+            if not planned:
+                drop_layout(shot, previous)
 
 
 class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, StoryboardArtMixin, StoryboardVideoMixin):
@@ -538,6 +626,112 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
     def read_asset_needs(self, unit_id):
         """只读：本场需求、已落实的绑定、引用悬空与计数。"""
         return gap_view(self.read_storyboard(unit_id), self.get_asset)
+
+    def read_storyboard_layout(self, unit_id, shot_id):
+        """只读：本镜全部框图与哈希。
+
+        `read_storyboard` 已经把框图贴在 `shot.timeline.keyframes[i].layout` 上；
+        这里再单列一份「按时刻排序 + 明确哈希」的清单，供界面画近似 previs、助手核对
+        「这一帧该有什么」时不必自己翻时间轴。
+        """
+        board = self.read_storyboard(unit_id)
+        shot = _shot_in_scene(board, shot_id)
+        layouts = shot.get('layouts') if isinstance(shot.get('layouts'), dict) else {}
+        rows = [{'offset_ms': int(key), 'hash': row['hash'], 'layout': row}
+                for key, row in sorted(layouts.items(), key=lambda item: int(item[0]))]
+        return {'unit_id': unit_id, 'shot_id': shot_id, 'revision': board['revision'],
+                'keyframe_offsets': [row['offset_ms'] for row in shot['timeline']['keyframes']],
+                'layouts': rows, 'count': len(rows)}
+
+    def run_generation_task(self, unit_id, revision, kind, shot_id, offset_ms, prompt='', layout=None, moment=None,
+                            constraints=None):
+        """按技能声明的生成工作流执行一次真实生成，并把结果绑回关键帧。
+
+        生成是即时命令（不进内容暂存）：失败不绑定、保留旧图，错误里说清是技能缺失、
+        输入不合法还是服务失败。任务包与回执都随返回值给出，界面和助手看到同一份输入。
+        """
+        from tempfile import TemporaryDirectory
+
+        from . import generation_task
+
+        if kind not in generation_task.KINDS:
+            raise ValueError('生成类型须为' + '、'.join(generation_task.KINDS))
+        board = self.read_storyboard(unit_id)
+        if type(revision) is not int or revision != board['revision']:
+            raise ContentConflictError('分镜已修改，请刷新后重试')
+        shot = _shot_in_scene(board, shot_id)
+        offset = _integer(offset_ms, '镜内位置')
+        if offset not in {row['offset_ms'] for row in shot['timeline']['keyframes']}:
+            raise ValueError('该时刻还没有关键帧；先用 set_keyframe 建帧或 add_timeline_keyframe 建立计划')
+        # 定案前后能改什么由既有规则决定：草图要解除定案，风格帧要已定案。先查，
+        # 免得白跑一次生成再被拒。
+        if kind == 'sketch' and board['approved']:
+            raise ContentGuardError('请先解除定案再生成草图')
+        if kind == 'style' and not board['approved']:
+            raise ContentGuardError('请先定案本场分镜再生成风格帧')
+        context = self.read_script_unit_context(unit_id)
+        style_text = context['project_style']['text']
+        # 风格帧必须有项目风格（转图靠它），草图不强制：既有草图流程也不要求先填。
+        if kind == 'style' and not style_text.strip():
+            raise ValueError('请在创作约定中填写项目风格')
+        basis, references = self._storyboard_sketch_basis(board, shot, offset, context)
+        skill = generation_task.select_skill(kind)
+        task = generation_task.build_task(
+            kind, shot_id=shot_id, offset_ms=offset, board=board, layout=layout, moment=moment,
+            assets=generation_task.assets_from_cards(basis['assets']),
+            style={'text': style_text, 'references': [str(path) for path in references]},
+            constraints=constraints, prompt=prompt)
+        credentials, video_basis_hash = None, None
+        if kind == 'video':
+            from .storyboard_video import _profile, _signature
+            credentials = _profile(self)
+            # 视频依据在提交前算好：提交之后再算，一旦变化就说不清「提交的到底是哪一版」。
+            video_basis_hash = _signature(self, board, shot)
+        prompt_text = generation_task.task_prompt(task)
+        with TemporaryDirectory(prefix=f'generation-task-{kind}-') as folder:
+            receipt = generation_task.execute(task, skill, work_dir=Path(folder), credentials=credentials)
+            written = self._bind_generation(unit_id, revision, kind, shot, task, receipt, basis, context,
+                                           prompt_text, video_basis_hash)
+        frames = next((row for row in written['shots'] if row['id'] == shot_id), {}).get('keyframes') or []
+        bound = next((row for row in frames if row['offset_ms'] == offset), {})
+        # 只回本次 kind 绑定的那一栏：风格帧也带草图，按存在与否取会报错图。
+        field = {'sketch': 'sketch_path', 'style': 'style_path'}.get(kind)
+        return {'unit_id': unit_id, 'kind': kind, 'shot_id': shot_id, 'offset_ms': offset,
+                'storyboard_revision': written['revision'], 'bound_to': task['expect']['bind_to'],
+                'output_path': bound.get(field) if field else None,
+                'skill': receipt['skill'], 'warnings': receipt['warnings'],
+                'provider': _provider_summary(receipt['provider_receipt']),
+                'started_at': receipt['started_at'], 'finished_at': receipt['finished_at'], 'task': task}
+
+    def _bind_generation(self, unit_id, revision, kind, shot, task, receipt, basis, context,
+                         prompt_text, video_basis_hash=None):
+        """把生成结果写回关键帧；这里不吞异常——失败即不绑定，旧图原样保留。"""
+        provider = receipt['provider_receipt']
+        shot_id, offset = shot['id'], task['offset_ms']
+        if kind == 'sketch':
+            return self._write_storyboard(
+                unit_id, revision,
+                [{'op': 'set_keyframe', 'shot_id': shot_id, 'offset_ms': offset,
+                  'sketch_path': receipt['output_path']}],
+                # provider 回执里带原始请求/响应；落盘时 _write_storyboard 只取身份字段。
+                sketch_receipt={'provider': provider, 'prompt': prompt_text,
+                                'user_prompt': task['prompt'], 'simple_color': False,
+                                'layout': deepcopy(task['layout'] or {})},
+                sketch_basis=basis)
+        if kind == 'style':
+            return self._write_storyboard(
+                unit_id, revision,
+                [{'op': 'set_keyframe', 'shot_id': shot_id, 'offset_ms': offset,
+                  'style_path': receipt['output_path']}],
+                render_receipt=provider, expected_style=context['project_style']['text'],
+                expected_body_revision=context['unit']['body_revision'])
+        return self._write_storyboard(
+            unit_id, revision, [],
+            media_patch={'shot_id': shot_id, 'values': {'generations': [
+                *shot.get('generations', []),
+                _video_generation_row(shot, task, receipt, video_basis_hash, prompt_text)]}},
+            media_audit={'operation': 'generation_task_submitted', 'shot_id': shot_id},
+            sketch_basis=basis)
 
     @content_write
     def declare_asset_needs(self, unit_id, revision, unit_needs=None, shot_needs=None, replace=True):
@@ -609,7 +803,8 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
                    'update_object', 'set_camera_overlays', 'move_action_keyframe', 'delete_action_keyframe', 'bind_keyframe_marker',
                    'bind_action_keyframe_marker', 'move_camera_keyframe', 'delete_camera_keyframe',
                    'add_timeline_keyframe', 'update_timeline_keyframe', 'delete_timeline_keyframe', 'set_timeline_segments',
-                   'set_shot_handoff', 'set_asset_needs', 'set_shot_asset_needs'}
+                   'set_shot_handoff', 'set_asset_needs', 'set_shot_asset_needs',
+                   'set_keyframe_layout', 'clear_keyframe_layouts'}
         board = strip_timeline_views(deepcopy(original))
         # 编辑与比较都在原始计划上做；派生字段最后再贴回返回值，免得被当成已存字段。
         strip_timeline_views(original)
@@ -631,6 +826,7 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
                 validate_script(board, self.get_asset, {row['id']: row for row in self.read_script_unit_context(unit_id)['unit']['blocks']})
                 validate_timing(board)
                 validate_timeline(board)
+                validate_layouts(board)
         except (ValueError, TypeError) as error:
             conflicts.append({'code': 'invalid_storyboard_change', 'message': str(error)})
         old_shots = {row['id']: row for row in original['shots']}
@@ -831,6 +1027,7 @@ class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, St
             validate_script(board, asset_lookup, {row['id']: row for row in self.read_script_unit_context(unit_id)['unit']['blocks']})
             validate_timing(board, asset_lookup)
             validate_timeline(board)
+            validate_layouts(board)
             validate_media(board)
             validate_panels(board)
             board["revision"] += 1
