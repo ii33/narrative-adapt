@@ -91,7 +91,7 @@ Item {
         spacing: 5
         RowLayout {
             Layout.fillWidth: true
-            Label { text: "勾选导入；点击名称筛选右侧。父级包含全部下属，跨分支选择会保留。"; wrapMode: Text.Wrap; Layout.fillWidth: true; color: picker.t.muted }
+            Label { text: "父级包含全部下属，跨分支选择会保留。"; wrapMode: Text.Wrap; Layout.fillWidth: true; color: picker.t.muted }
             Button { objectName: picker.objectPrefix + "All"; text: "全部分支"; onClicked: picker.focused = ({}) }
         }
         Flickable {

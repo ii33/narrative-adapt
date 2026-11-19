@@ -13,13 +13,17 @@ from pathlib import Path
 
 import pytest
 
+from narrative.skills import BUILTIN_SKILLS
+
 pytestmark = pytest.mark.ui
 
-# 内置技能：三条作业说明 + 三条生成工作流（顺序与 skills.BUILTIN_SKILLS 一致）。
-BUILTIN_NAMES = ["分场与分镜", "人物一致性检查", "外部工具调用规范",
-                 "素描（FLUX 3 Klein）", "风格化（Krea 2 风格参考）", "首尾帧短片（MiniMax H3）"]
-# 声明了 workflow 的那三条：它们的正文是「怎么喂框图/参考图/首尾帧」，不点名任何工具。
-GENERATION_NAMES = BUILTIN_NAMES[3:]
+# 内置清单以源码为准：这文件只断言「界面把内置的都列出来、只读、会打开什么」，
+# 内置增删不该每次都来改一遍这里的常量。
+
+BUILTIN_NAMES = [skill.name for skill in BUILTIN_SKILLS]
+# 声明了 workflow 的那几条：它们的正文是「怎么喂框图/参考图/首尾帧」，不点名任何工具。
+GENERATION_NAMES = [skill.name for skill in BUILTIN_SKILLS if skill.workflow]
+INSTRUCTION_NAMES = [skill.name for skill in BUILTIN_SKILLS if not skill.workflow]
 
 
 def _value(item, name):
@@ -121,6 +125,11 @@ def skill_shell(tmp_path, monkeypatch):
     # 让内置六行 + 用户行全部落在视口里——点击是按坐标点的，被裁掉的行点不到。
     # 真实窗口尺寸由 Main.qml 决定，不受这里影响。
     window.resize(1440, 1200)
+    # 设置页现在第一次进设置时才建（启动时不再常驻），先真的进一次设置。
+    window.setProperty("mode", "settings")
+    for _ in range(6):
+        app.processEvents()
+        time.sleep(0.01)
     page = window.findChild(object, "settingsPage")
     panel = page.findChild(object, "skillSettingsPanel")
     assert panel is not None, "设置页里没有技能面板"
@@ -200,10 +209,12 @@ def test_panel_lists_builtin_skills_and_they_are_read_only(tmp_path, monkeypatch
         assert [row["name"] for row in rows] == BUILTIN_NAMES
         assert all(row["builtin"] is True for row in rows)
         # 前三条（作业说明型）自己就能打开工具：列表上「会打开 N 个工具」这一列不是装饰。
-        assert all(row["opens"]["resolved_tools"] for row in rows[:3])
-        # 后三条（生成型）只声明工作流，不点名工具：列表上要写明它们会改什么。
-        assert all(row["opens"]["resolved_tools"] == [] for row in rows[3:])
-        assert [row["workflow"]["kind"] for row in rows[3:]] == ["sketch", "style", "video"]
+        assert all(row["opens"]["resolved_tools"] for row in rows if row["name"] in INSTRUCTION_NAMES)
+        # 生成型只声明工作流，不点名工具：列表上要写明它们会改什么。
+        generation_rows = [row for row in rows if row["name"] in GENERATION_NAMES]
+        assert all(row["opens"]["resolved_tools"] == [] for row in generation_rows)
+        assert [row["workflow"]["kind"] for row in generation_rows] == [
+            skill.workflow["kind"] for skill in BUILTIN_SKILLS if skill.workflow]
         assert _value(ui["panel"], "loadError") == ""
         assert _value(ui["panel"], "configPath").endswith("skills.json")
         assert "工作流：sketch／flux3-image-klein" in _evaluate(ui["panel"], "groupsText(skills[3])")

@@ -45,6 +45,15 @@ ApplicationWindow {
     // 属性（那是 undefined），必须通过只指向窗口的别名传进去。
     readonly property var windowRoot: app
 
+    // -- 启动打点 -------------------------------------------------------
+    // 只有 scripts/startup_bench.py 会传 --startup-trace；正常启动时这个布尔量是 false，
+    // 下面每处打点的第一行就短路返回，不建对象、不读时钟、不发信号。
+    // 打点写在**属性绑定**里而不是 Component.onCompleted：实测 onCompleted 在这一层
+    // 全被推迟到整棵树建完之后才发，时间戳挤在最后几十毫秒里，量不出分段。
+    // 属性绑定按文档顺序求值，所以「某个属性写在该元素最后」= 该子树建完的时刻。
+    readonly property bool startupTrace: Qt.application.arguments.indexOf("--startup-trace") >= 0
+    function startupMark(name) { console.log("STARTUP " + name + " " + Date.now()); return 0 }
+
     // -- shared state ---------------------------------------------------
     property var project: ({})
     property bool busy: false
@@ -93,28 +102,30 @@ ApplicationWindow {
     property real navigationExpandedWidth:196
     function toggleNavigation(){if(!navigationCollapsed)navigationExpandedWidth=Math.max(150,sidebar.width);navigationCollapsed=!navigationCollapsed;sidebar.SplitView.preferredWidth=navigationCollapsed?56:navigationExpandedWidth}
 
+    // 每项只有键名与页面名：这里曾经还有一句功能副标题（「逐镜制作与状态」之类），
+    // 与页面名重复、又白占一行高度，已经去掉。导航行因此是单行的（高度见 delegate）。
     readonly property var navItems: [
-        {key: "browse", label: "数据浏览", hint: "按分类看节点"},
-        {key: "relations", label: "关系图", hint: "人物与关系"},
-        {key: "source", label: "原文", hint: "导入与回查"},
-        {key: "adaptation", label: "改编", hint: "独立编辑叙事"},
-        {key: "assets", label: "资产", hint: "形象、物品与视觉设定"},
-        {key: "screenplay", label: "剧本", hint: "选段、场表与正文"},
-        {key: "storyboard", label: "分镜稿", hint: "分镜文字、图格与导出"},
+        {key: "browse", label: "数据浏览"},
+        {key: "relations", label: "关系图"},
+        {key: "source", label: "原文"},
+        {key: "adaptation", label: "改编"},
+        {key: "assets", label: "资产"},
+        {key: "screenplay", label: "剧本"},
+        {key: "storyboard", label: "分镜稿"},
         // 镜头表夹在分镜稿与预演之间：先按场排镜（分镜稿），再逐镜看状态（镜头表），
         // 再看三维预演摆成什么样，最后进导演台调调度。图标借用分镜稿那一档——
         // NavigationIcon 里还没有它自己的画法，而逐镜看的就是同一批分镜格。
-        {key: "shot_table", label: "镜头表", hint: "逐镜制作与状态", icon: "storyboard"},
+        {key: "shot_table", label: "镜头表", icon: "storyboard"},
         // 预演进导演台之前（先看效果，再定调度）。
-        {key: "previs", label: "预演", hint: "三维预演工作区"},
-        {key: "director", label: "导演台", hint: "调度、机位与动态预演"},
-        {key: "screenplay_structure", label: "结构", hint: "集、幕与段落"},
-        {key: "static_check", label: "静态检查", hint: "约束与问题定位"},
+        {key: "previs", label: "预演"},
+        {key: "director", label: "导演台"},
+        {key: "screenplay_structure", label: "结构"},
+        {key: "static_check", label: "静态检查"},
         // 设置是导航里的最后一项（原来「工程设置」的位置）：工程内只留这一个入口，
         // 进去以后才分「全局」与「本工程」两组。它不是工作区的一页，所以没有对应的
         // Loader 位置：点它走 openSettings 换 mode，不切 currentPage。
         // 图标借 NavigationIcon 里现成的齿轮画法（project_settings 那一档）。
-        {key: "settings", label: "设置", hint: "全局与本工程设置", icon: "project_settings"}
+        {key: "settings", label: "设置", icon: "project_settings"}
     ]
 
     function goTo(key) {
@@ -138,8 +149,44 @@ ApplicationWindow {
         copy[key] = true
         visitedPages = copy
     }
+    // 页面文件在这里才被读进来（连编译一起推迟）：初始属性在页面的
+    // Component.onCompleted 之前落下，所以页面「建好就读数据」那套照旧成立。
+    function loadPage(loader, file) {
+        if (!loader || loader.item) return
+        loader.setSource(Qt.resolvedUrl(file), { "app": windowRoot })
+    }
+
+    // -- 预演页预热 ------------------------------------------------------
+    // 工程打开、界面空闲 300 ms 后「假装访问过一次」预演页：Loader 照常实例化
+    // DirectorWorkspacePage，它自己起本地服务、建 WebEngineView 并开始加载——但
+    // StackLayout 只显示当前页，所以这一页在屏幕外加载，用户看不到任何闪动。
+    // 为什么值得：离屏基准（scripts/previs_load_bench.py）里第一次打开要 ~3.0 秒才等到
+    // 页面接口可用（~0.8 秒是 WebEngine 起渲染进程，其余是入口 chunk 的链式加载），
+    // 而同一个渲染进程里再开一次只要 ~1.0 秒。把这段时间挪到用户看别的页面时，
+    // 点「预演」就只剩切换。
+    // 为什么用 markPageVisited()：它就是上面这些 Loader 用的那个开关，所以接线只需要
+    // 这一处，不必改 Loader 的 active 绑定。pageVisited 只被这些 Loader 读，
+    // 提前置位等于「已备好」。
+    // 为什么看 GraphicsInfo：软件渲染（离屏、截图脚本、测试）下 WebGL 起不来，页面必然
+    // 报「DirectorDesk startup failed」，预热只是白烧 3 秒 CPU——那种情况不预热。
+    Timer {
+        objectName: "previsPreheat"
+        interval: 300
+        repeat: false
+        running: app.mode === "workspace" && !app.pageVisited("previs")
+                 && GraphicsInfo.api !== GraphicsInfo.Unknown
+                 && GraphicsInfo.api !== GraphicsInfo.Software
+        onTriggered: app.markPageVisited("previs")
+    }
+
     onCurrentPageChanged: markPageVisited(currentPage)
-    Component.onCompleted: markPageVisited(currentPage)
+    Component.onCompleted: {
+        // 根对象最后完成：这一行 ≈ 整次 load 的收尾时刻。
+        if (startupTrace) startupMark("root")
+        // 这里曾经也 markPageVisited(currentPage)：启动时 currentPage 的默认值是
+        // browse，于是「还没进工程」就先把 136 KB 的浏览页建了出来。现在只在真的
+        // 进工作区（enterWorkspace）或翻到某一页时才标记，启动一个页面都不建。
+    }
 
     // 从节点/属性跳回原文：切到原文页并把引文位置滚到眼前。
     function openSource(sourceId, start) {
@@ -184,6 +231,26 @@ ApplicationWindow {
     function closeSettings() {
         if (mode !== "settings") return
         mode = modeBeforeSettings === "workspace" ? "workspace" : "launcher"
+    }
+
+    // 设置页只在第一次进设置时创建，之后一直留着：离开再回来不重建，
+    // 分组停留位置与表单不闪一下。改 mode 的地方不止 openSettings（返回、关工程、
+    // 测试里直接摆属性），所以按 mode 的变化来记，而不是只在入口函数里记。
+    property bool settingsVisited: false
+    // 进过一次工作区就在这儿留个记号：导航栏那一列第一次进去时才建，之后留着
+    // （折叠状态、滚动位置不丢）。按 mode 的变化记，直接摆 mode 的调用方也照顾到。
+    property bool workspaceVisited: false
+    // 协作者面板同理：它收起着就不建，第一次打开时才建（60 KB 的 QML，实测 200 ms）。
+    property bool assistantVisited: false
+    onAssistantOpenChanged: if (assistantOpen) assistantVisited = true
+    onModeChanged: {
+        if (mode === "workspace") workspaceVisited = true
+        if (mode !== "settings") return
+        // 这一趟之前就建好了吗？刚被创建出来的那个页面在 Component.onCompleted
+        // 里已经进过一遍了，别重复读磁盘。
+        var existing = settingsLoader.item
+        settingsVisited = true
+        if (existing) existing.enter()
     }
 
     function backToLauncher() {
@@ -288,7 +355,7 @@ ApplicationWindow {
             // 启动页与工作区的下标保持原样（原有的懒创建与几何断言都依赖它们）。
             currentIndex: app.mode === "launcher" ? 0 : app.mode === "workspace" ? 1 : 2
 
-            LauncherPage { id: launcherPage; app: app }
+            LauncherPage { id: launcherPage; app: app; property int __trace: app.startupTrace ? app.startupMark("launcherPage 建完") : 0 }
 
 
             // -- workspace ----------------------------------------------
@@ -297,6 +364,7 @@ ApplicationWindow {
                 id: workspaceColumns
                 objectName: "workspaceColumns"
                 orientation: Qt.Horizontal
+                property int __traceBegin: app.startupTrace ? app.startupMark("workspace 开始") : 0
 
                 handle: Rectangle {
                     objectName: "workspaceColumnHandle"
@@ -339,8 +407,21 @@ ApplicationWindow {
                         radius: app.islandRadius
                     }
 
-                    ColumnLayout {
+                    // 导航栏的内容按需创建：启动页/设置页里这一列一个字都看不见，但它
+                    // 有十来件控件（返回、收起、标题、修订、路径、状态行、版本、警告、
+                    // 滚动区 + 13 个导航项），实测整块建出来要 1 s 上下——比启动时其余
+                    // 所有东西加起来还多（逐个控件拿掉都只在噪声里，所以只能整块推迟）。
+                    // 第一次进工作区才建，之后留着：导航折叠状态与滚动位置都不丢。
+                    Loader {
+                        id: navigationLoader
                         anchors.fill: sidebarCard
+                        active: app.workspaceVisited || app.mode === "workspace"
+                        sourceComponent: navigationColumnComponent
+                    }
+                    Component {
+                        id: navigationColumnComponent
+                    ColumnLayout {
+                        anchors.fill: parent
                         anchors.margins:app.navigationCollapsed?6:14
                         spacing: 4
 
@@ -354,9 +435,10 @@ ApplicationWindow {
                             ToolTip.visible:hovered
                             ToolTip.text:"工程列表"
                             onClicked: app.backToLauncher()
+                            property int __trace: app.startupTrace ? app.startupMark("① 返回按钮建完") : 0
                         }
 
-                        ToolButton{objectName:"navigationCollapse";text:app.navigationCollapsed?">":"< 收起导航";Layout.fillWidth:true;implicitWidth:40;onClicked:app.toggleNavigation();ToolTip.visible:hovered;ToolTip.text:app.navigationCollapsed?"展开导航":"收起导航"}
+                        ToolButton{objectName:"navigationCollapse";text:app.navigationCollapsed?">":"< 收起导航";Layout.fillWidth:true;implicitWidth:40;onClicked:app.toggleNavigation();ToolTip.visible:hovered;ToolTip.text:app.navigationCollapsed?"展开导航":"收起导航";property int __trace: app.startupTrace ? app.startupMark("② 收起按钮建完") : 0}
                         Label {
                             visible:!app.navigationCollapsed
                             Layout.fillWidth: true
@@ -391,7 +473,8 @@ ApplicationWindow {
                                 required property var modelData
                                 objectName: "navigation_" + modelData.key
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 46
+                                // 单行项：副标题去掉之后 46 会留出半行空白。
+                                Layout.preferredHeight: 34
 
                                 Rectangle {
                                     anchors.fill: parent
@@ -401,25 +484,17 @@ ApplicationWindow {
                                 }
                                 // 图标默认按导航键名画；个别页面没有自己的画法时用 icon 指定借哪一档。
                                 NavigationIcon {name:modelData.icon||modelData.key;ink:app.navSelection===modelData.key?app.theme.accent:app.theme.ink;width:24;height:24;anchors.verticalCenter:parent.verticalCenter;x:app.navigationCollapsed?(parent.width-width)/2:10}
-                                Column {
+                                Label {
                                     visible:!app.navigationCollapsed
                                     anchors.left: parent.left
                                     anchors.leftMargin: 44
                                     anchors.verticalCenter: parent.verticalCenter
-                                    spacing: 1
-                                    Label {
-                                        text: modelData.label
-                                        color: app.navSelection === modelData.key
-                                            ? app.theme.accent : app.theme.ink
-                                        font.pixelSize: 14
-                                        font.weight: app.navSelection === modelData.key
-                                            ? Font.DemiBold : Font.Normal
-                                    }
-                                    Label {
-                                        text: modelData.hint
-                                        color: app.theme.muted
-                                        font.pixelSize: 11
-                                    }
+                                    text: modelData.label
+                                    color: app.navSelection === modelData.key
+                                        ? app.theme.accent : app.theme.ink
+                                    font.pixelSize: 14
+                                    font.weight: app.navSelection === modelData.key
+                                        ? Font.DemiBold : Font.Normal
                                 }
                                 ToolTip.visible:navMouse.containsMouse
                                 ToolTip.text:modelData.label
@@ -437,6 +512,7 @@ ApplicationWindow {
 
                             }
                         }
+                        property int __trace: app.startupTrace ? app.startupMark("③ 导航滚动区建完") : 0
 
                         // 设置入口不在这里：它是导航列表的最后一项（navItems 的
                         // settings），和「这个工程有哪些页面」并排，只是点它进的是设置页。
@@ -481,6 +557,8 @@ ApplicationWindow {
                             font.pixelSize: 10
                             wrapMode: Text.Wrap
                         }
+                        property int __traceEnd: app.startupTrace ? app.startupMark("导航列建完（Repeater 的 13 项还没建）") : 0
+                    }
                     }
                 }
 
@@ -527,19 +605,27 @@ ApplicationWindow {
                             return 0
                         }
 
-                        // 每个位置一个 Loader：第一次进入那一页才实例化，之后保留。
-                        Loader { id: browseLoader; active: app.pageVisited("browse") || app.currentPage === "browse"; sourceComponent: browsePageComponent }
-                        Loader { active: app.pageVisited("relations") || app.currentPage === "relations"; sourceComponent: relationsPageComponent }
-                        Loader { id: sourceLoader; active: app.pageVisited("source") || app.currentPage === "source"; sourceComponent: sourcePageComponent }
-                        Loader { active: app.pageVisited("adaptation") || app.currentPage === "adaptation"; sourceComponent: adaptationPageComponent }
-                        Loader { active: app.pageVisited("assets") || app.currentPage === "assets"; sourceComponent: assetsPageComponent }
-                        Loader { active: app.pageVisited("screenplay") || app.currentPage === "screenplay"; sourceComponent: screenplayPageComponent }
-                        Loader { active: app.pageVisited("storyboard") || app.currentPage === "storyboard"; sourceComponent: storyboardPageComponent }
-                        Loader { id: shotTableLoader; active: app.pageVisited("shot_table") || app.currentPage === "shot_table"; sourceComponent: shotTablePageComponent }
-                        Loader { active: app.pageVisited("previs") || app.currentPage === "previs"; sourceComponent: previsPageComponent }
-                        Loader { active: app.pageVisited("director") || app.currentPage === "director"; sourceComponent: directorPageComponent }
-                        Loader { active: app.pageVisited("screenplay_structure") || app.currentPage === "screenplay_structure"; sourceComponent: structurePageComponent }
-                        Loader { active: app.pageVisited("static_check") || app.currentPage === "static_check"; sourceComponent: staticCheckPageComponent }
+                        // 每个位置一个 Loader：第一次进入那一页才把页面文件读起来，之后保留。
+                        // 为什么用 setSource(url) 而不是 sourceComponent：只要 Main.qml 里
+                        // 写着 `Component { BrowsePage {} }`，那个页面文件在 load 时就会被
+                        // 编译——哪怕它的 Loader 是 active:false。12 个页面文件加起来是启动
+                        // 时间里最大的一笔（二分实测 1.3 s）。setSource 连编译一起推迟到
+                        // 真正进入那一页时；初始属性在页面的 Component.onCompleted 之前
+                        // 落下，所以页面自己那套「建好就读数据」的初始化照旧能读到 app。
+                        Loader { id: browseLoader; active: app.pageVisited("browse"); onActiveChanged: if (active) app.loadPage(browseLoader, "BrowsePage.qml") }
+                        Loader { id: relationsLoader; active: app.pageVisited("relations"); onActiveChanged: if (active) app.loadPage(relationsLoader, "RelationPage.qml") }
+                        Loader { id: sourceLoader; active: app.pageVisited("source"); onActiveChanged: if (active) app.loadPage(sourceLoader, "SourcePage.qml") }
+                        Loader { id: adaptationLoader; active: app.pageVisited("adaptation"); onActiveChanged: if (active) app.loadPage(adaptationLoader, "AdaptationPage.qml") }
+                        Loader { id: assetsLoader; active: app.pageVisited("assets"); onActiveChanged: if (active) app.loadPage(assetsLoader, "AssetsPage.qml") }
+                        Loader { id: screenplayLoader; active: app.pageVisited("screenplay"); onActiveChanged: if (active) app.loadPage(screenplayLoader, "ScreenplayPage.qml") }
+                        Loader { id: storyboardLoader; active: app.pageVisited("storyboard"); onActiveChanged: if (active) app.loadPage(storyboardLoader, "StoryboardPage.qml") }
+                        Loader { id: shotTableLoader; active: app.pageVisited("shot_table"); onActiveChanged: if (active) app.loadPage(shotTableLoader, "ShotTablePage.qml") }
+                        // 预演页的 QML 里 import 了 QtWebEngineQuick：它只在这一页被真正
+                        // 打开时才编译，没有 WebEngine 的环境下别的页面完全不受影响。
+                        Loader { id: previsLoader; active: app.pageVisited("previs"); onActiveChanged: if (active) app.loadPage(previsLoader, "DirectorWorkspacePage.qml") }
+                        Loader { id: directorLoader; active: app.pageVisited("director"); onActiveChanged: if (active) app.loadPage(directorLoader, "DirectorDeskPage.qml") }
+                        Loader { id: structureLoader; active: app.pageVisited("screenplay_structure"); onActiveChanged: if (active) app.loadPage(structureLoader, "ScreenplayStructurePage.qml") }
+                        Loader { id: staticCheckLoader; active: app.pageVisited("static_check"); onActiveChanged: if (active) app.loadPage(staticCheckLoader, "StaticCheckPage.qml") }
                     }
                     }
                 }
@@ -585,22 +671,37 @@ ApplicationWindow {
 
                     // 一份面板、两个位置：停靠时是 SplitView 第三列，窄窗口时 parent
                     // 换到页面区上的抽屉里。同一实例，宽度跨过阈值时对话内容不丢。
-                    AssistantPanel {
-                        id: assistantPanel
-                        parent: app.assistantDocked ? assistantDockSlot : assistantOverlay
-                        anchors.top: parent.top
-                        anchors.bottom: parent.bottom
-                        anchors.right: parent.right
-                        anchors.margins: app.islandInset
-                        width: app.assistantDocked
-                            ? parent.width - 2 * app.islandInset
-                            : Math.min(360 + (app.islandsMode ? app.theme.island_gap : 0),
-                                       parent.width - 2 * app.islandInset)
-                        app: app
-                        pageId: app.currentPage
-                        visible: app.assistantOpen
-                        onCloseRequested: app.assistantOpen = false
+                    // 面板收起时不建：它那 60 KB 的 QML 建一遍要 200 ms 上下（实测），
+                    // 而启动时它一定是收起的。第一次打开建出来，之后开合只是显隐。
+                    Loader {
+                        id: assistantLoader
+                        anchors.fill: parent
+                        active: app.assistantVisited
+                        sourceComponent: assistantPanelComponent
                     }
+                    Component {
+                        id: assistantPanelComponent
+                        AssistantPanel {
+                            id: assistantPanel
+                            // 在 Component 里必须用只指向窗口的别名：写 `app: app`
+                            // 会解析成面板自己的 app 属性（那时还是 undefined），
+                            // 连带 parent/pageId 一起失效。
+                            parent: windowRoot.assistantDocked ? assistantDockSlot : assistantOverlay
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.right: parent.right
+                            anchors.margins: windowRoot.islandInset
+                            width: windowRoot.assistantDocked
+                                ? parent.width - 2 * windowRoot.islandInset
+                                : Math.min(360 + (windowRoot.islandsMode ? windowRoot.theme.island_gap : 0),
+                                           parent.width - 2 * windowRoot.islandInset)
+                            app: windowRoot
+                            pageId: windowRoot.currentPage
+                            visible: windowRoot.assistantOpen
+                            onCloseRequested: windowRoot.assistantOpen = false
+                        }
+                    }
+                    property int __traceEnd: app.startupTrace ? app.startupMark("工作区收尾（Repeater 之前）") : 0
                 }
             }
 
@@ -608,27 +709,17 @@ ApplicationWindow {
             // 设置单独成一页，里面再分「全局」（外观 / 模型渠道 / MCP / 技能）与
             // 「本工程」（工程设置 / 关于）两组。从启动页或工作区进来，返回时由
             // closeSettings 回到进来的那一页（工程仍开着就从工作区回去，不会丢现场）。
-            SettingsPage { id: settingsPage; app: app }
+            // 这一页曾经常驻在 StackLayout 里：不进设置也会被编译并建出来（含技能面板
+            // 47 KB、MCP 面板 28 KB、内置提示词列表）。现在第一次进设置才建，之后留着。
+            Loader {
+                id: settingsLoader
+                active: app.settingsVisited
+                onActiveChanged: if (active) app.loadPage(settingsLoader, "SettingsPage.qml")
+            }
+            property int __traceEnd: app.startupTrace ? app.startupMark("外壳建完（StackLayout 收尾）") : 0
         }
 
     }
-
-
-    // 懒创建用的组件定义。顺序与 navItems 一致，由上面每个 Loader 按需实例化。
-    Component { id: browsePageComponent; BrowsePage { app: windowRoot } }
-    Component { id: relationsPageComponent; RelationPage { app: windowRoot } }
-    Component { id: sourcePageComponent; SourcePage { app: windowRoot } }
-    Component { id: adaptationPageComponent; AdaptationPage { app: windowRoot } }
-    Component { id: assetsPageComponent; AssetsPage { app: windowRoot } }
-    Component { id: screenplayPageComponent; ScreenplayPage { app: windowRoot } }
-    Component { id: storyboardPageComponent; StoryboardPage { app: windowRoot } }
-    Component { id: shotTablePageComponent; ShotTablePage { app: windowRoot } }
-    Component { id: directorPageComponent; DirectorDeskPage { app: windowRoot } }
-    // 预演页用 source 懒加载：QtWebEngineQuick 只在那一个文件里 import，
-    // 没有 WebEngine 的环境下这里只会是 Error 状态，不影响其它页面。
-    Component { id: previsPageComponent; DirectorWorkspacePage { app: windowRoot } }
-    Component { id: structurePageComponent; ScreenplayStructurePage { app: windowRoot } }
-    Component { id: staticCheckPageComponent; StaticCheckPage { app: windowRoot } }
 
 
     // 启动页与设置页的窗口按钮与拖动区：浮在内容之上，不占布局（放在 StackLayout 里会被当成新的一页）。
@@ -653,5 +744,6 @@ ApplicationWindow {
             anchors.topMargin: 10
             anchors.rightMargin: 12
         }
+        property int __traceEnd: app.startupTrace ? app.startupMark("窗口浮动件建完") : 0
     }
 }

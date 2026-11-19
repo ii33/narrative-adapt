@@ -56,6 +56,19 @@ def transcript_shell(tmp_path, monkeypatch, *, single_long_user=False):
     assert engine.rootObjects()
     window = engine.rootObjects()[0]
     assert isinstance(window.contentItem(), QQuickItem)
+
+    def _settle_rounds(rounds=8):
+        for _ in range(rounds):
+            app.processEvents()
+            time.sleep(0.01)
+
+    # 协作者面板现在第一次打开时才建（启动时它一定是收起的，建一遍就是白等），
+    # 所以这里先开一次再收起：面板回到「存在但未显示」的原状，下面取 transcript
+    # 的那一串断言照旧。
+    window.setProperty('assistantOpen', True)
+    _settle_rounds()
+    window.setProperty('assistantOpen', False)
+    _settle_rounds()
     panel = window.findChild(object, 'assistantPanel')
     view = panel.findChild(object, 'assistantTranscript')
 

@@ -77,6 +77,11 @@ def mcp_shell(tmp_path, monkeypatch):
     engine.load(QUrl.fromLocalFile(str(QML_PATH)))
     assert engine.rootObjects(), "Main.qml 没有加载出来"
     window = engine.rootObjects()[0]
+    # 设置页现在第一次进设置时才建（启动时不再常驻），先真的进一次设置。
+    window.setProperty("mode", "settings")
+    for _ in range(6):
+        app.processEvents()
+        time.sleep(0.01)
     page = window.findChild(object, "settingsPage")
     panel = page.findChild(object, "mcpSettingsPanel")
     assert panel is not None, "设置页里没有 MCP 面板"

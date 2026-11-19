@@ -184,7 +184,6 @@ Item {
                 Item { Layout.fillWidth: true }
                 WindowChrome { app: page.app }
             }
-            Label { text:"提取粒度与模型配置仅用于当前工程，不修改全局设置。"; wrapMode:Text.Wrap; Layout.fillWidth:true; color:page.t.muted }
             RowLayout {
                 Layout.fillWidth:true
                 Label { text:"工程名称"; color:page.t.ink; Layout.preferredWidth:200 }
@@ -207,7 +206,7 @@ Item {
                 title:"内置提示词"
                 Layout.fillWidth:true
                 contentItem:ColumnLayout {
-                    Label {Layout.fillWidth:true;wrapMode:Text.Wrap;color:page.t.muted;text:page.selectedPrompt.id==="sketch_style"?"分镜格和素描关键帧共用此风格。保存后用于后续生成，进行中的生成会核对风格是否变化。":"按用途编辑当前工程的提示词。修改从下次任务生效；恢复默认只影响所选项。"}
+                    Label {Layout.fillWidth:true;wrapMode:Text.Wrap;color:page.t.muted;text:page.selectedPrompt.id==="sketch_style"?"分镜格和素描关键帧共用此风格；保存后用于后续生成。":"修改从下次任务生效；恢复默认只影响所选项。"}
                     ComboBox {id:promptType;objectName:"projectPromptType";Layout.fillWidth:true;model:page.promptSettings.prompts || [];textRole:"label";enabled:page.promptsLoaded&&!page.promptSaving}
                     Label {objectName:"projectPromptDescription";Layout.fillWidth:true;wrapMode:Text.Wrap;color:page.t.body;text:page.selectedPrompt.description || ""}
                     Label {objectName:"projectPromptState";text:page.selectedPrompt.overridden?"当前工程已自定义":"使用默认内容";color:page.t.muted}
@@ -229,7 +228,7 @@ Item {
                     onActivated: page.granularity=currentIndex === 1 ? "fine" : "standard"
                 }
             }
-            Label { text:"标准：梳理完整叙事进展；精细：细查完整事件、人物地点与属性事实，不追求事件数量。两档均不把准备、连续动作和直接结果逐项拆成事件；动作仅按需单独提取。"; wrapMode:Text.Wrap; Layout.fillWidth:true; color:page.t.muted }
+            Label { text:"标准：梳理完整叙事进展；精细：细查完整事件、人物地点与属性事实。"; wrapMode:Text.Wrap; Layout.fillWidth:true; color:page.t.muted }
             RowLayout {
                 Label { text:"模型服务"; color:page.t.ink }
                 ComboBox {
@@ -252,10 +251,9 @@ Item {
                     RowLayout{
                         Layout.fillWidth:true
                         Button{objectName:"projectApiKeyCheck";text:page.keyChecking?"检查中…":"检查有效性";enabled:page.loaded&&!page.keyChecking;onClicked:page.checkKey()}
-                        Label{Layout.fillWidth:true;wrapMode:Text.Wrap;color:page.t.muted;text:"向当前模型发送一次最小请求，不保存设置。"}
                     }
                     Label{objectName:"projectApiKeyCheckResult";Layout.fillWidth:true;wrapMode:Text.Wrap;visible:!!page.keyCheckResult.code;text:(page.keyCheckResult.valid===true?"有效：":page.keyCheckResult.valid===false?"无效：":"未能确定：")+(page.keyCheckResult.message||"");color:page.keyCheckResult.valid===false?page.t.warn:page.t.muted}
-                    Label{Layout.fillWidth:true;wrapMode:Text.Wrap;color:page.t.muted;text:"密钥只保存在本机凭据库，不写入工程或聊天。清除本机密钥不会删除环境变量；保存后从下次任务使用新配置。"}
+                    Label{Layout.fillWidth:true;wrapMode:Text.Wrap;color:page.t.muted;text:"密钥只保存在本机凭据库，不写入工程或聊天。"}
                 }
             }
             Repeater {
@@ -293,7 +291,7 @@ Item {
         title:(preview?"有效内容 · ":"编辑 · ")+promptLabel
         contentItem:ColumnLayout {
             SubmissionFeedback{state:promptSubmission}
-            Label {Layout.fillWidth:true;wrapMode:Text.Wrap;color:page.t.muted;text:promptEditor.preview?"这是当前工程实际使用的内容。":"保存后从下次任务生效；提示词仅用于当前工程。"}
+            Label {Layout.fillWidth:true;wrapMode:Text.Wrap;color:page.t.muted;visible:text.length>0;text:promptEditor.preview?"":"保存后从下次任务生效。"}
             ScrollView {Layout.fillWidth:true;Layout.fillHeight:true;TextArea{id:promptText;objectName:"projectPromptText";readOnly:promptEditor.preview;selectByMouse:true;wrapMode:TextEdit.Wrap}}
             RowLayout {
                 Layout.fillWidth:true;Item{Layout.fillWidth:true}

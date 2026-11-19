@@ -393,7 +393,7 @@ Item {
             Button {objectName:"storyboardCreateMissingAssets";text:desk.missingAssetsPending?"正在建立…":"建立缺失资产（"+desk.selectedMissingAssetCount+"）";enabled:desk.ready&&!desk.busy&&!desk.approved&&!desk.assetAnalysisPending&&!desk.missingAssetsPending&&desk.selectedMissingAssetCount>0;onClicked:desk.createMissingAssets(desk.assetShotIds)}
             Item { Layout.fillWidth:true }
         }
-        Label {visible:!desk.directorOnly&&desk.deskMode===0&&desk.assetShotIds.length>0;text:"每条待确定元素建立一张独立空资产卡；需要复用时，请在元素行选择已有资产。";color:desk.t.muted;wrapMode:Text.Wrap;Layout.fillWidth:true}
+        Label {visible:!desk.directorOnly&&desk.deskMode===0&&desk.assetShotIds.length>0;text:"需要复用资产时，请在元素行选择已有资产。";color:desk.t.muted;wrapMode:Text.Wrap;Layout.fillWidth:true}
         StoryboardScriptView { desk:desk; visible:!desk.directorOnly&&desk.deskMode===0; Layout.fillWidth:true; Layout.fillHeight:true }
         ShotPanelBoard { desk:desk; visible:!desk.directorOnly&&desk.deskMode===1; Layout.fillWidth:true; Layout.fillHeight:true }
         ColumnLayout { visible:desk.directorOnly; Layout.fillWidth:true; Layout.fillHeight:true
@@ -611,7 +611,7 @@ Item {
     StoryboardObjectEditor{id:objectEditor;desk:desk}
     Dialog{id:actionKeys;objectName:"storyboardActionKeysDialog";title:"动作关键点 · "+(desk.selectedObject.name||"");modal:true;anchors.centerIn:parent;width:Math.min(620,desk.width-24);height:Math.min(450,desk.height-24)
         contentItem:ColumnLayout{
-            Label{text:"移动时间和删除保留其余关键点。操作保存到当前场，不改镜头顺序。";wrapMode:Text.Wrap;Layout.fillWidth:true}
+            Label{text:"操作只保存到当前场，不改镜头顺序。";wrapMode:Text.Wrap;Layout.fillWidth:true}
             Label{visible:!!desk.message;text:desk.message;wrapMode:Text.Wrap;Layout.fillWidth:true;color:desk.t.warn}
             ListView{Layout.fillWidth:true;Layout.fillHeight:true;clip:true;model:((desk.board.objects||[]).find(o=>o.id===desk.selectedObjectId)||{}).keyframes||[]
                 delegate:RowLayout{required property var modelData;property string keyframeId:modelData.id;width:ListView.view.width;Label{text:desk.seconds(modelData.time_ms);Layout.fillWidth:true}SpinBox{id:keyTime;objectName:"storyboardActionKeyTime";property string keyframeId:modelData.id;from:0;to:2147483647;value:modelData.time_ms;editable:true}Button{objectName:"storyboardMoveActionKey";property string keyframeId:modelData.id;text:"移动";enabled:!desk.busy&&!desk.approved;onClicked:desk.previewPhase2([{op:"move_action_keyframe",object_id:desk.selectedObjectId,keyframe_id:modelData.id,time_ms:keyTime.value}],desk.board.revision)}Button{text:"时刻";enabled:!desk.busy&&!desk.approved;onClicked:desk.openMarkerBinding({op:"bind_action_keyframe_marker",object_id:desk.selectedObjectId,keyframe_id:modelData.id})}Button{objectName:"storyboardDeleteActionKey";property string keyframeId:modelData.id;text:"删除";enabled:!desk.busy&&!desk.approved;onClicked:desk.previewPhase2([{op:"delete_action_keyframe",object_id:desk.selectedObjectId,keyframe_id:modelData.id}],desk.board.revision)}}

@@ -63,6 +63,14 @@ Rectangle {
     property string scrollAnchorKey: ""
     property real scrollAnchorOffset: 0
     property real scrollFallbackY: 0
+    // 贴底收敛次数：只给 settleScroll() 末尾那次复查用，见那里的注释。
+    property int tailPinPasses: 0
+
+    // 面板现在第一次打开才由 Loader 建出来，建出来时布局已经定稿：以前「面板变可见 →
+    // ListView 高度从 0 变成 N → onHeightChanged 重排一次 → 贴底」那条老触发点不会再发。
+    // 这里补一条显式的：第一次显示、且仍在跟随尾部，就主动贴底一次。用户往上翻过时
+    // followTail 为假，这里不动他的位置（既有行为不变）。
+    onVisibleChanged: if (visible && followTail) panel.scheduleScroll()
 
     function nearBottom() {
         return transcript.contentHeight <= transcript.height
@@ -125,6 +133,21 @@ Rectangle {
             }
         }
         restoringScroll = false
+        // 为什么贴底之后还要复查：positionViewAtEnd() 是按「当前（可能还带估算）的
+        // contentHeight」定位置的，而它自己触发的嵌套布局会就地修正 contentHeight 与
+        // originY——那些修正发出的 contentHeightChanged 全被上面的 restoringScroll 挡掉，
+        // 不会再排下一轮，估算偏差就留在原地（实测：面板改成第一次打开才建之后，切回
+        // 历史会话差 28px 贴不到底，此后也没有任何事件把它拉回去）。这里只补有限次机会：
+        // 仍然不贴底就再排一轮，收敛即停；followTail 为假（用户正在往上翻）时走的是上面
+        // 的锚点分支，这里一律清零、不碰位置。
+        if (!followTail) {
+            tailPinPasses = 0
+        } else if (!panel.nearBottom() && tailPinPasses < 4) {
+            ++tailPinPasses
+            panel.scheduleScroll()
+        } else {
+            tailPinPasses = 0
+        }
     }
 
     function contentLayoutChanged() {
@@ -178,6 +201,8 @@ Rectangle {
     }
 
     function syncMessages(rows, reset) {
+        // 有新内容就是新一轮贴底收敛：把上一轮的复查次数清零。
+        tailPinPasses = 0
         if (!reset) panel.captureScroll(false)
         changingMessages = true
         if (reset) {
@@ -914,7 +939,7 @@ Rectangle {
         Label {
             Layout.fillWidth: true
             visible: panel.messages.length === 0
-            text: "问图里的事：某个场景里谁在场、某个编号是什么、某条记录为什么失效。"
+            text: "可以问：谁在场、某个编号是什么、某条记录为什么失效。"
             color: t.muted
             font.pixelSize: 10
             wrapMode: Text.Wrap
@@ -1031,11 +1056,6 @@ Rectangle {
         contentItem: ColumnLayout {
             spacing: 6
             Label { text: "新建会话 · 选模板"; color: t.ink; font.pixelSize: 12; font.weight: Font.DemiBold }
-            Label {
-                Layout.fillWidth: true; wrapMode: Text.Wrap
-                text: "模板决定这个会话的系统提示词与工具集合，建好就冻结。"
-                color: t.muted; font.pixelSize: 9
-            }
             ScrollView {
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.min(300, pickerList.implicitHeight)
@@ -1244,7 +1264,7 @@ Rectangle {
         onAccepted: panel.attach(Array.from(imagePicker.selectedFiles,function(value){return value.toString()}))
     }
 
-    Component.onCompleted: panel.load()
+    Component.onCompleted: { panel.load(); Qt.callLater(panel.scheduleScroll) }
 
     Connections {
         target: app

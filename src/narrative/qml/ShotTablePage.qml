@@ -681,7 +681,7 @@ Item {
                     anchors.centerIn: parent
                     width: parent.width - 40
                     visible: !page.detail.ok
-                    text: "选中左边任意一行，看这一镜的时间轴、需求与缺口。"
+                    text: "选中左边一行，看这一镜的详情。"
                     color: page.t.muted
                     font.pixelSize: 12
                     wrapMode: Text.Wrap

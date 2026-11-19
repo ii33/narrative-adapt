@@ -22,6 +22,11 @@ from pathlib import Path
 ENV_DIST = "NARRATIVE_PREVIS_DIST"
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# 缓存目录名：落在工程数据根下（与 previs/ 下载目录同级），随工程一起搬走或删掉。
+PREVIS_CACHE_NAME = "previs-cache"
+# 已经配过缓存的目录：Qt 只认「建页面之前」的那一次设置，重复 set 只会刷一条警告日志。
+_cache_stamp: Path | None = None
+
 
 def _candidates(workspace: Path | None) -> list[Path]:
     found: list[Path] = []
@@ -57,6 +62,68 @@ def availability(workspace: Path | None = None) -> tuple[bool, str]:
 class _Handler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args, **kwargs) -> None:  # noqa: D401 - 静默默认日志
         return
+
+
+def cache_dir(workspace: Path | None) -> Path | None:
+    """预演台的磁盘缓存目录：工程数据根下的 ``previs-cache/``；没有工程就返回 None。
+
+    不给默认缓存路径（系统用户目录下的 QtWebEngine）兜底：那正是「换个工程也读同一份
+    缓存」的老问题，也让卸载/删工程时留下不知道归谁的目录。
+    """
+    if workspace is None:
+        return None
+    return workspace / PREVIS_CACHE_NAME
+
+
+def configure_engine_cache(workspace: Path | None) -> str:
+    """把预演台 WebEngine 的磁盘缓存钉到工程目录下，返回一句可写进诊断的结论。
+
+    为什么必须在这里做：``bridge.previsWorkspace()`` 在 ``WebEngineView`` 创建**之前**
+    被调用，这是唯一「还没建过任何页面」的时机——Qt 要求 ``setCachePath()`` 早于首个
+    页面，之后再调只会被忽略。
+
+    为什么用默认 profile：保存/导出的下载接管装在默认 profile 上（``native_bridge``），
+    换一个 profile 就得把下载接管一起搬走，风险比这点收益大（见下）。
+
+    实测（Qt 6.12 / PySide6，``scripts/previs_load_bench.py`` 的 ``--named-profile`` 对照组）：
+    QML 的 ``WebEngineView`` 用的是 ``QQuickWebEngineProfile.defaultProfile()``，而它
+    **是 off-the-record**——``cachePath()`` 恒为空、``setCachePath()`` 被忽略，磁盘缓存
+    一行都不落盘；只有另建命名 profile 才写盘（一次 10–13 MB），可首屏并没有更快
+    （3.19 s → 冷 3.47 s / 热 3.37 s）：写这十几 MB 本身就在这 3 秒里抢时间，而大头是
+    JS 的解析与执行——同一进程里再开一次（34 个请求全命中内存缓存，一次网络都不发）
+    也才掉到 0.92 s。也就是说这份磁盘缓存换不来用户看得见的时间，却要把下载接管
+    （``native_bridge`` 接在默认 profile 上）搬到新 profile 上，不值。
+    所以这里**不**换 profile：能在当前 profile 上配就配（将来 Qt 改成持久 profile、
+    或别处接管了下载之后自动生效），配不了就返回空串，也不去工程里留一个永远空的目录。
+
+    为什么不清缓存：二次打开靠这份缓存省掉 chunk 的重新下载与解析，每次打开前清掉
+    就等于永远当冷启动跑（现在没有任何地方调 ``clearHttpCache()``，见
+    ``scripts/previs_load_bench.py`` 与全仓检索）。
+    """
+    target = cache_dir(workspace)
+    if target is None:
+        return ""
+    try:
+        from PySide6.QtWebEngineQuick import QQuickWebEngineProfile
+    except Exception:  # noqa: BLE001 - 没有 WebEngine：预演台本来就不可用
+        return ""
+    profile = QQuickWebEngineProfile.defaultProfile()
+    try:
+        if profile.isOffTheRecord():   # 页面的默认 profile 都是这一种：改不动，也不用建空目录
+            return ""
+    except (OSError, RuntimeError):
+        return ""
+    global _cache_stamp
+    if _cache_stamp == target:
+        return str(target)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        profile.setCachePath(str(target))
+        profile.setPersistentStoragePath(str(target / "storage"))
+    except OSError:  # 工程目录只读：宁可没有缓存，也不要为了缓存把页面弄失败
+        return ""
+    _cache_stamp = target
+    return str(target)
 
 
 class WorkspaceServer:
@@ -96,11 +163,16 @@ _default: WorkspaceServer | None = None
 
 
 def shared_server(workspace: Path | None = None) -> WorkspaceServer | None:
-    """整个进程共用一份服务：界面切来切去不必反复起停。"""
+    """整个进程共用一份服务：界面切来切去不必反复起停。
+
+    顺手把 WebEngine 的缓存目录钉下来：这个函数在 view 建出来之前被调用（见
+    ``configure_engine_cache`` 的说明），晚一步就不再生效了。
+    """
     global _default
     dist = dist_dir(workspace)
     if dist is None:
         return None
+    configure_engine_cache(workspace)
     if _default is None or _default.directory != dist:
         if _default is not None:
             _default.stop()

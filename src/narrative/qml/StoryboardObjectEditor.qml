@@ -11,7 +11,7 @@ Dialog{
  contentItem:ColumnLayout{
         SubmissionFeedback{state:contentSubmission}
 
-  Label{text:"这里编辑全场基础位置与朝向；已有动作关键点仍按时间覆盖基础值。当前时刻的修改请开启记录关键点。";wrapMode:Text.Wrap;Layout.fillWidth:true}
+  Label{text:"动作关键点按时间覆盖这里的值；改当前时刻请先开记录关键点。";wrapMode:Text.Wrap;Layout.fillWidth:true}
   Label{visible:!!editor.errorText;text:editor.errorText;wrapMode:Text.Wrap;Layout.fillWidth:true;color:desk.t.warn}
   TextField{id:nameField;objectName:"storyboardObjectName";placeholderText:"对象名称";Layout.fillWidth:true;enabled:!editor.pending}
   ComboBox{id:kind;objectName:"storyboardObjectKind";model:["人物","道具","布景"];property var values:["person","prop","set"];enabled:!editor.pending}

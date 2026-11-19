@@ -394,14 +394,6 @@ ColumnLayout {
     }
 
     Label {
-        Layout.fillWidth: true
-        wrapMode: Text.Wrap
-        color: panel.t.muted
-        font.pixelSize: 11
-        text: "技能是一段给模型看的作业说明，外加它要打开的业务组与工具。它不替换系统提示词，"
-            + "只在会话里被 load_skill 显式加载之后生效；能不能真的打开工具仍由那次会话的访问模式决定。"
-    }
-    Label {
         objectName: "skillConfigPath"
         Layout.fillWidth: true
         text: "配置文件：" + panel.configPath
@@ -611,9 +603,7 @@ ColumnLayout {
                     font.pixelSize: 11
                     text: panel.loadError.length > 0
                         ? "技能文件读不出来，先按上面的错误改好它。"
-                        : "还没有可显示的技能。内置技能随程序发布，正常情况下至少六条"
-                            + "（三条作业说明 + 三条生成工作流）；一条也没有说明技能文件被清空了，"
-                            + "可以在这里新建一条，或把备份 skills.json.bak 放回来。"
+                        : "还没有技能。新建一条，或把备份 skills.json.bak 放回来。"
                 }
             }
         }
@@ -653,14 +643,6 @@ ColumnLayout {
                     font.pixelSize: 11
                 }
                 Item { Layout.fillWidth: true }
-                Label {
-                    Layout.fillWidth: true
-                    horizontalAlignment: Text.AlignRight
-                    text: "复制出来的技能可以改；内置原文一个字符都不动"
-                    color: panel.t.muted
-                    font.pixelSize: 10
-                    elide: Text.ElideRight
-                }
             }
             Label {
                 objectName: "skillPromptHint"
@@ -668,8 +650,7 @@ ColumnLayout {
                 wrapMode: Text.Wrap
                 color: panel.t.muted
                 font.pixelSize: 10
-                text: "「替换提示词」指这条技能的正文顶替哪一段内置提示词。同一个键有多条时，"
-                    + "最近更新的那条生效；停用或删除它就自动回落到内置。"
+                text: "「替换提示词」指这条技能的正文顶替哪一段内置提示词；留空则只附加说明。"
             }
             Label {
                 objectName: "skillPromptProblem"
@@ -866,9 +847,7 @@ ColumnLayout {
                             wrapMode: Text.Wrap
                             color: panel.t.muted
                             font.pixelSize: 10
-                            text: "填了条目名，这条技能的正文就顶替那一段内置提示词（同键多条时最近更新的生效，"
-                                + "停用或删除即回落内置）；留空表示它只是附加说明，不改任何提示词。"
-                                + "从「内置提示词」区复制出来的草稿已经填好这一栏。"
+                            text: "填了条目名，正文就顶替那一段内置提示词；留空表示只附加说明。"
                         }
                     }
 
@@ -877,14 +856,6 @@ ColumnLayout {
                         text: "正文（给模型看的作业说明）"
                         color: panel.t.muted
                         font.pixelSize: 12
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        color: panel.t.muted
-                        font.pixelSize: 10
-                        text: "这一整段会进模型上下文：写成「先调用哪个工具、看到什么再往下走、什么不算完成」，"
-                            + "而不是写给人看的介绍。技能不替换系统提示词，只在会话里被 load_skill 加载后生效。"
                     }
                     TextArea {
                         id: instructionsArea
@@ -915,7 +886,7 @@ ColumnLayout {
                         Label { text: "业务组"; color: panel.t.muted; font.pixelSize: 12 }
                         Label {
                             Layout.fillWidth: true
-                            text: "点一下选中/取消；选中会一并打开这一组的工具"
+                            text: "选中会一并打开这一组的工具"
                             color: panel.t.muted
                             font.pixelSize: 10
                             elide: Text.ElideRight
@@ -977,14 +948,6 @@ ColumnLayout {
                             placeholderText: "搜索工具名，例如 screenplay 或 read_scene"
                             onTextEdited: panel.toolQuery = text
                         }
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        color: panel.t.muted
-                        font.pixelSize: 10
-                        text: "业务组已经能覆盖的就不必再单点工具；上面搜到的名字直接点它加入。"
-                            + "没有搜索时只列已选的工具。"
                     }
                     ScrollView {
                         id: toolScroll

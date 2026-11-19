@@ -62,16 +62,17 @@ Item {
     // 声明顺序一一对应——错位会让「点外观、改模型」这种静默错误重新出现，
     // 所以顺序只有这一处真相，导航与内容都从它派生。
     readonly property var globalSections: [
-        {key: "appearance", label: "外观", hint: "深浅色与主框构"},
-        {key: "model", label: "模型渠道", hint: "所有工程的默认值"},
-        {key: "mcp", label: "MCP 服务器", hint: "外部工具服务器"},
-        {key: "skill", label: "技能", hint: "可保存的作业说明"}
+        {key: "appearance", label: "外观"},
+        {key: "model", label: "模型渠道"},
+        {key: "mcp", label: "MCP 服务器"},
+        {key: "skill", label: "技能"}
     ]
     readonly property var projectSections: [
         // 没有打开工程时这一节点不可点：它读写的都是当前工程的配置，空工程态点进去
-        // 只会报一串「请先打开图项目」。hint 换成一句原因，说明为什么点不了。
-        {key: "project_settings", label: "工程设置", hint: "提取粒度与模型", disabledHint: "先打开工程"},
-        {key: "about", label: "关于", hint: "版本与配置文件"}
+        // 只会报一串「请先打开图项目」。所以这一项自带一句停用原因（别的分组没有）：
+        // 说明为什么点不了，而不是只把字染灰。
+        {key: "project_settings", label: "工程设置", disabledHint: "先打开工程"},
+        {key: "about", label: "关于"}
     ]
     readonly property var sections: globalSections.concat(projectSections)
 
@@ -128,15 +129,20 @@ Item {
         page.mcpConfigPath = snapshot.path || ""
     }
 
-    // 页面常驻在 StackLayout 里，只有真正露出来（visible）时才去读磁盘：
-    // 启动时不打开设置，就不该为它做一次配置读取；每次进来也顺手刷新一遍，
-    // 免得显示的是上次进来时的旧值（手改过配置文件时尤其明显）。
-    // 默认分组也在这里定：每次进来都按来源回到该看的那一组，
-    // 而不是上次离开时停在哪。
-    onVisibleChanged: if (visible) {
+    function enter() {
         page.load()
         page.sectionIndex = page.indexOfSection(page.defaultSectionKey())
     }
+
+    // 这一页现在由 Main.qml 的 Loader 在第一次进设置时创建，创建时它的 visible 已是
+    // 真值，visibleChanged 不会补发——首次进入在这里走一遍同样的流程。
+    // 不按 visible 判断：这一页只会在「正在进设置」的那一次被创建，而创建那一刻
+    // 外层 StackLayout 有没有把这格标成可见，取决于属性绑定与 onModeChanged 的先后，
+    // 靠它判断会时灵时不灵（实测同一个入口两次运行结果不同）。
+    // 之后再进来（页面留着不重建）由 Main.qml 的 onModeChanged 调 enter()：
+    // 页面挂在 Loader 下面以后，StackLayout 不再改它的 visible，靠 visibleChanged
+    // 已经收不到「又进了一次设置」这件事了。
+    Component.onCompleted: page.enter()
 
     function applyProfile(p) {
         profile = p || ({})
@@ -247,11 +253,6 @@ Item {
                     font.weight: Font.DemiBold
                     color: t.ink
                 }
-                Label {
-                    text: "全局设置是这台机器的默认值，本工程设置只影响当前工程。"
-                    color: t.muted
-                    font.pixelSize: 12
-                }
                 Item { Layout.fillWidth: true }
             }
         }
@@ -286,12 +287,16 @@ Item {
                                 ? null : modelData.section
                             readonly property bool available: navEntry.section
                                 ? page.sectionAvailable(navEntry.section.key) : false
+                            // 只有「不可用」才留一行原因；可用时不写功能说明（分组名已经够）。
+                            readonly property string disabledNote: navEntry.section && !navEntry.available
+                                ? (navEntry.section.disabledHint || "") : ""
 
                             objectName: navEntry.section
                                 ? "settingsSectionNav_" + navEntry.section.key
                                 : "settingsGroupRow_" + modelData.group
                             Layout.fillWidth: true
-                            Layout.preferredHeight: navEntry.section ? 46 : 28
+                            Layout.preferredHeight: navEntry.section
+                                ? (navEntry.disabledNote.length > 0 ? 44 : 30) : 28
                             // 第二组前面留一段距离：两组是一层区分，不能连成一片。
                             Layout.topMargin: navEntry.section ? 0
                                 : (modelData.group === "project" ? 10 : 2)
@@ -336,10 +341,8 @@ Item {
                                 }
                                 Label {
                                     objectName: navEntry.section ? "settingsSectionHint_" + navEntry.section.key : ""
-                                    text: navEntry.section
-                                        ? (navEntry.available ? navEntry.section.hint
-                                            : (navEntry.section.disabledHint || navEntry.section.hint))
-                                        : ""
+                                    visible: navEntry.disabledNote.length > 0
+                                    text: navEntry.disabledNote
                                     color: page.t.muted
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
@@ -408,13 +411,6 @@ Item {
                                 onActivated: bridge.setThemeMode(page.appearanceModes[index].key)
                             }
                         }
-                        Label {
-                            Layout.fillWidth: true
-                            text: "跟随系统时随 Windows 深浅色自动切换；选浅色或深色后固定，不再跟系统。"
-                            color: t.muted
-                            font.pixelSize: 11
-                            wrapMode: Text.Wrap
-                        }
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
@@ -466,14 +462,6 @@ Item {
                                 onClicked: bridge.loadGlobalSettings()
                             }
                         }
-                        Label {
-                            Layout.fillWidth: true
-                            text: "未单独配置的工程沿用这里的值。"
-                            color: t.muted
-                            font.pixelSize: 11
-                            wrapMode: Text.Wrap
-                        }
-
                         ScrollView {
                             id: settingsScroll
                             Layout.fillWidth: true
@@ -660,13 +648,6 @@ Item {
                                 color: t.ink
                                 font.pixelSize: 12
                             }
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: "叙事图工作台。设置与工程文件分开存放：设置是这台机器上的默认值，不写进任何工程。"
-                            color: t.muted
-                            font.pixelSize: 11
-                            wrapMode: Text.Wrap
                         }
                         Label { text: "模型渠道配置文件"; color: t.muted; font.pixelSize: 12 }
                         Label {

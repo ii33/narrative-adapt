@@ -321,10 +321,17 @@ def test_back_returns_to_the_page_settings_was_opened_from(tmp_path, monkeypatch
 
 
 def test_workspace_navigation_offers_exactly_one_settings_entry(tmp_path, monkeypatch):
-    """工程内只剩一个设置入口，且它就是导航列表的最后一项。"""
+    """工程内只剩一个设置入口，且它就是导航列表的最后一项。
+
+    导航栏现在跟着工作区一起按需创建（启动页里它整列都不建，那是启动耗时的大头），
+    所以先真的打开一个工程：这一节说的本来就是「工作区里的导航」。
+    """
     with _shell(tmp_path, monkeypatch) as ui:
         ui["settle"]()
         window = ui["window"]
+        _open_project(ui, tmp_path)
+        _pump(ui)
+        assert window.property("mode") == "workspace"
 
         # 原来并列的两个入口都撤了：页面项「工程设置」与导航底部的「设置」按钮。
         base = _nav_base(ui)

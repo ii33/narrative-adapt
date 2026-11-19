@@ -124,11 +124,6 @@ Item {
                     font.weight: Font.DemiBold
                     color: t.ink
                 }
-                Label {
-                    text: "选择工程进入；模型服务等全局默认值在「设置」里改。"
-                    color: t.muted
-                    font.pixelSize: 12
-                }
                 Item { Layout.fillWidth: true }
                 Label {
                     visible: app.busy
@@ -308,7 +303,7 @@ Item {
                             Layout.fillWidth: true
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.WordWrap
-                            text: "列表里还没有工程。\n打开一个 .nproj 工程文件，它就留在这里。"
+                            text: "还没有工程。"
                             color: t.muted
                             font.pixelSize: 12
                         }
@@ -342,11 +337,6 @@ Item {
                             color: t.ink
                             font.pixelSize: 13
                             font.weight: Font.DemiBold
-                        }
-                        Label {
-                            text: "工程以 .nproj 信息文件为入口，数据库和资料单独存放。"
-                            color: t.muted
-                            font.pixelSize: 11
                         }
                         RowLayout {
                             spacing: 6

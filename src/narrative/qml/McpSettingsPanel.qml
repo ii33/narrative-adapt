@@ -294,14 +294,6 @@ ColumnLayout {
     }
 
     Label {
-        Layout.fillWidth: true
-        wrapMode: Text.Wrap
-        color: panel.t.muted
-        font.pixelSize: 11
-        text: "外部服务器的工具会按 mcp__服务器__工具 的名字进模型工具表，并带上原来的参数说明。"
-            + "这里配置的是所有工程共用的，不写进工程文件。"
-    }
-    Label {
         objectName: "mcpConfigPath"
         Layout.fillWidth: true
         text: "配置文件：" + panel.configPath
@@ -466,8 +458,7 @@ ColumnLayout {
                     font.pixelSize: 11
                     text: panel.loadError.length > 0
                         ? "配置文件读不出来，先按上面的错误改好它。"
-                        : "还没有配置 MCP 服务器。点「新增」填一条 stdio 启动命令，"
-                            + "它的工具就会出现在模型工具表里。"
+                        : "还没有配置 MCP 服务器。"
                 }
             }
         }
@@ -571,8 +562,7 @@ ColumnLayout {
                         wrapMode: Text.Wrap
                         color: panel.t.muted
                         font.pixelSize: 10
-                        text: "参数按空白切开；带空格的一段用一对双引号护住。"
-                            + "不做引号嵌套、单引号和反斜杠转义——需要这些就用配置文件。"
+                        text: "带空格的一段用一对双引号护住。"
                     }
 
                     Label {

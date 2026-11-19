@@ -219,7 +219,7 @@ Item {
         }
         Label {
             Layout.fillWidth: true
-            text: "检查证据、引用、结构与属性约束，只读运行；未发现静态问题不代表原文已完整提取。"
+            text: "未发现静态问题不代表原文已完整提取。"
             color: page.t.muted
             wrapMode: Text.Wrap
         }

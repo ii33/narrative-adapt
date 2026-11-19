@@ -1998,14 +1998,6 @@ Item {
                                     }
                                     Button { visible: page.adaptationMode; text: "管理资产设定"; flat: true; onClicked: app.goTo("assets") }
                                 }
-                                Label {
-                                    Layout.fillWidth: true
-                                    text: "和属性一样跟阅读位置走：只列这一刻有效的。点标题展开。"
-                                    color: t.muted
-                                    font.pixelSize: 10
-                                    wrapMode: Text.Wrap
-                                }
-
                                 Repeater {
                                     objectName: "materialCards"
                                     model: page.material.cards
@@ -2452,7 +2444,7 @@ Item {
             Label {
                 Layout.fillWidth: true
                 visible: page.draftImages.length === 0
-                text: "还没有图片。可以一次选多张，每张下面写一句说明。"
+                text: "还没有图片。可以一次选多张。"
                 color: t.muted
                 font.pixelSize: 10
                 wrapMode: Text.Wrap
@@ -2638,7 +2630,7 @@ Item {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: "按提取阅读顺序显示现有时间点；导入不会改变提取数据。"
+                text: "导入不会改变提取数据。"
                 color: t.muted
             }
             Label {
@@ -2815,7 +2807,7 @@ Item {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: "在所选事件记录建立、变更或失效；程序按事件及同事件内顺序推导状态。引文可逐字核对，不填写有效期。"
+                text: "在所选事件记录建立、变更或失效；引文可逐字核对。"
                 color: t.muted
                 font.pixelSize: 11
             }
