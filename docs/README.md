@@ -61,6 +61,7 @@
 | 公开仓库范围 | [PUBLIC_REPOSITORY.md](features/PUBLIC_REPOSITORY.md) |
 | 上下文运行时 | [context-runtime.md](features/context-runtime.md) |
 | 提示词写法（五段结构、硬指标） | [PROMPT_STYLE.md](PROMPT_STYLE.md) |
+| MiniMax H3 视频提示词官方规范（官方结构与字段、官方运镜词表、参考生视频与首尾帧差异、映射到运镜/主体/环境/约束四段、常见失败） | [MINIMAX_H3_PROMPT.md](MINIMAX_H3_PROMPT.md) |
 | 提示词版本与变更记录 | [extraction/PROMPT_CHANGELOG.md](extraction/PROMPT_CHANGELOG.md) |
 | 提取提示词重写与真实验收 | [EXTRACTION_PROMPT_REWRITE.md](EXTRACTION_PROMPT_REWRITE.md) |
 | 测试分层与默认套件边界 | [TESTING.md](TESTING.md) |
