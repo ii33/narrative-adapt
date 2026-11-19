@@ -1728,6 +1728,157 @@ class NativeBridge(QObject):
                 "gap_count": len(gaps), "has": cls._shot_products(shot),
                 "receipts": len(receipts), "handoff": shot.get("handoff") or None}
 
+    # ---- 标尺上的可拖点：能不能拖、为什么不能，全在 Python 判 ---------------------
+    # 标尺要改的是「时刻」，而「时刻的主人」不止一个：静帧、命名时刻、关键帧计划。
+    # 谁做主由 storyboard_operations 的既有规则决定（绑了命名时刻的帧改时刻必须走
+    # update_marker，直接 move_keyframe 会被拒），所以这里把「拖动会走哪几条路」一并
+    # 算给界面：QML 只提交与重画，不重新推断规则——同一口径两处实现迟早不一致。
+    #
+    # 声音节拍与机位点本轮只显示不可拖：它们各有自己的编辑入口（声音编辑器、机位
+    # 关键帧、预演绑定），从标尺上顺手改会绕开那些入口自己的校验。既然不可拖，就把
+    # 原因写出来，免得点了没反应、看着像坏了。
+    SOUND_CUE_READONLY = "声音节拍由声音编辑器管（镜内时刻与命名时刻的绑定都在那里改），本轮不从标尺拖"
+    CAMERA_KEY_READONLY = "机位点由机位关键帧与预演绑定管，本轮不从标尺拖"
+    DRAG_APPROVED = "本场已定案：请先解除定案，再改这一镜的时间轴"
+
+    @staticmethod
+    def _shot_aspect_ratio(shot: dict) -> str:
+        """画幅只认镜头字段（与 storyboard_operations._shot_aspect 同一来源）。
+
+        老工程没有这个字段：返回空串，界面显示「画幅未写」，而不是替它猜一个 16:9。
+        """
+        for field in ("aspect_ratio", "frame_aspect"):
+            value = shot.get(field)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    @staticmethod
+    def _shot_segment_limit(board: dict) -> int:
+        """单段上限：场级可配，配坏了只落回默认值——详情面板不是校验器。
+
+        校验器（validate_timeline）会拒掉非法配置；这里要是照抄那套抛错，一个坏配置
+        就能让整张镜头表打不开，而详情本来只是「读出来给人看」。
+        """
+        from .storyboard_operations import DEFAULT_MAX_SEGMENT_MS
+
+        limit = board.get("timeline_max_segment_ms", DEFAULT_MAX_SEGMENT_MS)
+        return limit if type(limit) is int and 1 <= limit <= 600000 else DEFAULT_MAX_SEGMENT_MS
+
+    @classmethod
+    def _shot_keyframe_points(cls, shot: dict, layouts: dict, *, approved: bool) -> list[dict]:
+        """标尺上的关键帧点：时刻、命名、这一刻有没有框图、能不能拖、拖动走哪些路。
+
+        三条路都来自既有规则：
+        * 绑了命名时刻的静帧（marker_id）只能经 update_marker 改时刻；
+        * 没绑标记的静帧走 move_keyframe；
+        * 显式计划行还要一起走 update_timeline_keyframe——只挪静帧的话，标尺是按计划
+          画的，那一刻的竖线不会动，用户会以为没保存。
+        没有显式计划（计划是从静帧推导的）时就没有计划行可改，只挪静帧。
+        """
+        duration = shot.get("duration_ms") or 0
+        frames: dict[int, dict] = {}
+        for frame in shot.get("keyframes") or []:
+            frames.setdefault(frame.get("offset_ms", 0), frame)
+        plan_explicit = not (shot.get("timeline_derived") or {}).get("keyframes", True)
+        rows = []
+        for row in (shot.get("timeline") or {}).get("keyframes") or []:
+            offset = row.get("offset_ms", 0)
+            frame = frames.get(offset) or {}
+            marker_id = frame.get("marker_id") or ""
+            moves = []
+            if frame:
+                moves.append("update_marker" if marker_id else "move_keyframe")
+            if plan_explicit:
+                moves.append("update_timeline_keyframe")
+            # 末帧边界：静帧必须落进 [0, duration)（与 timing_conflicts 同一条线），
+            # 只有计划行时可以落在时长上（validate_timeline 允许 offset == duration）。
+            ceiling = duration - 1 if frame else duration
+            reason = cls.DRAG_APPROVED if approved else ""
+            rows.append({"offset_ms": offset,
+                         "moment_name": row.get("moment_name", ""),
+                         "description": row.get("description", ""),
+                         "frame_id": frame.get("id", ""),
+                         "marker_id": marker_id,
+                         "has_layout": offset in layouts,
+                         "draggable": not reason, "reason": reason, "moves": moves,
+                         "min_offset_ms": 0, "max_offset_ms": max(0, ceiling)})
+        return rows
+
+    @classmethod
+    def _shot_segment_rows(cls, board: dict, shot: dict, *, approved: bool
+                           ) -> tuple[list[list[int]], list[dict], bool, list[dict]]:
+        """段（原始 [start,end] 表）、段的可显示行、段是不是显式存的、每条内部边界的可拖范围。
+
+        段端点必须落在已有关键帧上、且每段不超过单段上限（validate_timeline 的既有
+        约束）。所以「把边界挪到别处」只能是「把边界上的那个关键帧挪到别处，并把分段
+        表钉成显式」——这里给出每一条边界能落到哪个区间，写的时候两件事一起提交。
+        """
+        timeline = shot.get("timeline") or {}
+        segments = [[int(seg[0]), int(seg[1])] for seg in timeline.get("segments") or []]
+        explicit = not (shot.get("timeline_derived") or {}).get("segments", True)
+        limit = cls._shot_segment_limit(board)
+        anchors = {row.get("offset_ms", 0) for row in timeline.get("keyframes") or []}
+        anchors |= {frame.get("offset_ms") for frame in shot.get("keyframes") or []}
+        # 显式分段要求每个端点都落在关键帧上（validate_timeline 的既有约束）。推导出来的
+        # 分段常把镜头首尾（0 与时长）当端点，而它们未必是关键帧——这时把这张表写成显式
+        # 会被拒，所以拖动只能挪走边界上的关键帧，分段继续按关键帧推导。
+        storable = bool(segments) and all(seg[0] in anchors for seg in segments) and segments[-1][1] in anchors
+        rows = [{"index": index, "start_ms": seg[0], "end_ms": seg[1], "explicit": explicit}
+                for index, seg in enumerate(segments)]
+        edges = []
+        # 只给内部边界：整镜的首尾边界拖开会在镜头开头或结尾留下没人管的一段，
+        # 那不是「分段更自由」，而是把时间轴弄出一个谁也读不到的洞。
+        for index in range(1, len(segments)):
+            left, right, at = segments[index - 1][0], segments[index][1], segments[index][0]
+            # 边界不必吸附到现有关键帧：那一刻的关键帧会跟着一起挪，挪完它自己就是端点。
+            low = max(left + 1, right - limit)
+            high = min(right - 1, left + limit)
+            if approved:
+                reason = cls.DRAG_APPROVED
+            elif low > high:
+                reason = f"相邻两段已顶到单段上限{limit}ms：边界往哪边挪都会超限"
+            else:
+                reason = ""
+            becomes_explicit = not explicit and storable
+            edges.append({"index": index, "at_ms": at, "min_ms": low, "max_ms": high,
+                          "draggable": not reason, "reason": reason,
+                          "becomes_explicit": becomes_explicit,
+                          "hint": ("拖动会把分段从推导变成显式：之后不再随关键帧自动推导"
+                                   if becomes_explicit else
+                                   ("拖动会挪走边界上的关键帧，分段仍按关键帧推导" if not explicit else ""))})
+        return segments, rows, explicit, edges
+
+    @classmethod
+    def _shot_cue_rows(cls, shot: dict) -> list[dict]:
+        """声音节拍：时刻、来源（命名时刻／自己的时刻／没时刻）与标签。
+
+        binding 说出「这一刻是谁定的」：绑了命名时刻的节拍会随标记走，改时刻得去声音
+        编辑器；没时刻的节拍在尺上画不出来，所以 offset_ms 是 None 而不是 0——
+        0 会被画成一个真的落在镜头开头的声音。
+        """
+        cues = []
+        sounds = {row.get("id"): row for row in shot.get("sounds") or []}
+        for cue in (shot.get("timeline") or {}).get("sound_cues") or []:
+            sound = sounds.get(cue.get("sound_id")) or {}
+            if sound.get("marker_id"):
+                binding = "marker"
+            elif sound.get("time_ms") is not None:
+                binding = "own"
+            else:
+                binding = "none"
+            cues.append({"sound_id": cue.get("sound_id", ""), "offset_ms": cue.get("offset_ms"),
+                         "binding": binding, "kind": cue.get("kind") or "",
+                         "label": cue.get("label") or sound.get("label") or "",
+                         "draggable": False, "reason": cls.SOUND_CUE_READONLY})
+        return cues
+
+    @classmethod
+    def _shot_camera_rows(cls, shot: dict) -> list[dict]:
+        return [{"keyframe_id": row.get("keyframe_id", ""), "offset_ms": row.get("offset_ms", 0),
+                 "draggable": False, "reason": cls.CAMERA_KEY_READONLY}
+                for row in (shot.get("timeline") or {}).get("camera_keys") or []]
+
     @Slot(str, result="QVariantMap")
     def shotTable(self, unit_id: str) -> dict:
         """一镜一行的表：顺序即镜头顺序，index 从 1 起（人读的镜号）。"""
@@ -1752,7 +1903,12 @@ class NativeBridge(QObject):
 
     @Slot(str, str, result="QVariantMap")
     def shotDetail(self, unit_id: str, shot_id: str) -> dict:
-        """选中镜的全部只读细节：时间轴、关键帧计划、需求与绑定、缺口、回执。"""
+        """选中镜的全部只读细节：时间轴、关键帧计划、需求与绑定、缺口、回执。
+
+        另给标尺拖动要用的三组派生字段：keyframes（可拖点与它们的 moves/上下界）、
+        segments/segment_edges（段与内部边界）、sound_cues/camera_keys（只显示不可拖，
+        带原因）。能不能拖、为什么不能都在这里判好，界面不重新推断规则。
+        """
         try:
             view = self._shot_views(unit_id)
         except Exception as exc:  # noqa: BLE001
@@ -1771,6 +1927,10 @@ class NativeBridge(QObject):
         shot = next(row for row in board.get("shots") or [] if row.get("id") == shot_id)
         elements = shot.get("asset_elements") or shot.get("visual_elements") or []
         needs = gaps.get("needs") or []
+        layouts = self._shot_layouts(shot)
+        approved = board.get("approved") is True
+        segments, segment_rows, segments_explicit, edges = self._shot_segment_rows(
+            board, shot, approved=approved)
         return {"ok": True, "error": "", "unit_id": board.get("unit_id", unit_id),
                 "revision": board.get("revision", 0), "title": view["title"],
                 "approved": board.get("approved") is True,
@@ -1804,7 +1964,17 @@ class NativeBridge(QObject):
                 "layouts": [{"offset_ms": offset, "hash": row.get("hash", ""), "layout": row}
                             for offset, row in sorted(self._shot_layouts(shot).items())],
                 "receipts": self._shot_receipts(shot, view["receipts"]),
-                "has": self._shot_products(shot)}
+                "has": self._shot_products(shot),
+                # 标尺上要拖的东西：点、段、段边界、节拍。能不能拖与为什么不能都在这里判好，
+                # 界面只负责画与提交（一次拖动只提交一次，见页面里的 commitKeyframeDrag）。
+                "aspect_ratio": self._shot_aspect_ratio(shot),
+                "keyframes": self._shot_keyframe_points(shot, layouts, approved=approved),
+                "segments": segment_rows,
+                "segments_explicit": segments_explicit,
+                "segment_edges": edges,
+                "max_segment_ms": self._shot_segment_limit(board),
+                "sound_cues": self._shot_cue_rows(shot),
+                "camera_keys": self._shot_camera_rows(shot)}
 
     @Slot(str, str, int, result="QVariantMap")
     def shotLayout(self, unit_id: str, shot_id: str, offset_ms: int) -> dict:
@@ -1864,6 +2034,319 @@ class NativeBridge(QObject):
         return {"ok": False, "error": message, "unit_id": "", "revision": 0, "title": "",
                 "scene_number": "", "approved": False, "total_duration_ms": 0,
                 "unit_gap_count": 0, "counts": {}, "rows": []}
+
+    # ---- 镜头表：写（拖时刻、拖段边界、产图、预演） -------------------------------
+    # 为什么这几个写槽位同步返回、不走 _project_task：一次拖动或一次按钮点击只提交一次，
+    # 界面要立刻知道「写没写成、为什么没写成」再决定刷新还是回弹；写成异步回调，
+    # 松手后的标尺会先弹回原处再跳过去。写的是本地 sqlite 里的一块 JSON，耗时毫秒级
+    # （慢的是产图里的网络请求，见 runGenerationTask 的说明）。
+    #
+    # 这些操作不进 storyboardAction 的界面白名单：那条通道是分镜页既有的异步契约，
+    # 返回 {token, result|error}；把「ok/warnings/output_path」硬塞进去，会让两种
+    # 失败语义混在一起。它们各自有专用槽位，失败一律 ok:false + 中文原因。
+    def _shot_write_failed(self, exc: Exception, **extra) -> dict:
+        """写槽位的统一失败出口：ok:false + 可直接显示的中文原因，并报 errorOccurred。"""
+        message = str(exc) or exc.__class__.__name__
+        self.errorOccurred.emit(self.SHOT_TABLE_KIND, message)
+        return {"ok": False, "error": message, **extra}
+
+    @Slot(str, str, int, int, result="QVariantMap")
+    def moveShotKeyframe(self, unit_id: str, shot_id: str, offset_ms: int, new_offset_ms: int) -> dict:
+        """把标尺上某一刻的关键帧挪到新时刻；一次拖动只写一次。
+
+        走哪条路由既有规则决定（见 _shot_keyframe_points 的 moves）：绑了命名时刻的帧
+        换算成标记时刻写 update_marker，静帧写 move_keyframe，显式计划行写
+        update_timeline_keyframe。越界、撞点、已定案都只回 ok:false + 中文原因，
+        界面刷新后仍看到原来的时刻——不能出现「拖了但没写进去，画面却动了」。
+        """
+        try:
+            ops = project_catalog.open_graph_project(self._project())
+            board = ops.read_storyboard(unit_id)
+            shot = next(row for row in board.get("shots") or [] if row.get("id") == shot_id)
+        except StopIteration:
+            return self._shot_write_failed(ValueError("该镜头不属于本场，可能已被删除或换了场次；请刷新镜头表"))
+        except Exception as exc:  # noqa: BLE001 - 写槽位照例不把异常抛进 QML 事件循环
+            return self._shot_write_failed(exc)
+        approved = board.get("approved") is True
+        point = next((row for row in self._shot_keyframe_points(shot, self._shot_layouts(shot), approved=approved)
+                      if row["offset_ms"] == offset_ms), None)
+        if point is None:
+            return self._shot_write_failed(ValueError(
+                f"标尺上没有{offset_ms}ms这一刻的关键帧；请刷新镜头表后再拖"))
+        if not point["draggable"]:
+            return self._shot_write_failed(ValueError(point["reason"]))
+        duration = shot.get("duration_ms") or 0
+        if not 0 <= new_offset_ms <= point["max_offset_ms"]:
+            tail = (f"（这一镜时长{duration}ms，静帧不能落在时长上）" if point["frame_id"] and point["max_offset_ms"] < duration
+                    else f"（这一镜时长{duration}ms）")
+            return self._shot_write_failed(ValueError(
+                f"镜内时刻须在0至{point['max_offset_ms']}ms之间{tail}"))
+        if new_offset_ms == offset_ms:
+            return {"ok": True, "error": "", "notice": "", "via": [], "unit_id": unit_id,
+                    "shot_id": shot_id, "offset_ms": offset_ms, "revision": board.get("revision", 0)}
+        taken = {row.get("offset_ms") for row in (shot.get("timeline") or {}).get("keyframes") or []}
+        taken |= {frame.get("offset_ms") for frame in shot.get("keyframes") or []}
+        if new_offset_ms in taken:
+            return self._shot_write_failed(ValueError(
+                f"{new_offset_ms}ms 上已经有另一条关键帧：两个点不能并成一个，请先挪开或删掉那一个"))
+        changes, marker_id = [], point["marker_id"]
+        if point["frame_id"]:
+            if marker_id:
+                # 既有规则：绑了命名时刻的帧，时刻的主人是那个标记；帧的镜内时刻由
+                # resolve_markers 按「标记时刻 − 动作起点」重算，所以这里换算成标记时刻。
+                action_start = shot.get("action_start_ms") or 0
+                changes.append({"op": "update_marker", "marker_id": marker_id,
+                                "time_ms": action_start + new_offset_ms})
+            else:
+                changes.append({"op": "move_keyframe", "shot_id": shot_id,
+                                "frame_id": point["frame_id"], "offset_ms": new_offset_ms})
+        if "update_timeline_keyframe" in point["moves"]:
+            changes.append({"op": "update_timeline_keyframe", "shot_id": shot_id,
+                            "offset_ms": offset_ms, "new_offset_ms": new_offset_ms})
+        try:
+            written = ops.apply_storyboard_changes(unit_id, board.get("revision", 0), changes)
+        except Exception as exc:  # noqa: BLE001
+            return self._shot_write_failed(exc)
+        marker_name = next((row.get("name", "") for row in written.get("markers") or []
+                            if row.get("id") == marker_id), "") if marker_id else ""
+        via = "命名时刻" + (f"「{marker_name}」" if marker_name else "") if marker_id else "关键帧"
+        return {"ok": True, "error": "",
+                "notice": f"已把{offset_ms}ms的帧挪到{new_offset_ms}ms（经{via}）",
+                "via": point["moves"], "unit_id": unit_id, "shot_id": shot_id,
+                "offset_ms": new_offset_ms, "frame_id": point["frame_id"], "marker_id": marker_id,
+                "revision": written.get("revision", 0)}
+
+    @Slot(str, str, int, int, result="QVariantMap")
+    def moveShotSegmentEdge(self, unit_id: str, shot_id: str, index: int, new_offset_ms: int) -> dict:
+        """把第 index 条段边界挪到新时刻：连带挪边界上的关键帧，并把分段写成显式。
+
+        为什么连带挪关键帧：段端点必须落在已有关键帧上、每段不超过单段上限
+        （validate_timeline 的既有约束），所以「边界挪到别处」只能是「那一刻的关键帧
+        挪到别处，顺手把分段表钉下来」。推导分段一拖就变成显式表——这正是页面上那句
+        提示要说的事（按下时显示一行字，不弹对话框）。
+        """
+        try:
+            ops = project_catalog.open_graph_project(self._project())
+            board = ops.read_storyboard(unit_id)
+            shot = next(row for row in board.get("shots") or [] if row.get("id") == shot_id)
+        except StopIteration:
+            return self._shot_write_failed(ValueError("该镜头不属于本场，可能已被删除或换了场次；请刷新镜头表"))
+        except Exception as exc:  # noqa: BLE001
+            return self._shot_write_failed(exc)
+        approved = board.get("approved") is True
+        segments, _, explicit, edges = self._shot_segment_rows(board, shot, approved=approved)
+        edge = next((row for row in edges if row["index"] == index), None)
+        if edge is None:
+            return self._shot_write_failed(ValueError("标尺上没有这条段边界（整镜首尾不可拖）；请刷新镜头表后再拖"))
+        if not edge["draggable"]:
+            return self._shot_write_failed(ValueError(edge["reason"]))
+        if not edge["min_ms"] <= new_offset_ms <= edge["max_ms"]:
+            return self._shot_write_failed(ValueError(
+                f"这条段边界须落在{edge['min_ms']}至{edge['max_ms']}ms之间"
+                f"（两侧段长不能超{self._shot_segment_limit(board)}ms，也不能越过相邻边界）"))
+        point = next((row for row in self._shot_keyframe_points(
+            shot, self._shot_layouts(shot), approved=approved) if row["offset_ms"] == edge["at_ms"]), None)
+        if point is None or not point["moves"]:
+            return self._shot_write_failed(ValueError(
+                f"这条段边界（{edge['at_ms']}ms）上没有可移动的关键帧；请刷新镜头表后再拖"))
+        taken = {row.get("offset_ms") for row in (shot.get("timeline") or {}).get("keyframes") or []}
+        taken |= {frame.get("offset_ms") for frame in shot.get("keyframes") or []}
+        if new_offset_ms in taken:
+            return self._shot_write_failed(ValueError(
+                f"{new_offset_ms}ms 上已经有另一条关键帧：两个点不能并成一个，请先挪开或删掉那一个"))
+        changes = []
+        marker_id = point["marker_id"]
+        if point["frame_id"]:
+            if marker_id:
+                action_start = shot.get("action_start_ms") or 0
+                changes.append({"op": "update_marker", "marker_id": marker_id,
+                                "time_ms": action_start + new_offset_ms})
+            else:
+                changes.append({"op": "move_keyframe", "shot_id": shot_id,
+                                "frame_id": point["frame_id"], "offset_ms": new_offset_ms})
+        if "update_timeline_keyframe" in point["moves"]:
+            changes.append({"op": "update_timeline_keyframe", "shot_id": shot_id,
+                            "offset_ms": edge["at_ms"], "new_offset_ms": new_offset_ms})
+        written_segments = []
+        if explicit or edge["becomes_explicit"]:
+            # 显式分段必须跟着改：只挪关键帧会被「端点必须落在关键帧上」拒掉。
+            # 推导分段只有在整张表都能落到关键帧上时才写成显式，否则继续推导。
+            written_segments = [list(seg) for seg in segments]
+            written_segments[index - 1][1] = new_offset_ms
+            written_segments[index][0] = new_offset_ms
+            changes.append({"op": "set_timeline_segments", "shot_id": shot_id,
+                            "segments": written_segments})
+        try:
+            written = ops.apply_storyboard_changes(unit_id, board.get("revision", 0), changes)
+        except Exception as exc:  # noqa: BLE001
+            return self._shot_write_failed(exc)
+        notice = f"段边界已挪到{new_offset_ms}ms（边界上的关键帧一起挪了）"
+        if edge["becomes_explicit"]:
+            notice += "；分段从此变成显式，不再随关键帧自动推导"
+        return {"ok": True, "error": "", "notice": notice, "index": index, "at_ms": new_offset_ms,
+                "became_explicit": edge["becomes_explicit"], "via": point["moves"],
+                "segments": written_segments,
+                "unit_id": unit_id, "shot_id": shot_id, "revision": written.get("revision", 0)}
+
+    @Slot(str, str, int, str, str, result="QVariantMap")
+    def runGenerationTask(self, unit_id: str, shot_id: str, offset_ms: int, kind: str, prompt: str) -> dict:
+        """按技能声明的生成工作流真跑一次生成，并把结果绑回这一帧。
+
+        warnings 原样带回界面：技能里那些这轮没生效的项（workflow.params 没有透传
+        通道、工作流文件不存在、视频不读 ComfyUI 工作流）是「配了却没效果」的唯一
+        解释，界面必须逐条显示，不能只报一句成功。
+
+        失败一律 ok:false：执行器保证失败不绑定、旧图保留，界面因此不得按「已出图」
+        改写产物状态——只要 ok 不是 true，output_path 就当作没有。
+        """
+        base = {"ok": False, "error": "", "warnings": [], "output_path": "", "bound_to": "",
+                "skill": {}, "provider": {}, "unit_id": unit_id, "shot_id": shot_id,
+                "offset_ms": offset_ms, "kind": kind, "revision": 0}
+        try:
+            ops = project_catalog.open_graph_project(self._project())
+            board = ops.read_storyboard(unit_id)
+            result = ops.run_generation_task(unit_id, board.get("revision", 0), kind,
+                                             shot_id, offset_ms, prompt or "")
+        except Exception as exc:  # noqa: BLE001 - 技能缺失/输入不合法/服务失败都从这里出去
+            message = str(exc) or exc.__class__.__name__
+            self.errorOccurred.emit(self.SHOT_TABLE_KIND, message)
+            return base | {"error": message}
+        return base | {"ok": True, "error": "",
+                       "warnings": list(result.get("warnings") or []),
+                       "output_path": result.get("output_path") or "",
+                       "bound_to": result.get("bound_to", "") or "",
+                       "skill": result.get("skill") or {},
+                       "provider": result.get("provider") or {},
+                       "revision": result.get("storyboard_revision", 0),
+                       "started_at": result.get("started_at", ""),
+                       "finished_at": result.get("finished_at", "")}
+
+    @Slot(str, result="QVariantMap")
+    def readPrevis(self, unit_id: str) -> dict:
+        """本场有没有预演、有哪些机位、哪几镜已经绑好。
+
+        「本场还没有预演工程」不算错误（与 shotLayout 同一口径）：它只说明还没把
+        .director 放进来，报成错误会让用户以为界面坏了；真读不出来（文件坏、多文件
+        没指定场景）才走 errorOccurred。
+        """
+        base = {"ok": False, "error": "", "hint": "", "available": False, "unit_id": unit_id,
+                "scene_id": "", "name": "", "duration_s": 0, "fps": 0, "aspect": "",
+                "cameras": [], "bindings": [], "files": [], "path": ""}
+        try:
+            ops = project_catalog.open_graph_project(self._project())
+        except Exception as exc:  # noqa: BLE001
+            # base 里 error 是空串：先摊 base 再盖失败的 error，否则原因会被空串盖掉。
+            return base | self._shot_write_failed(exc)
+        try:
+            info = ops.read_previs(unit_id)
+        except Exception as exc:  # noqa: BLE001
+            message = str(exc) or exc.__class__.__name__
+            if message.startswith("本场还没有预演工程"):
+                return base | {"error": message,
+                               "hint": "把 DirectorDesk 导出的 .director 放进本场预演目录，再来绑机位"}
+            return base | self._shot_write_failed(exc)
+        return base | {"ok": True, "available": True, "error": "",
+                       "scene_id": info.get("scene_id", "") or "",
+                       "name": info.get("name", "") or "",
+                       "duration_s": info.get("duration_s", 0) or 0,
+                       "fps": info.get("fps", 0) or 0,
+                       "aspect": info.get("aspect", "") or "",
+                       "path": info.get("path", "") or "",
+                       "files": info.get("files") or [],
+                       "cameras": [{"camera_id": row.get("camera_id", ""),
+                                    "name": row.get("name", ""),
+                                    "focal": row.get("focal", 0)}
+                                   for row in info.get("cameras") or []],
+                       "bindings": info.get("bindings") or []}
+
+    @Slot(str, str, int, bool, result="QVariantMap")
+    def capturePrevisLayout(self, unit_id: str, shot_id: str, offset_ms: int,
+                           overwrite: bool = False) -> dict:
+        """按这一镜绑定的预演机位，把镜内 offset_ms 投影成框图写进去。
+
+        「还没绑机位」「预演目录里没有工程」「这一帧已有手工框图」都不是程序故障，
+        而是需要用户做一件具体事的状态：所以除执行器原样的中文原因，还给一句 hint
+        （去预演页绑定／先放 .director／确认覆盖），界面照着说，用户照着做。
+        """
+        base = {"ok": False, "error": "", "hint": "", "unit_id": unit_id, "shot_id": shot_id,
+                "offset_ms": offset_ms, "revision": 0, "camera_id": "", "scene_id": "",
+                "time_ms": 0, "framing": "", "hash": "", "projected": 0}
+        try:
+            ops = project_catalog.open_graph_project(self._project())
+            result = ops.capture_previs_layout(unit_id, shot_id, offset_ms, overwrite)
+        except Exception as exc:  # noqa: BLE001
+            message = str(exc) or exc.__class__.__name__
+            self.errorOccurred.emit(self.SHOT_TABLE_KIND, message)
+            return base | {"error": message, "hint": self._previs_hint(message)}
+        layout = result.get("layout") or {}
+        return base | {"ok": True, "error": "",
+                       "revision": result.get("revision", 0),
+                       "camera_id": result.get("camera_id", "") or "",
+                       "scene_id": result.get("scene_id", "") or "",
+                       "time_ms": result.get("time_ms", 0) or 0,
+                       "framing": result.get("framing", "") or "",
+                       "hash": layout.get("hash", "") or "",
+                       "projected": len(result.get("projected") or []),
+                       "notice": f"已按预演机位写下{offset_ms}ms的框图"
+                                 f"（{result.get('framing') or '未判景别'}，"
+                                 f"{len(result.get('projected') or [])}个主体）"}
+
+    @staticmethod
+    def _previs_hint(message: str) -> str:
+        """把执行器的原因翻成「下一步做什么」；认不出的原因不硬编指引。"""
+        table = (("还没有绑定预演机位", "去预演页把这一镜绑到某台机位（选中机位后绑定这一镜），回来再出框图"),
+                 ("本场还没有预演工程", "先把 DirectorDesk 导出的 .director 放进本场预演目录，再去预演页绑机位"),
+                 ("已有手工框图", "这一帧的手工框图不会被机器盖掉：确认要换成预演投影时再点一次「覆盖」"),
+                 ("没有关键帧", "先在分镜稿里给这一刻建关键帧，再回来出框图"))
+        return next((hint for key, hint in table if key in message), "")
+
+    @Slot(str, str, "QVariant", "QVariant", "QVariant", result="QVariantMap")
+    def setShotPrevis(self, unit_id: str, shot_id: str, camera_id, scene_id, time_offset_ms) -> dict:
+        """把这一镜绑到预演里的某台机位；camera_id 传 null/空串即解除绑定。
+
+        只写 shot.previs，不动框图与时间轴；机位是否真在预演场景里由执行器核对，
+        免得存进一个点开就报错的映射（这条校验不在这里重复实现）。
+        """
+        camera = camera_id if isinstance(camera_id, str) and camera_id.strip() else None
+        scene = scene_id if isinstance(scene_id, str) and scene_id.strip() else None
+        try:
+            offset = None if time_offset_ms is None else int(time_offset_ms)
+        except (TypeError, ValueError):
+            return self._shot_write_failed(ValueError("time_offset_ms 须为大于等于0的整数毫秒"))
+        base = {"ok": False, "error": "", "unit_id": unit_id, "shot_id": shot_id,
+                "camera_id": camera or "", "scene_id": scene or "", "revision": 0, "previs": {}}
+        try:
+            ops = project_catalog.open_graph_project(self._project())
+            board = ops.read_storyboard(unit_id)
+            written = ops.set_shot_previs(unit_id, board.get("revision", 0), shot_id,
+                                          camera_id=camera, scene_id=scene,
+                                          time_offset_ms=offset)
+        except Exception as exc:  # noqa: BLE001
+            return base | self._shot_write_failed(exc)
+        previs = written.get("previs") or {}
+        return base | {"ok": True, "error": "", "revision": written.get("revision", 0),
+                       "previs": previs,
+                       "notice": (f"已把这一镜绑到预演机位{previs.get('camera_id', '')}"
+                                  f"（镜内0ms＝预演{previs.get('time_offset_ms', 0)}ms）"
+                                  if previs else "已解除这一镜的预演机位绑定")}
+
+    @Slot("QVariantMap", result=str)
+    def storyboardSelectionLabel(self, selection: dict) -> str:
+        """把「镜头表定位预演」的选择记录摊成一行回执。
+
+        预演页不接场景参数（它自己从预演工程里列场景），所以这行文字是唯一的定位
+        回执：没有它，用户点了「预演」看到的还是上一次的场景，会以为定位没生效。
+        缺 unit_id/shot_id 就返回空串——没有定位时不留一条空条。
+        """
+        data = selection if isinstance(selection, dict) else {}
+        unit, shot = data.get("unit_id") or "", data.get("shot_id") or ""
+        if not unit or not shot:
+            return ""
+        scene = data.get("unit_label") or unit
+        index = data.get("shot_index") or 0
+        label = f"第 {index} 镜" if index else shot
+        title = f"（{data['shot_title']}）" if data.get("shot_title") else ""
+        return f"当前定位：{scene} / {label}{title} @ {data.get('offset_ms') or 0}ms"
 
     # ---- 三维预演台（DirectorDesk 构建产物） -------------------------------------
     # 产物是 ES module，只能走本地 http；这里给出地址并接管它的“保存/导出”下载。

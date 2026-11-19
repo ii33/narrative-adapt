@@ -17,6 +17,13 @@ Item {
     property string currentScene: ""
     property bool ready: false
 
+    // 镜头表「定位预演」只做两件事：记下这一镜、切页。预演页自己不接场景参数
+    // （它从预演工程里列场景），所以这里给一行定位回执——否则用户点了「预演」，
+    // 看到的还是上一次的场景，会以为定位没生效。文字由桥按同一份选择记录生成。
+    readonly property var selection: (root.app && root.app.storyboardSelection)
+                                     ? root.app.storyboardSelection : ({})
+    readonly property string selectionText: root.app ? bridge.storyboardSelectionLabel(root.selection) : ""
+
     function openWorkspace() {
         var info = bridge.previsWorkspace()
         available = info.available === true
@@ -139,6 +146,31 @@ Item {
                 anchors.topMargin: 12
                 anchors.right: parent.right
                 anchors.rightMargin: 12
+            }
+        }
+
+        // 定位回执：只在从镜头表「定位预演」切过来时出现。
+        // 一行字，不占操作区；没有定位就不显示，不留一条空条。
+        Rectangle {
+            objectName: "previsLocationBar"
+            Layout.fillWidth: true
+            Layout.preferredHeight: 24
+            visible: root.selectionText.length > 0
+            color: "transparent"
+
+            DragHandle {
+                app: root.app
+                anchors.fill: parent
+            }
+
+            Label {
+                objectName: "previsLocationReceipt"
+                anchors.left: parent.left
+                anchors.leftMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.selectionText
+                color: root.app.theme.muted
+                font.pixelSize: 11
             }
         }
 
