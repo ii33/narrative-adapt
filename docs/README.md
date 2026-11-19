@@ -58,6 +58,7 @@
 | 工具参数与返回 | [AGENT_API.md](features/AGENT_API.md) |
 | 外部 MCP 服务器（配置在哪、字段含义、工具命名、只读判定、缓存与刷新、排查） | [MCP_CLIENT.md](MCP_CLIENT.md) |
 | 预演页与主程序之间的 JS 接口层（实时改场景、抓帧） | [PREVIS_HOST_API.md](PREVIS_HOST_API.md) |
+| 预演补丁的固化与重放（vendored 改动、`snapshot`/`apply`/`verify`/`build`、上游升级流程与风险） | [PREVIS_PATCH.md](PREVIS_PATCH.md) |
 | 技能（是什么、和会话模板的区别、字段、界面怎么建、会话里怎么生效、冻结会话限制、内置清单） | [SKILLS.md](SKILLS.md) |
 | 公开仓库范围 | [PUBLIC_REPOSITORY.md](features/PUBLIC_REPOSITORY.md) |
 | 上下文运行时 | [context-runtime.md](features/context-runtime.md) |

@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "generated_at": "2026-11-19T10:59:04Z",
+  "upstream_version": "0.5.5+revision.1",
+  "upstream_short_version": "0.5.5.1",
+  "summary": "narrative-adapt 预演接口层补丁：v1 宿主接口（src/host/*、startup/main/scene-workspace/storage 接入）+ v2 可读性层（src/readability.ts 及 engine/main 改造）；改因见 PATCHES.md 与 docs/PREVIS_HOST_API.md。package.json 的 pnpm.onlyBuiltDependencies 是让 esbuild 能就地构建所需，不是行尾噪音。",
+  "source": {
+    "repo": ".runtime/vendor/director-desk",
+    "detected_by": "--files（手工指定）"
+  },
+  "files": [
+    {
+      "path": "PATCHES.md",
+      "origin": "added",
+      "bytes": 13507,
+      "sha256": "55825affef01a9e8439813b2d9e0b01b56bde884140c5cd4cd530693d687b078"
+    },
+    {
+      "path": "package.json",
+      "origin": "modified",
+      "bytes": 2142,
+      "sha256": "d846312731159dca7f75906e8311e525a143fbbcccab2f2875d8a6ea2ce2c8e0"
+    },
+    {
+      "path": "src/engine.ts",
+      "origin": "modified",
+      "bytes": 60595,
+      "sha256": "33e341e7b067832c9819b0cf22956e12790956d960b8a2f6d5ec468da8f1b939"
+    },
+    {
+      "path": "src/host/host-api.ts",
+      "origin": "added",
+      "bytes": 18807,
+      "sha256": "cec1f111fa26e77ce389ee78e885916082559a21bb94b23a57cc805d3a067180"
+    },
+    {
+      "path": "src/host/host-scene.ts",
+      "origin": "added",
+      "bytes": 21599,
+      "sha256": "07fbfac3b9417eccb05c0d1b54c930741fae31b6d21058816cf2ba46b9f55690"
+    },
+    {
+      "path": "src/main.ts",
+      "origin": "modified",
+      "bytes": 31670,
+      "sha256": "8cf1fae84bc5aab6652869cb7bf2551b77d1f82470c0b9641b5ed339ddb6ccec"
+    },
+    {
+      "path": "src/readability.ts",
+      "origin": "added",
+      "bytes": 27593,
+      "sha256": "288c7e6f78d5b9fe9c487a05bdca85a51006b1acc6faf2c88de52c1ab920b698"
+    },
+    {
+      "path": "src/scenes/scene-workspace.ts",
+      "origin": "modified",
+      "bytes": 4263,
+      "sha256": "cad10a0b9481be24203aafc273826ccc5de76a1257dffc1ebea5fc78a4ac99a5"
+    },
+    {
+      "path": "src/startup.ts",
+      "origin": "modified",
+      "bytes": 644,
+      "sha256": "ee1a55e763d7f2b585bf1c105b0dea80f5180808f20834eac0ca02ec07393322"
+    },
+    {
+      "path": "src/storage.ts",
+      "origin": "modified",
+      "bytes": 3154,
+      "sha256": "8bcfb1f1bb3bd72619212e31754563b3ede938e3c31590a34d5e50a4238f916d"
+    }
+  ]
+}
