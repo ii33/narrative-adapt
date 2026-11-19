@@ -21,6 +21,7 @@ from .content_errors import (
     content_write,
 )
 from .graph_store import GraphStore, active_connection, on_rollback
+from .previs_tools import StoryboardPrevisMixin
 from .project_package import layout
 from .readable_ids import allocate_id
 from .storyboard_art import StoryboardArtMixin, changed_basis_keys
@@ -591,7 +592,7 @@ def _apply(db, board, change, block_ids):
                 drop_layout(shot, previous)
 
 
-class StoryboardOperationsMixin(StoryboardAssetsMixin, StoryboardPanelsMixin, StoryboardArtMixin, StoryboardVideoMixin):
+class StoryboardOperationsMixin(StoryboardPrevisMixin, StoryboardAssetsMixin, StoryboardPanelsMixin, StoryboardArtMixin, StoryboardVideoMixin):
     _store: GraphStore
 
     def read_storyboard_usage_tips(self):

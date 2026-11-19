@@ -49,6 +49,18 @@ def register(Tool, register_tool, validate):
         "unit_id": text | {"required": True}})
     add("read_storyboard_layout", "只读某镜全部框图与哈希：每项offset_ms＋hash＋layout（camera机位、objects的归一化bbox[x0,y0,x1,y1]与景深、unmet_needs、source）。供界面画近似previs与助手核对这一帧该有什么；不修改任何数据", {
         "unit_id": text | {"required": True}, "shot_id": text | {"required": True}})
+    add("read_previs", "只读本场三维预演工程（DirectorDesk导出的.director）摘要：场景名、时长、机位数、实体数、cut数、文件路径，附摄影机清单、场景清单与已绑定的镜头。工程放在 工程数据根/previs/<场次编号>/ 下，一个场景一个文件；可用环境变量NARRATIVE_PREVIS_PROJECT_ROOT换根目录。目录里有多个文件时用scene_id选。找不到时说明该放哪里", {
+        "unit_id": text | {"required": True},
+        "scene_id": {"type": ["string", "null"], "description": "场景编号或文件名；目录里只有一个.director时可省略"}})
+    add("set_shot_previs", "把镜头绑到预演里的某台摄影机，只写shot.previs={scene_id,camera_id,time_offset_ms}，不动框图与时间轴。time_offset_ms是镜头第0毫秒对应的预演时刻，镜内第N毫秒即预演time_offset_ms+N；省略为0。camera_id传null取消绑定（不能省略以免误解绑）。场景目录里有多个.director时用scene_id选", {
+        "unit_id": text | {"required": True}, "revision": integer | {"required": True},
+        "shot_id": text | {"required": True}, "camera_id": {"type": ["string", "null"], "description": "预演摄影机编号；显式传null取消绑定，不能省略"},
+        "scene_id": {"type": ["string", "null"], "description": "预演场景编号或文件名；目录里只有一个.director时可省略"},
+        "time_offset_ms": {"type": ["integer", "null"], "description": "镜头第0毫秒对应的预演时刻（毫秒），省略为0"}}, writes=True)
+    add("capture_previs_layout", "按该镜已绑定的预演机位，把镜内offset_ms这一帧投影成框图并写入（source=previs，bbox为归一化画面坐标、depth为米，机位来自预演、景别按主体占比粗判）。offset_ms须是该镜已有关键帧。已有手工框图默认不覆盖，确认替换传overwrite=true；上次预演投影可直接重算", {
+        "unit_id": text | {"required": True}, "shot_id": text | {"required": True},
+        "offset_ms": integer | {"required": True},
+        "overwrite": {"type": "boolean", "description": "默认false：保留已有手工框图"}}, writes=True)
     add("read_storyboard_assets_context", "读取选中镜头及正文、全部资产对象目录，供逐镜分析人物具体形象/物品/场景；不自动建对象或猜测缺失内容。返回的asset_needs是本场需求与两类缺口摘要（需求未落实／引用悬空），只读", {
         "unit_id": text | {"required": True}, "shot_ids": strings | {"required": True, "minItems": 1}})
     add("submit_storyboard_assets", "只保存所选镜头的待确定元素需求，不创建或选择资产。每个visual_elements项仅含kind/name/usage，程序添加未绑定状态。保留所有原已确定资产行，新结果替换原未确定行，不按同名合并。允许空列表；必须覆盖shot_ids恰好一次。资产由用户在列表手动选择或建立。内容问题暂存并局部patch_content_submission修补", {

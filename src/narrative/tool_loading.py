@@ -105,7 +105,8 @@ def tool_family(name: str) -> str:
     if registered is not None and registered.scope == 'host':
         return 'host'
     # 生成执行器与框图读写都不带 storyboard 字样，但服务的是分镜业务。
-    if name in {'run_generation_task', 'read_storyboard_layout'} or 'storyboard' in name:
+    if name in {'run_generation_task', 'read_storyboard_layout',
+                'read_previs', 'set_shot_previs', 'capture_previs_layout'} or 'storyboard' in name:
         return 'storyboard'
     if name in {'compile_screenplay', 'export_screenplay'}:
         return 'output'
