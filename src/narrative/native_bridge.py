@@ -8,21 +8,20 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from . import (
     appearance,
-    graph_profile_ops,
-    mcp_client,
-    project_catalog,
     project_package,
     project_removal,
     prompt_registry,
@@ -33,18 +32,115 @@ from . import (
     version,
 )
 from .browse_view import moment_tree
-from .graph_operations import GraphOperations
-from .harness import HarnessRunner, harness_env
 from .native_models import CanvasState, node_detail, search_result
-from .node_material import holds_at
 from .prompt_defaults import DEFAULT_PROMPTS
-from .prompt_settings import effective_prompt
 from .provider_store import GLOBAL_SCOPE, ProviderStore
+
+if TYPE_CHECKING:
+    # 只在类型注解里出现的重模块。本文件有 `from __future__ import annotations`，注解在
+    # 运行时不会被求值，所以这个名字挂在这里不需要 import 任何东西——写在模块顶上的话，
+    # 每次启动都要替注解付 graph_operations 的导入账。
+    from .graph_operations import GraphOperations
 
 _NODE_TYPES = {"person", "group", "item", "location", "event", "action", "scene", "big_event", "storyline", "other"}
 SCREENPLAY_WRITING_PROMPT_VERSION = "screenplay-writing-ui/9"
 
 SCREENPLAY_SCENE_TABLE_RULES = DEFAULT_PROMPTS["scene_table"]["text"]
+
+# -- 惰性导入：只在「某些槽位」用得到的重模块，拖到第一次真用到 ----------------
+#
+# 为什么不在模块顶上 import：graph_profile_ops / project_catalog / harness 会把
+# graph_operations、storyboard_operations、模型网关和 pydantic 一起拉进来，冷启动合计
+# 一千多毫秒。启动时付这笔钱，等于让只想看看界面的用户替「打开工程」「发一句话」这两件
+# 真正的功能买单。改成第一次真用到时才导入：此后 sys.modules 已经缓存，再拿只剩一次
+# 查找；缺依赖时也仍然是在用户真触发那一步报错，而不是界面还开不出来就先崩。
+#
+# 槽位返回值、errorOccurred 的 kind 与触发时机都不受影响：惰性导入抛出的错误会走到各
+# 槽位原有的失败出口（errorOccurred(kind, 原因) 或 ok:false），不会漏进 QML 事件循环。
+
+
+class _LazyModule:
+    """第一次读取属性时才真正 import 的模块代理。
+
+    为什么用代理而不是把二十来个调用点逐个改成函数内 import：那些调用点散在整个文件里，
+    逐个改既会把 diff 铺满全文，也让「谁在什么时候导入」更难看出来。代理只动导入块一处，
+    调用点一个字都不用改，属性查找语义与直接 import 的模块一致：第一次访问时导入，之后
+    就是普通属性查找（模块对象已经缓存住）。
+
+    导入失败翻译成一条中文原因：这些模块第一次被用到时通常在后台线程里（槽位已经把
+    失败报给 errorOccurred），直接甩一条英文 ImportError 上去，用户看不出是缺依赖。
+    """
+
+    __slots__ = ("_module", "_name")
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+        self._module: Any = None
+
+    def _load(self) -> Any:
+        module = self._module
+        if module is None:
+            try:
+                module = import_module(f".{self._name}", __package__)
+            except ImportError as exc:
+                raise RuntimeError(
+                    f"模块 {self._name} 载入失败（{exc}）。依赖没装全，请重新安装后再试："
+                    "uv sync --locked"
+                ) from exc
+            self._module = module
+        return module
+
+    def __getattr__(self, attribute: str) -> Any:
+        return getattr(self._load(), attribute)
+
+    def __repr__(self) -> str:
+        state = "已载入" if self._module is not None else "未载入"
+        return f"<惰性模块 narrative.{self._name}（{state}）>"
+
+
+# 「打开/新建工程」才用得到：连带 graph_operations、storyboard_operations、pydantic。
+project_catalog = _LazyModule("project_catalog")
+# 「全局模型设置」才用得到：连带 harness、模型网关、pydantic。
+graph_profile_ops = _LazyModule("graph_profile_ops")
+# 外部 MCP 服务器：只有打开 MCP 面板/刷新工具时才用得到。它把 urllib.request、
+# http.client 一整套 HTTP 客户端拉进来，两百多毫秒，和启动无关。
+mcp_client = _LazyModule("mcp_client")
+
+
+# HarnessRunner 的真身也在 harness 里（聊天才用得到）。这里留一个占位而不是删掉名字：
+# 测试与外部代码一直用 monkeypatch.setattr(native_bridge, "HarnessRunner", …) 换掉实现，
+# 那条路径读的就是这个模块全局变量，所以运行时仍然必须从这个名字上取值。
+HarnessRunner: Any = None
+
+
+def _harness_runner() -> Any:
+    """取 HarnessRunner，第一次真正起对话时才导入 harness。
+
+    为什么先看全局再导入：被 monkeypatch 换过实现时必须直接用它，不能再导一次把补丁盖掉。
+    导入失败翻译成一条中文原因：这条路径在后台线程里跑，甩一条英文 ImportError 上去没人
+    看得懂是缺依赖。
+    """
+    global HarnessRunner
+    if HarnessRunner is None:
+        try:
+            from .harness import HarnessRunner as runner_class
+        except ImportError as exc:
+            raise RuntimeError(
+                f"聊天运行时载入失败（{exc}）。依赖没装全，请重新安装后再试：uv sync --locked"
+            ) from exc
+        HarnessRunner = runner_class
+    return HarnessRunner
+
+
+def _harness_env(ops):
+    """harness 的 harness_env：同样只有发消息时才用得到，所以第一次用才导入。"""
+    try:
+        from .harness import harness_env
+    except ImportError as exc:
+        raise RuntimeError(
+            f"聊天运行时载入失败（{exc}）。依赖没装全，请重新安装后再试：uv sync --locked"
+        ) from exc
+    return harness_env(ops)
 
 
 # -- 全局 MCP 服务器：界面交上来的那一行怎么变成配置 --------------------------
@@ -392,10 +488,16 @@ class NativeBridge(QObject):
         self._close_assistant()
         # 外部 MCP 服务器是我们自己起的子进程：进程退出前必须收掉，否则每台都会留下
         # 一个没人管的孤儿进程。收尾失败也不能拦住关窗，所以只吞掉异常。
-        try:
-            mcp_client.close()
-        except Exception:  # noqa: BLE001 - 退出路径上不允许再抛
-            pass
+        #
+        # 只在 mcp_client 已经被导入过时才收（不论是谁导入的，所以查 sys.modules 而不是
+        # 查代理自己的状态：tool_loading 等模块也会把 mcp_client 拉进来）：没导入过就说明
+        # 这次运行根本没碰过 MCP，为了「关」而把它导入一遍纯属白花钱；只要它已经进来了，
+        # 就必须照旧收干净——惰性化推迟的是导入时机，不是收尾。
+        if "narrative.mcp_client" in sys.modules:
+            try:
+                mcp_client.close()
+            except Exception:  # noqa: BLE001 - 退出路径上不允许再抛
+                pass
         self._pool.shutdown(wait=False, cancel_futures=True)
 
     def load_appearance(self) -> None:
@@ -2837,6 +2939,10 @@ class NativeBridge(QObject):
         """改一次资料，然后把这一刻的整页发回去：界面只认一种 payload。"""
 
         def work(ops) -> dict:
+            # 资料模块顺带把 content_errors（因此 pydantic）拉进来，两百多毫秒；
+            # 只有真的在改资料时才需要它，所以在这里才导入。
+            from .node_material import holds_at
+
             changed = change(ops)
             if isinstance(changed, dict) and changed.get("status") == "staged":
                 return changed
@@ -2987,7 +3093,7 @@ class NativeBridge(QObject):
     def _attach_conversation_runtime(self, ops, settings, api_key, expected_path):
         from .conversation_runtime import get_runtime
 
-        runtime = get_runtime(ops, settings, api_key, runner_factory=HarnessRunner)
+        runtime = get_runtime(ops, settings, api_key, runner_factory=_harness_runner())
         with self._assistant_lock:
             cancelled = self._closed or self._project_path != expected_path
             if not cancelled:
@@ -3451,7 +3557,7 @@ class NativeBridge(QObject):
                     job["chat_id"] = chat_id
                 publish_event(ops, {"event": "assistant_started", "chat_id": chat_id, "task_id": task_id, "access_mode": access_mode})
                 extraction_granularity = ops.load_project_settings()["extraction_granularity"]
-                settings, api_key, workdir = harness_env(ops)
+                settings, api_key, workdir = _harness_env(ops)
                 runtime = self._attach_conversation_runtime(ops, settings, api_key, path)
                 with self._assistant_lock:
                     job.update(chat_id=chat_id, runtime=runtime)
@@ -3593,7 +3699,7 @@ class NativeBridge(QObject):
                     task_catalog = tool_catalog(access_mode=access_mode)
                     audit["task_tool_names"] = [tool["name"] for tool in task_catalog]
                     session_runner, session = open_conversation_session(
-                        ops, settings, api_key, HarnessRunner,
+                        ops, settings, api_key, _harness_runner(),
                         task_tools=task_catalog, tool_handler=native_call,
                         chat_id=chat_id, prompt_config=audit["prompt_config"], task_id=task_id,
                         access_mode=access_mode, cancel_event=job["cancel"],
@@ -3989,6 +4095,10 @@ class NativeBridge(QObject):
             return
 
         def work(ops) -> dict:
+            # 提示词模块连着 content_errors（因此 pydantic）与 graph_store，两百多毫秒；
+            # 它只在「把一段原文/事件交给协作者」这条路上用得到，所以在这一步才导入。
+            from .prompt_settings import effective_prompt
+
             source = ops.source(source_id)
             start, end = 0, len(source["text"])
             title = source.get("title") or source_id
@@ -4164,6 +4274,9 @@ class NativeBridge(QObject):
             self.errorOccurred.emit("event_actions_task", str(exc))
             return
         def work(ops) -> dict:
+            # 同上：提示词模块在「提取动作」这一步才真正需要。
+            from .prompt_settings import effective_prompt
+
             node = next((row for row in ops.graph_snapshot()["nodes"] if row["id"] == node_id), None)
             if node is None or node.get("node_type") != "event":
                 raise ValueError("动作提取只能针对已存在的event事件")
