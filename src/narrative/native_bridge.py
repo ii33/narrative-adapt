@@ -1553,6 +1553,9 @@ class NativeBridge(QObject):
                     "read_storyboard", "read_storyboard_usage_tips", "check_storyboard", "preview_storyboard", "preview_storyboard_changes", "apply_storyboard_changes",
                     "read_storyboard_assets_context", "submit_storyboard_assets",
                     "create_missing_storyboard_assets",
+                    # 资产需求与框图是分镜的相邻层：镜头表、导演台与助手都要能直接读写，
+                    # 所以走分镜这一条界面通道，而不是另开白名单。
+                    "read_asset_needs", "declare_asset_needs", "read_storyboard_layout",
                     "load_storyboard_camera_presets", "save_storyboard_camera_preset",
                     "read_storyboard_video_settings", "save_storyboard_video_settings", "read_storyboard_video_receipts",
                     "set_storyboard_animation", "render_storyboard_animatic", "attach_storyboard_video", "detach_storyboard_video",
@@ -1593,6 +1596,274 @@ class NativeBridge(QObject):
                 self.resultReady.emit("storyboard", failed(exc))
             return
         self._project_task("storyboard", work)
+
+    # ---- 镜头表（逐镜制作驾驶舱） ------------------------------------------------
+    # 这一层只做「把已经读得到的数据摆成一行一镜」：字段全部在 Python 侧从
+    # read_storyboard / read_asset_needs / read_storyboard_video_receipts 派生，
+    # QML 不解析业务结构，只负责画。
+    #
+    # 为什么是同步槽位：表格与详情都是「点一下就该看见」的只读快照，直接返回
+    # {ok, error, ...} 比再走一趟 resultReady 信道更直接；失败也仍是
+    # errorOccurred("shot_table", …) + ok:false，绝不把异常抛进 QML 事件循环。
+    #
+    # 四个产物的口径（只认存储字段，不猜）：
+    #   layout（框图）＝该镜有结构化框图记录（shot['layouts']，见 storyboard_layout：
+    #                   一帧的机位、主体归一化 bbox、景深、这一帧还缺哪些资产）；
+    #   sketch（素描）＝关键帧绑了由图像服务生成的草图（带 sketch_source 回执）；
+    #   style（风格）＝关键帧有 style_path；
+    #   video（视频）＝镜头已采用视频（selected_video）。
+    # 四者互不约束：没有框图也要能看素描状态，所以这里只报事实，不判「解锁」。
+    SHOT_TABLE_KIND = "shot_table"
+
+    def _shot_views(self, unit_id: str) -> dict:
+        """读一次场次：分镜板 + 缺口视图 + 视频回执 + 场次标题。三个槽位共用同一口径。"""
+        ops = project_catalog.open_graph_project(self._project())
+        board = ops.read_storyboard(unit_id)
+        # 缺口视图是派生结果（asset_needs.gap_view）：需求未落实与引用悬空分开算。
+        gaps = ops.read_asset_needs(unit_id)
+        receipts = ops.read_storyboard_video_receipts(unit_id).get("receipts") or []
+        try:
+            unit = ops.read_script_unit_context(unit_id).get("unit") or {}
+        except Exception:  # noqa: BLE001 - 标题只是表头，读不到不该拖垮整张表
+            unit = {}
+        plan = unit.get("plan") or {}
+        return {"board": board, "gaps": gaps, "receipts": receipts,
+                "title": plan.get("title") or "", "scene_number": unit.get("scene_number") or ""}
+
+    @staticmethod
+    def _shot_layouts(shot: dict) -> dict:
+        """该镜的框图，按镜内时刻索引。
+
+        两个来源合一：存储里的 shot['layouts']（键是时刻字符串），以及 read_storyboard
+        贴在 timeline.keyframes[i].layout 上的读视图——后者只覆盖出现在计划里的时刻，
+        所以存储那一份也要看，免得「有计划外的框」被漏报。
+        """
+        found: dict[int, dict] = {}
+        stored = shot.get("layouts")
+        if isinstance(stored, dict):
+            for key, row in stored.items():
+                if isinstance(row, dict):
+                    try:
+                        found[int(key)] = row
+                    except (TypeError, ValueError):
+                        continue
+        for row in (shot.get("timeline") or {}).get("keyframes") or []:
+            if isinstance(row.get("layout"), dict):
+                found.setdefault(row.get("offset_ms", 0), row["layout"])
+        return found
+
+    @classmethod
+    def _shot_products(cls, shot: dict) -> dict:
+        frames = shot.get("keyframes") or []
+        return {"layout": bool(cls._shot_layouts(shot)),
+                "sketch": any(frame.get("sketch_source") for frame in frames),
+                "style": any(frame.get("style_path") for frame in frames),
+                "video": bool(shot.get("selected_video"))}
+
+    @staticmethod
+    def _shot_receipts(shot: dict, video_receipts: list[dict]) -> list[dict]:
+        """回执：素描生成记录（关键帧里的 sketch_source）＋该镜的视频服务回执。"""
+        rows = []
+        for frame in shot.get("keyframes") or []:
+            source = frame.get("sketch_source") or {}
+            if not source:
+                continue
+            rows.append({"kind": "sketch", "id": frame.get("id", ""),
+                         "offset_ms": frame.get("offset_ms", 0),
+                         "provider": source.get("provider", "") or "",
+                         "job_id": source.get("job_id", "") or ""})
+        for record in video_receipts:
+            if record.get("shot_id") != shot.get("id"):
+                continue
+            rows.append({"kind": "video", "id": record.get("id", ""),
+                         "generation_id": record.get("generation_id", "") or "",
+                         "offset_ms": 0, "provider": "", "job_id": ""})
+        return rows
+
+    @classmethod
+    def _shot_gaps(cls, gaps: dict, shot_id: str, *, scope: str = "shot",
+                   shot: dict | None = None) -> list[dict]:
+        """本镜的缺口清单：镜级需求未落实 + 本镜的引用悬空 + 框图里这一帧还缺的资产。
+
+        场级需求只在本场有引用时才可能落实，混进每一镜的数里会让人以为「每镜都缺」，
+        所以单独走 unit_gaps；镜级缺口只认 scope=shot 的两类，外加框图自带的 unmet_needs
+        （那是**帧级**需求：某一帧要的人物/物品还没绑卡，同样是没落实）。
+        """
+        rows = []
+        for need in gaps.get("needs") or []:
+            if need.get("scope") != scope or need.get("bound_asset_id"):
+                continue
+            if scope == "shot" and need.get("shot_id") != shot_id:
+                continue
+            rows.append({"gap": "unresolved", "scope": scope, "shot_id": need.get("shot_id"),
+                         "kind": need.get("kind", ""), "name": need.get("name", ""),
+                         "variant": need.get("variant", ""), "note": need.get("note", ""),
+                         "message": "需求未落实：还没有任何引用把它绑到资产卡上"})
+        if scope != "shot":
+            return rows
+        for record in gaps.get("dangling") or []:
+            if record.get("shot_id") != shot_id:
+                continue
+            rows.append({"gap": "dangling", "scope": "shot", "shot_id": shot_id, "kind": "",
+                         "name": record.get("name", ""), "asset_id": record.get("asset_id", ""),
+                         "message": record.get("message", "")})
+        if shot is not None:
+            for offset, layout in sorted(cls._shot_layouts(shot).items()):
+                for need in layout.get("unmet_needs") or []:
+                    rows.append({"gap": "frame", "scope": "frame", "shot_id": shot_id,
+                                 "offset_ms": offset, "kind": need.get("kind", ""),
+                                 "name": need.get("name", ""), "variant": need.get("variant", ""),
+                                 "note": need.get("note", ""),
+                                 "message": f"这一帧（{offset}ms）还缺这张资产卡"})
+        return rows
+
+    @classmethod
+    def _shot_row(cls, shot: dict, index: int, gaps: list[dict], receipts: list[dict]) -> dict:
+        timeline = shot.get("timeline") or {}
+        return {"shot_id": shot.get("id", ""), "index": index,
+                "title": shot.get("title", ""), "duration_ms": shot.get("duration_ms", 0),
+                "summary": shot.get("description", "") or shot.get("shot_language", ""),
+                "keyframe_count": len(shot.get("keyframes") or []),
+                "segment_count": len(timeline.get("segments") or []),
+                "gap_count": len(gaps), "has": cls._shot_products(shot),
+                "receipts": len(receipts), "handoff": shot.get("handoff") or None}
+
+    @Slot(str, result="QVariantMap")
+    def shotTable(self, unit_id: str) -> dict:
+        """一镜一行的表：顺序即镜头顺序，index 从 1 起（人读的镜号）。"""
+        try:
+            view = self._shot_views(unit_id)
+        except Exception as exc:  # noqa: BLE001 - 界面槽位不抛异常，只报 ok:false
+            return self._shot_failed(exc)
+        board, gaps = view["board"], view["gaps"]
+        rows = []
+        for index, shot in enumerate(board.get("shots") or [], 1):
+            receipts = self._shot_receipts(shot, view["receipts"])
+            shot_gaps = self._shot_gaps(gaps, shot.get("id", ""), shot=shot)
+            rows.append(self._shot_row(shot, index, shot_gaps, receipts))
+        return {"ok": True, "error": "", "unit_id": board.get("unit_id", unit_id),
+                "revision": board.get("revision", 0), "title": view["title"],
+                "scene_number": view["scene_number"],
+                "approved": board.get("approved") is True,
+                "total_duration_ms": sum(row["duration_ms"] for row in rows),
+                "unit_gap_count": len(self._shot_gaps(gaps, "", scope="unit")),
+                "counts": gaps.get("counts") or {},
+                "rows": rows}
+
+    @Slot(str, str, result="QVariantMap")
+    def shotDetail(self, unit_id: str, shot_id: str) -> dict:
+        """选中镜的全部只读细节：时间轴、关键帧计划、需求与绑定、缺口、回执。"""
+        try:
+            view = self._shot_views(unit_id)
+        except Exception as exc:  # noqa: BLE001
+            return self._shot_failed(exc)
+        board, gaps = view["board"], view["gaps"]
+        index = next((number for number, row in enumerate(board.get("shots") or [], 1)
+                      if row.get("id") == shot_id), 0)
+        if not index:
+            message = "该镜头不属于本场，可能已被删除或已换成别的场次；请刷新镜头表"
+            self.errorOccurred.emit(self.SHOT_TABLE_KIND, message)
+            return {"ok": False, "error": message, "unit_id": board.get("unit_id", unit_id),
+                    "revision": board.get("revision", 0), "shot": {}, "timeline": {},
+                    "timeline_derived": {}, "handoff": None,
+                    "asset_needs": {"unit": [], "shot": []}, "gaps": [], "unit_gaps": [],
+                    "receipts": [], "layouts": [], "has": {}}
+        shot = next(row for row in board.get("shots") or [] if row.get("id") == shot_id)
+        elements = shot.get("asset_elements") or shot.get("visual_elements") or []
+        needs = gaps.get("needs") or []
+        return {"ok": True, "error": "", "unit_id": board.get("unit_id", unit_id),
+                "revision": board.get("revision", 0), "title": view["title"],
+                "approved": board.get("approved") is True,
+                "shot": {"id": shot.get("id", ""), "index": index,
+                         "title": shot.get("title", ""),
+                         "summary": shot.get("description", "") or shot.get("shot_language", ""),
+                         "description": shot.get("description", ""),
+                         "shot_language": shot.get("shot_language", ""),
+                         "sound_notes": shot.get("sound_notes", ""),
+                         "duration_ms": shot.get("duration_ms", 0),
+                         "action_start_ms": shot.get("action_start_ms", 0),
+                         "source_block_ids": list(shot.get("source_block_ids") or []),
+                         "keyframe_count": len(shot.get("keyframes") or []),
+                         "visual_elements": [{"kind": row.get("kind", ""), "name": row.get("name", ""),
+                                              "variant": row.get("variant", ""),
+                                              "usage": row.get("usage", ""),
+                                              "asset_id": row.get("asset_id") or "",
+                                              "label": row.get("label", "") or row.get("name", ""),
+                                              "status": row.get("status", ""),
+                                              "message": row.get("message", "")}
+                                             for row in elements if isinstance(row, dict)],
+                         "asset_elements_status": shot.get("asset_elements_status", "")},
+                "timeline": shot.get("timeline") or {},
+                "timeline_derived": shot.get("timeline_derived") or {},
+                "handoff": shot.get("handoff") or None,
+                "asset_needs": {"unit": [row for row in needs if row.get("scope") == "unit"],
+                                "shot": [row for row in needs if row.get("shot_id") == shot_id]},
+                "gaps": self._shot_gaps(gaps, shot_id, shot=shot),
+                "unit_gaps": self._shot_gaps(gaps, "", scope="unit"),
+                # 框图按时刻列出来：详情面板据此画「这一帧该有什么」，也是近似预演的输入。
+                "layouts": [{"offset_ms": offset, "hash": row.get("hash", ""), "layout": row}
+                            for offset, row in sorted(self._shot_layouts(shot).items())],
+                "receipts": self._shot_receipts(shot, view["receipts"]),
+                "has": self._shot_products(shot)}
+
+    @Slot(str, str, int, result="QVariantMap")
+    def shotLayout(self, unit_id: str, shot_id: str, offset_ms: int) -> dict:
+        """该时刻的框图（结构化构图记录），供详情面板显示「有没有框图」。
+
+        框图是 storyboard_layout 那一层数据（机位、主体归一化 bbox、景深、这一帧还缺
+        哪些资产），不是草图图片；草图另走 sketch_url，两者一起返回，界面不必再读一次。
+
+        「这一帧还没出框图」是正常状态而不是错误：只返回 ok:false + reason 说明为什么，
+        不报 errorOccurred——把它当错误报，用户会以为界面坏了。
+        """
+        base = {"shot_id": shot_id, "offset_ms": offset_ms, "frame_offset_ms": None,
+                "frame_id": "", "hash": "", "layout": {}, "camera": {}, "objects": [],
+                "unmet_needs": [], "sketch_path": "", "sketch_url": "",
+                "style_path": "", "style_url": ""}
+        try:
+            ops = project_catalog.open_graph_project(self._project())
+            shot = next((row for row in ops.read_storyboard(unit_id).get("shots") or []
+                         if row.get("id") == shot_id), None)
+        except Exception as exc:  # noqa: BLE001 - 读不到工程/场次才真的算错
+            message = self._shot_failed(exc)["error"]
+            return base | {"ok": False, "reason": message}
+        if shot is None:
+            return base | {"ok": False, "reason": "该镜头不属于本场，可能已被删除或已换成别的场次"}
+        layouts = self._shot_layouts(shot)
+        frames = shot.get("keyframes") or []
+        plan = (shot.get("timeline") or {}).get("keyframes") or []
+        if not frames and not plan and not layouts:
+            return base | {"ok": False, "reason": "本镜还没有任何关键帧，先在分镜稿里排框"}
+        # 框图的时刻必须落在关键帧上：显式框位（keyframes）与关键帧计划（timeline）都算。
+        # 先认精确时刻，再退到「该时刻正在播的那一帧」，与预演里取当前帧的口径一致。
+        offsets = sorted({row.get("offset_ms", 0) for row in frames}
+                         | {row.get("offset_ms", 0) for row in plan} | set(layouts))
+        chosen = offset_ms if offset_ms in offsets else next(
+            (value for value in reversed(offsets) if value <= offset_ms), None)
+        if chosen is None:
+            return base | {"ok": False,
+                           "reason": f"本镜第一帧在 {offsets[0]}ms，比 {offset_ms}ms 还晚，此刻没有帧"}
+        frame = next((row for row in frames if row.get("offset_ms") == chosen), None) or {}
+        sketch = frame.get("sketch_path") or ""
+        style = frame.get("style_path") or ""
+        found = {"frame_offset_ms": chosen, "frame_id": frame.get("id", ""),
+                 "sketch_path": sketch, "sketch_url": self.storyboardImageUrl(sketch),
+                 "style_path": style, "style_url": self.storyboardImageUrl(style)}
+        layout = layouts.get(chosen)
+        if layout is None:
+            return base | found | {"ok": False,
+                                   "reason": "这一帧还没有框图：先写下这一帧的站位、机位与景深"}
+        return base | found | {"ok": True, "reason": "", "hash": layout.get("hash", ""),
+                               "layout": layout, "camera": layout.get("camera") or {},
+                               "objects": layout.get("objects") or [],
+                               "unmet_needs": layout.get("unmet_needs") or []}
+
+    def _shot_failed(self, exc: Exception) -> dict:
+        message = str(exc) or exc.__class__.__name__
+        self.errorOccurred.emit(self.SHOT_TABLE_KIND, message)
+        return {"ok": False, "error": message, "unit_id": "", "revision": 0, "title": "",
+                "scene_number": "", "approved": False, "total_duration_ms": 0,
+                "unit_gap_count": 0, "counts": {}, "rows": []}
 
     # ---- 三维预演台（DirectorDesk 构建产物） -------------------------------------
     # 产物是 ES module，只能走本地 http；这里给出地址并接管它的“保存/导出”下载。

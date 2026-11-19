@@ -101,6 +101,10 @@ ApplicationWindow {
         {key: "assets", label: "资产", hint: "形象、物品与视觉设定"},
         {key: "screenplay", label: "剧本", hint: "选段、场表与正文"},
         {key: "storyboard", label: "分镜稿", hint: "分镜文字、图格与导出"},
+        // 镜头表夹在分镜稿与导演台之间：先按场排镜（分镜稿），再逐镜看状态（镜头表），
+        // 最后进导演台调调度。图标借用分镜稿那一档——NavigationIcon 里还没有它自己的
+        // 画法，而逐镜看的就是同一批分镜格。
+        {key: "shot_table", label: "镜头表", hint: "逐镜制作与状态", icon: "storyboard"},
         {key: "director", label: "导演台", hint: "调度、机位与动态预演"},
         {key: "previs", label: "预演", hint: "三维预演工作区"},
         {key: "screenplay_structure", label: "结构", hint: "集、幕与段落"},
@@ -384,7 +388,8 @@ ApplicationWindow {
                                     color: app.currentPage === modelData.key
                                         ? app.theme.accentSoft : "transparent"
                                 }
-                                NavigationIcon {name:modelData.key;ink:app.currentPage===modelData.key?app.theme.accent:app.theme.ink;width:24;height:24;anchors.verticalCenter:parent.verticalCenter;x:app.navigationCollapsed?(parent.width-width)/2:10}
+                                // 图标默认按导航键名画；个别页面没有自己的画法时用 icon 指定借哪一档。
+                                NavigationIcon {name:modelData.icon||modelData.key;ink:app.currentPage===modelData.key?app.theme.accent:app.theme.ink;width:24;height:24;anchors.verticalCenter:parent.verticalCenter;x:app.navigationCollapsed?(parent.width-width)/2:10}
                                 Column {
                                     visible:!app.navigationCollapsed
                                     anchors.left: parent.left
@@ -528,6 +533,7 @@ ApplicationWindow {
                         Loader { active: app.pageVisited("assets") || app.currentPage === "assets"; sourceComponent: assetsPageComponent }
                         Loader { active: app.pageVisited("screenplay") || app.currentPage === "screenplay"; sourceComponent: screenplayPageComponent }
                         Loader { active: app.pageVisited("storyboard") || app.currentPage === "storyboard"; sourceComponent: storyboardPageComponent }
+                        Loader { id: shotTableLoader; active: app.pageVisited("shot_table") || app.currentPage === "shot_table"; sourceComponent: shotTablePageComponent }
                         Loader { active: app.pageVisited("director") || app.currentPage === "director"; sourceComponent: directorPageComponent }
                         Loader { active: app.pageVisited("previs") || app.currentPage === "previs"; sourceComponent: previsPageComponent }
                         Loader { active: app.pageVisited("screenplay_structure") || app.currentPage === "screenplay_structure"; sourceComponent: structurePageComponent }
@@ -614,6 +620,7 @@ ApplicationWindow {
     Component { id: assetsPageComponent; AssetsPage { app: windowRoot } }
     Component { id: screenplayPageComponent; ScreenplayPage { app: windowRoot } }
     Component { id: storyboardPageComponent; StoryboardPage { app: windowRoot } }
+    Component { id: shotTablePageComponent; ShotTablePage { app: windowRoot } }
     Component { id: directorPageComponent; DirectorDeskPage { app: windowRoot } }
     // 预演页用 source 懒加载：QtWebEngineQuick 只在那一个文件里 import，
     // 没有 WebEngine 的环境下这里只会是 Error 状态，不影响其它页面。
