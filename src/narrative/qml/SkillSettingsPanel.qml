@@ -63,14 +63,19 @@ ColumnLayout {
     spacing: 8
 
     Component.onCompleted: panel.reload()
-    // 页面常驻在 StackLayout 里：只有真正露出来才去读文件，每次进来也顺手刷新一遍，
-    // 免得显示的是上次进来时的旧值（手改过配置文件时尤其明显）。
-    onVisibleChanged: if (visible) panel.reload()
+    // 切回来不重读：以前每次露出来都 reload 一遍（注释还写着「顺手刷新一遍」），
+    // 切分组再回来就像又加载了一次。现在只在这一节第一次露出来时读，之后靠
+    // 「重新载入」按钮与保存/删除后的 skillsChanged 把最新内容读回来。
+    onVisibleChanged: if (visible) panel.ensureLoaded()
+
+    property bool loadedOnce: false
+    function ensureLoaded() { if (loadedOnce) return; panel.reload() }
 
     onDraftFamiliesChanged: panel.refreshPreview()
     onDraftToolsChanged: panel.refreshPreview()
 
     function reload() {
+        loadedOnce = true
         var snapshot = bridge.skills()
         panel.skills = snapshot.skills || []
         panel.promptKeys = snapshot.prompt_keys || []

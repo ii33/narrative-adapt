@@ -16,6 +16,8 @@ Item {
     property var persons: []
     property var edges: []
     property string notice: ""
+    // 上次读数据时的工程数据戳（见 Main.qml 的 pageStale）。
+    property real loadedStamp: 0
     property var graphLayout: ({positions: {}, fitScale: 1})
     property var graphLabelLayout: ({edges: [], fitScale: 1})
     property bool labelGeometryReady: false
@@ -78,7 +80,17 @@ Item {
 
     function load() {
         page.notice = ""
+        // 这次读数据时的工程数据戳：关系图的人与边都由属性记录推出来，别的页面写一条
+        // 关系就会推后这个戳，切回来时据此决定要不要重读（见 Main.qml 的 pageStale）。
+        loadedStamp = bridge.dataStamp()
         bridge.loadRelations(page.cutId, page.relatedOnly)
+    }
+
+    // 切回来时走这里：第一次可见要读；之后只有工程库在离开期间被写过才重读。
+    // 没写过就什么都不做：缩放、平移、选中的关系都还在这一个实例上。
+    function ensureLoaded() {
+        if (!app.pageStale(loadedStamp)) return
+        page.load()
     }
 
     function apply(payload) {
@@ -102,7 +114,8 @@ Item {
     }
 
     // 切到这一页才去问：启动时还没有打开工程，问了只会报错。
-    onVisibleChanged: if (visible) load()
+    // 不再「每次可见就读一遍」：切走再切回时数据没变就不读（连布局也不重算）。
+    onVisibleChanged: if (visible) page.ensureLoaded()
 
     // 懒创建：这一页被创建时已经是当前页，不会触发 onVisibleChanged。
     Component.onCompleted: if (visible) load()

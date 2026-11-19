@@ -65,7 +65,9 @@ ApplicationWindow {
     property string diagnosticLine: "就绪 · " + app.mode
         + " · 工程 " + launcherPage.projectCount
         + " · 收到 " + resultKinds.length + " 条"
-        + (busy ? " · 处理中 " + bridge.pendingKinds().join(",") : "")
+        // bridge 在窗口拆解时会先变成 null（它被销毁时上下文属性跟着清空），
+        // 这条绑定会再求值一次；不守卫就是一条 TypeError 日志噪声。
+        + (busy && bridge ? " · 处理中 " + bridge.pendingKinds().join(",") : "")
         + " · " + clock
 
     // 每秒一跳。跳晚了就说明界面线程被占住了——那才是「点了很久才响应」的原因。
@@ -155,6 +157,16 @@ ApplicationWindow {
         if (!loader || loader.item) return
         loader.setSource(Qt.resolvedUrl(file), { "app": windowRoot })
     }
+
+    // -- 切回来不重读 ---------------------------------------------------
+    // 懒创建之后，切走再切回会让页面的 visible 变回真（Item 的 visible 沿父链传播：
+    // 隐藏 Loader，它里面的页面也跟着 visible=false），页面若在 visibleChanged 里
+    // 无条件 load()，用户看到的就是「又加载了一次」——这中间数据一个字都没变。
+    // 规则只有一条，所以写在窗口这一层，由页面调用：页面记住「上次读数据时的数据戳」
+    // （bridge.dataStamp()，工程库文件的最后改动时间），回来时只有戳变了才重读。
+    // 戳为 0（没有工程或读不到）按「不知道」算，仍然重读——宁可多读一次，
+    // 也不让页面停在旧值上。刷新按钮与写操作的回复不经过这里，照常强制重读。
+    function pageStale(stamp) { return stamp <= 0 || stamp !== bridge.dataStamp() }
 
     // -- 预演页预热 ------------------------------------------------------
     // 工程打开、界面空闲 300 ms 后「假装访问过一次」预演页：Loader 照常实例化
@@ -673,9 +685,17 @@ ApplicationWindow {
                     // 换到页面区上的抽屉里。同一实例，宽度跨过阈值时对话内容不丢。
                     // 面板收起时不建：它那 60 KB 的 QML 建一遍要 200 ms 上下（实测），
                     // 而启动时它一定是收起的。第一次打开建出来，之后开合只是显隐。
+                    // 这个 Loader **不能有自己的尺寸**（原来这里写着 anchors.fill: parent，
+                    // 那正是「面板打开了却看不见」的根因）：Loader 自己一旦有宽高，
+                    // 它会把这份宽高写给建出来的 item，而且之后每次自己宽高变化都再写一次
+                    // （见 .runtime/spike/loader_sizing_semantics.qml 的对照实验：Loader 有尺寸时，
+                    // item.width 始终等于 Loader 宽度，组件里写的 width 表达式被顶掉）。
+                    // 而这里的 Loader 挂在停靠槽里：停靠槽只在宽窗口才是可见的 SplitView 列，
+                    // 抽屉/启动页时宽度是 0 —— 面板就被写成 0×0，「可见」但一个像素都不占。
+                    // 所以 Loader 只负责创建，几何全部交给面板自己的 anchors + width 绑定
+                    // （面板的 parent 已经是两个宿主之一，不依赖 Loader 的大小）。
                     Loader {
                         id: assistantLoader
-                        anchors.fill: parent
                         active: app.assistantVisited
                         sourceComponent: assistantPanelComponent
                     }
@@ -687,14 +707,29 @@ ApplicationWindow {
                             // 会解析成面板自己的 app 属性（那时还是 undefined），
                             // 连带 parent/pageId 一起失效。
                             parent: windowRoot.assistantDocked ? assistantDockSlot : assistantOverlay
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            anchors.right: parent.right
+                            // 上下右贴住父项，宽度两种窗口各一套（高度由上下锚定得出）：
+                            // 停靠时吃满那一列（扣掉岛屿内缩），抽屉时上限 360 并右对齐。
+                            // 三种窗口都要能打开，靠的就是这条绑定活在面板自己身上，
+                            // 而不是被 Loader 的尺寸顶掉（见上面 Loader 处的注释）：
+                            // · 宽窗口停靠 —— 父项是停靠列，宽度随列宽走；
+                            // · 窄窗口抽屉 —— 父项是覆盖层，360 封顶、右边贴住；
+                            // · 启动页里被创建（停靠列宽 0）—— 先算 0，等进了工作区
+                            //   停靠列被 SplitView 摆出宽度，绑定自动重算出非零宽度。
+                            // `parent ? ... : 0` 不是多余的兜底：绑定可能在 parent 落定前
+                            // 被求值一次，条件里读 parent 同时保证了「parent 一变就重算」，
+                            // 否则一次求值失败绑定就死在那儿，面板永远 0 宽。
+                            // Math.max(0, ...) 兜住「窗口窄到连两倍内缩都放不下」的极端值。
+                            anchors.top: parent ? parent.top : undefined
+                            anchors.bottom: parent ? parent.bottom : undefined
+                            anchors.right: parent ? parent.right : undefined
                             anchors.margins: windowRoot.islandInset
-                            width: windowRoot.assistantDocked
-                                ? parent.width - 2 * windowRoot.islandInset
-                                : Math.min(360 + (windowRoot.islandsMode ? windowRoot.theme.island_gap : 0),
-                                           parent.width - 2 * windowRoot.islandInset)
+                            width: parent
+                                ? Math.max(0, windowRoot.assistantDocked
+                                    ? parent.width - 2 * windowRoot.islandInset
+                                    : Math.min(360 + (windowRoot.islandsMode && windowRoot.theme
+                                                      ? windowRoot.theme.island_gap : 0),
+                                               parent.width - 2 * windowRoot.islandInset))
+                                : 0
                             app: windowRoot
                             pageId: windowRoot.currentPage
                             visible: windowRoot.assistantOpen

@@ -18,6 +18,8 @@ Rectangle {
     property string nodeId: ""
     property var payload: ({assets: [], nodes: [], moments: [], revision: 0})
     property var card: ({})
+    // 上次读资产清单时的工程数据戳（见 Main.qml 的 pageStale）。
+    property real loadedStamp: 0
     property var images: []
     property var references: []
     property bool editing: false
@@ -30,7 +32,19 @@ Rectangle {
         var start = moments.find(function(m) { return m.id === n.point_id })
         return !current || !start || start.sort_id <= current.sort_id
     })
-    function reload() { bridge.loadAssets(category, category === "material" ? "" : moment, category === "material" ? "" : nodeId, domain) }
+    function reload() {
+        // 这次读数据时的工程数据戳（见 Main.qml 的 pageStale）：切走再切回时据此
+        // 判断要不要重读，没变就不读——正在编辑的表单也不会被覆盖。
+        loadedStamp = bridge.dataStamp()
+        bridge.loadAssets(category, category === "material" ? "" : moment, category === "material" ? "" : nodeId, domain)
+    }
+
+    // 切回来时走这里：第一次可见要读；之后只有工程库在离开期间被写过才重读。
+    // 没写过时连正在编辑的卡片都不动：那才是「切回来还在原处」。
+    function ensureLoaded() {
+        if (!app.pageStale(loadedStamp)) return
+        page.reload()
+    }
     function edit(c) {
         if(!contentSubmission.restoring)contentSubmission.begin()
         card = c; titleEdit.text = c.title || ""; detailEdit.text = c.detail || ""; promptEdit.text = c.prompt || ""
@@ -41,7 +55,7 @@ Rectangle {
         editing = true
     }
     function imageUrl(path) { return path.indexOf("file:") === 0 ? path : "file:///" + path.replace(/\\/g, "/") }
-    onVisibleChanged: if (visible && app.mode === "workspace") reload()
+    onVisibleChanged: if (visible && app.mode === "workspace") page.ensureLoaded()
 
     // 懒创建：创建时一出生就可见，不会触发 onVisibleChanged。
     Component.onCompleted: if (visible && app.mode === "workspace") reload()

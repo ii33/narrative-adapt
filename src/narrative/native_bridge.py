@@ -722,6 +722,36 @@ class NativeBridge(QObject):
     def pendingKinds(self) -> list[str]:
         return self.pendingOperations()
 
+    @Slot(result=float)
+    def dataStamp(self) -> float:
+        """工程数据的「最后改动时间」（秒，0 表示没有工程或读不到）。
+
+        只读、同步、不排队：几个 stat，不碰数据、不进线程池。
+
+        为什么要有它：页面懒创建之后，切走再切回会让页面的 `visible` 变真（Item 的
+        visible 沿父链传播），页面若在 visibleChanged 里无条件 load()，用户看到的
+        就是「又加载了一次」——数据其实一个字都没变。页面拿这个戳跟「上次读数据时的
+        戳」比：相等说明离开这段时间里工程库没被写过，不必重读；不等才重读。
+
+        为什么用文件时间戳而不是修订号：修订号只覆盖图，原文、剧本、资产各有各的
+        revision，页面要回答的是「有没有东西被写过」，一个库文件的时间戳就够。
+        工程库是单个 sqlite（WAL 模式下还有 -wal），写入会把 mtime 推后，纯读取
+        不动 mtime（实测见 .runtime/spike/probe_data_stamp.py）。
+        """
+        if self._project_path is None:
+            return 0.0
+        try:
+            package = project_package.layout(self._project_path)
+        except (OSError, ValueError, KeyError):
+            return 0.0
+        stamp = 0.0
+        for candidate in (package.db, package.db.with_name(package.db.name + "-wal")):
+            try:
+                stamp = max(stamp, candidate.stat().st_mtime_ns / 1_000_000_000)
+            except OSError:
+                continue
+        return stamp
+
     def _project(self) -> Path:
         if self._project_path is None:
             raise ValueError("请先打开图项目")

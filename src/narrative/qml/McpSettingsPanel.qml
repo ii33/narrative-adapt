@@ -46,9 +46,16 @@ ColumnLayout {
     spacing: 8
 
     Component.onCompleted: panel.reload()
-    onVisibleChanged: if (visible) panel.reload()
+    // 切回来不重读：这一节读的是配置文件，本面板自己的保存与「刷新工具」都会把最新
+    // 快照读回来（见 ensureLoaded）。以前这里每次露出来都 reload 一遍，切换分组再
+    // 回来界面看着像又加载了一次，其实一个字节都没变。
+    onVisibleChanged: if (visible) panel.ensureLoaded()
+
+    property bool loadedOnce: false
+    function ensureLoaded() { if (loadedOnce) return; panel.reload() }
 
     function reload() {
+        loadedOnce = true
         var snapshot = bridge.mcpServers()
         panel.servers = snapshot.servers || []
         panel.configPath = snapshot.path || ""

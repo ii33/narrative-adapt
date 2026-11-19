@@ -27,14 +27,31 @@ HEIGHT = 780
 MINIMUM_WIDTH_OVERRIDE = 900
 COLUMN_HANDLE = 12
 
-# 回归基线：紧凑模式 + 1127 + 协作者收起，改动前（HEAD 4eb3843）实测的三栏宽度。
-# 紧凑模式必须与改动前逐像素一致，这几个数字动了就说明包裹改坏了原有布局。
+# 回归基线：紧凑模式 + 1127 + 协作者收起时三栏的宽度。
+#
+# 这几个数字曾经是「改动前 HEAD 4eb3843」实测的 885/190/240/431。那时 browse 页根
+# 内容边距是 20，页面区宽 925，所以列区 = 925 - 2×20 = 885。之后 327eccc（「右上角
+# 控件回到各页标题行，只把位置对齐」）刻意把各页根内容外边距统一成 12（原先 12/16/20
+# 混用），目的是让八个页面右上角那组控件落在同一坐标。页面区宽度没动（仍是 925），
+# 列区于是变成 925 - 2×12 = 901；多出来的这 16 全部落到 fillWidth 的详情列
+# （431 → 447），定宽的分类 190 与列表 240 一动不动。
+#
+# 所以这 16 是那次「外边距统一」的正当结果，不是走形：12px 仍是真实内缩，内容既没
+# 贴边也没被裁切（.runtime/spike 下有四组截图）。不是删说明文本导致滚动条消失——
+# 列区的父链里根本没有滚动容器（见 test_islands_columns_are_inset_half_a_gap_from_the_page_card
+# 的注释），页内唯一的滚动容器 browseDetailScroll 长在详情栏内部。
+# 基线按 327eccc 之后的实测重置；将来再动页面外边距，这几个数字必须跟着给出理由。
 COMPACT_1127_BASELINE = {
-    "browseColumns": 885.0,
+    "browseColumns": 901.0,
     "browseCategories": 190.0,
     "browseListColumn": 240.0,
-    "browseDetail": 431.0,
+    "browseDetail": 447.0,
 }
+
+# 页面根内容外边距：327eccc 把各页统一成 12（browse 页原来是 20）。三栏整体从这条
+# 边距的内侧起算，岛屿模式再加半条 island_gap——两处断言共用这一个数，改了边距就
+# 只有一个地方要动。
+PAGE_CONTENT_INSET = 12
 
 
 def _item(window, name):
@@ -43,6 +60,11 @@ def _item(window, name):
         f"找不到 objectName={name}：QML 结构变了，先看 Main.qml / BrowsePage.qml"
     )
     return found
+
+
+def _find(window, name):
+    """可能不存在的对象（懒创建）：与 _item 的区别是找不到时返回 None。"""
+    return window.findChild(object, name)
 
 
 def _width(item):
@@ -219,12 +241,13 @@ def test_assistant_dock_and_overlay_are_mutually_exclusive(layout_ui, assistant)
     dock = _item(window, "assistantDock")
     overlay = _item(window, "assistantOverlay")
     scrim = _item(window, "assistantScrim")
-    panel = _item(window, "assistantPanel")
     page_area = _item(window, "workspacePageArea")
+    # 面板是「第一次打开才建」的：收起态下它本来就不该存在，所以只断言容器不露。
+    panel = _find(window, "assistantPanel") if assistant else None
     docked = bool(window.property("assistantDocked"))
     assert docked is (window.width() >= layout["assistant_dock_min_width"])
     area = _scene_rect(page_area, window)
-    panel_rect = _scene_rect(panel, window)
+    panel_rect = _scene_rect(panel, window) if panel is not None else None
     gap = layout["island_gap"] if mode == "islands" else 0
     # 岛屿模式整块比页面卡片内缩半条缝，面板自己还留一个 islandInset。
     inset = gap / 2 if mode == "islands" else 0
@@ -306,7 +329,7 @@ def test_1360_drawer_and_1380_dock_share_one_column_form(mode, tmp_path_factory)
 
 
 def test_compact_1127_columns_match_the_frozen_baseline(tmp_path_factory):
-    """紧凑模式 + 1127 + 协作者收起：三栏宽度与改动前逐项一致（回归基线）。"""
+    """紧凑模式 + 1127 + 协作者收起：三栏宽度与冻结基线逐项一致（见基线处的说明）。"""
     tmp = tmp_path_factory.mktemp("baseline-compact-1127")
     monkeypatch = pytest.MonkeyPatch()
     try:
@@ -327,19 +350,20 @@ def test_compact_1127_columns_match_the_frozen_baseline(tmp_path_factory):
                 "紧凑模式 1127 下的三栏宽度偏离了改动前基线："
                 f"实测 {actual}，基线 {COMPACT_1127_BASELINE}"
             )
-            # 岛屿模式那 5px 内缩在紧凑模式必须为 0，否则卡片边框对不上。
+            # 岛屿模式那半条缝在紧凑模式必须为 0，否则卡片边框对不上：列区相对页面
+            # 卡片只内缩页面自己的内容边距（PAGE_CONTENT_INSET，不是旧的 20）。
             columns = _item(window, "browseColumns")
             origin = _scene_rect(columns, window)
             page_rect = _scene_rect(_item(window, "browsePage"), window)
-            assert origin["x"] - page_rect["x"] == pytest.approx(20, abs=1)
-            assert page_rect["right"] - origin["right"] == pytest.approx(20, abs=1)
+            assert origin["x"] - page_rect["x"] == pytest.approx(PAGE_CONTENT_INSET, abs=1)
+            assert page_rect["right"] - origin["right"] == pytest.approx(PAGE_CONTENT_INSET, abs=1)
     finally:
         monkeypatch.undo()
 
 
 @pytest.mark.parametrize("mode", MODES)
 def test_islands_columns_are_inset_half_a_gap_from_the_page_card(mode, tmp_path_factory):
-    """岛屿模式：三列整体从页面卡片边框内缩 island_gap/2，不贴边。"""
+    """岛屿模式：三列整体从页面卡片边框内缩「内容边距 + island_gap/2」，不贴边。"""
     from narrative import theme
 
     gap = theme.LAYOUT["island_gap"]
@@ -360,8 +384,10 @@ def test_islands_columns_are_inset_half_a_gap_from_the_page_card(mode, tmp_path_
 
             columns = _scene_rect(_item(window, "browseColumns"), window)
             page_rect = _scene_rect(_item(window, "browsePage"), window)
-            # 页面自己的 ColumnLayout 有 20 的内容边距；岛屿模式再加半条缝。
-            inset = 20 + (gap / 2 if mode == "islands" else 0)
+            # 页面自己的 ColumnLayout 有 PAGE_CONTENT_INSET(12) 的内容边距；岛屿模式
+            # 再加半条缝。列区父链上没有任何 ScrollView/Flickable，所以这 12px 不会
+            # 因为「页里有没有滚动条」而变——滚动条只出现在详情栏内部的 ScrollView 里。
+            inset = PAGE_CONTENT_INSET + (gap / 2 if mode == "islands" else 0)
             assert columns["x"] - page_rect["x"] == pytest.approx(inset, abs=1)
             assert page_rect["right"] - columns["right"] == pytest.approx(inset, abs=1)
             # 列把手的竖线：岛屿模式靠把手宽度形成缝隙，不画线。

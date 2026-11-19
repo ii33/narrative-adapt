@@ -70,6 +70,7 @@ Item {
         {key:"temperature", label:"温度（空为服务默认）", name:"projectTemperature", type:"number"}
     ]
     function load() {
+        loadedOnce = true
         // 嵌进设置页以后，mode 是 "settings" 而不是 "workspace"：不能再靠 mode 判断
         // 有没有工程，只认当前工程路径。没开工程就什么都不读，空工程态点进这一节
         // 也不会去打 bridge 报一串「请先打开图项目」。
@@ -104,7 +105,12 @@ Item {
     }
     Timer{id:keyStatusRefresh;interval:250;onTriggered:page.refreshKeyStatus()}
     Component.onCompleted: page.load()
-    onVisibleChanged: if (visible) page.load()
+    // 切回来不重读：这一节的配置在文件里（换不了「数据戳」），而它自己的保存会带回复
+    // 把表单写回、换工程也会重读（见 onProjectChanged）。以前每次露出来都 load() 一遍，
+    // 除了重新弹一次「已读过的密钥」，用户看不到任何变化。
+    onVisibleChanged: if (visible) page.ensureLoaded()
+    property bool loadedOnce: false
+    function ensureLoaded() { if (loadedOnce) return; page.load() }
     Connections {
         target: app
         function onProjectChanged() {

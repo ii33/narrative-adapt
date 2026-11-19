@@ -37,6 +37,8 @@ Item {
     property var rangePreview:({})
     property int rangePreviewRequest:0
     property bool pendingRangeRefresh:false
+    // 上次读剧本工作区时的工程数据戳（见 Main.qml 的 pageStale）。
+    property real loadedStamp:0
     readonly property bool hasTimelineNodes:((workspace.timeline||{}).nodes||[]).length>0
     property string pendingSpanName:""
     property var pendingRebind:({})
@@ -143,7 +145,11 @@ Item {
         if(screenplay.id) walk("screenplay",screenplay.id,0)
         return out
     }
-    function load() { if(visible && app.mode==="workspace") bridge.loadScreenplayWorkspace(app.screenplayId || "") }
+    function load() { if(visible && app.mode==="workspace") { loadedStamp=bridge.dataStamp(); bridge.loadScreenplayWorkspace(app.screenplayId || "") } }
+    // 切回来时走这里：第一次可见要读；之后只有工程库在离开期间被写过才重读
+    // （见 Main.qml 的 pageStale）。没写过就什么都不读：选中的段/单元/正文块、
+    // 区间预览与时间轴草稿都还在这一个实例上，不会被一次多余的重读冲掉。
+    function ensureLoaded() { if(!app.pageStale(loadedStamp)) return; page.load(); bridge.loadPromptSettings() }
     function act(operation,args) { bridge.screenplayAction(operation,args) }
     function timelineAction(operation,id,expectedRevision) {
         timelineMutationScope={screenplay_id:screenplay.id,timeline_id:screenplay.timeline_id,revision:expectedRevision===undefined?workspace.timeline.revision:expectedRevision}
@@ -254,7 +260,7 @@ Item {
         }
         structure(actions,isSeries?"single":"series")
     }
-    onVisibleChanged:if(visible){load();bridge.loadPromptSettings()}
+    onVisibleChanged:if(visible)page.ensureLoaded()
 
     // 懒创建：创建时一出生就可见，不会触发 onVisibleChanged。
     Component.onCompleted:if(visible){load();bridge.loadPromptSettings()}

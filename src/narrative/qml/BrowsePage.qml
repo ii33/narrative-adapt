@@ -56,6 +56,9 @@ Item {
     property var detail: ({})
     property var counts: ({})
     property int revision: 0
+    // 上次读数据时的工程数据戳（见 Main.qml 的 pageStale）：切回来时用它判断
+    // 数据有没有真的变过，没变就不重读。
+    property real loadedStamp: 0
     property var importCandidates: []
     property var importSelected: []
     readonly property int includedImportCount: importPicker.includedCount
@@ -179,6 +182,9 @@ Item {
     // 查询、过滤、计数、切点解析都在后端：界面只提交条件并渲染结果。
     function load() {
         if (adaptationMode && !visible) return
+        // 记下这次读数据时的工程数据戳：切走再切回时用它判断要不要重读（见 Main.qml
+        // 的 pageStale）。读一次的代价是整张节点表，能不读就不读。
+        loadedStamp = bridge.dataStamp()
         page.loadCategoryVocabulary()
         var spec = {
             granularity: page.granularity,
@@ -190,6 +196,13 @@ Item {
         }
         if (adaptationMode) spec.include_suppressed = showSuppressed
         page.io.loadBrowse(spec)
+    }
+
+    // 切回来时走这里：第一次可见要读；之后只有工程库在离开期间被写过才重读，
+    // 没写过就什么都不做——页面实例是留着的那一个，选中项、搜索词、滚动都在原处。
+    function ensureLoaded() {
+        if (!app.pageStale(loadedStamp)) return
+        page.load()
     }
 
     function nameOf(id) {
@@ -885,7 +898,9 @@ Item {
 
     // Loads only once a project is open; the launcher has no project yet.
     Component.onCompleted: if (app.mode === "workspace") page.load()
-    onVisibleChanged: if (visible && app.mode === "workspace") page.load()
+    // 切回来不重读：页面一直留着，只有工程库在离开期间被写过（数据戳变了）才读。
+    // 之前这里是无条件 load()，于是每次切回这一页都像重新加载了一次。
+    onVisibleChanged: if (visible && app.mode === "workspace") page.ensureLoaded()
 
     Connections {
         target: app

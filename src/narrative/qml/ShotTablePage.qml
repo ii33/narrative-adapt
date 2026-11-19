@@ -44,6 +44,8 @@ Item {
     property string produceHint: ""
     property var previs: ({})
     property string projectPath: ""
+    // 上次读场次清单（剧本工作区）时的工程数据戳（见 Main.qml 的 pageStale）。
+    property real loadedStamp: 0
 
     readonly property bool ready: table.ok === true && !!unitId
     readonly property int totalMs: table.total_duration_ms || 0
@@ -88,7 +90,16 @@ Item {
     // 场次清单来自剧本工作区（与分镜稿页同一份数据），镜头数据来自三个只读槽位。
     function loadWorkspace() {
         if (!app || app.mode !== "workspace" || !visible) return
+        // 这次读数据时的工程数据戳（见 Main.qml 的 pageStale）：切走再切回时据此
+        // 判断要不要重读，没变就不读——选中的镜、筛选、详情都还在原处。
+        loadedStamp = bridge.dataStamp()
         bridge.loadScreenplayWorkspace(app.screenplayId || "")
+    }
+
+    // 切回来时走这里：第一次可见要读；之后只有工程库在离开期间被写过才重读。
+    function ensureLoaded() {
+        if (!app.pageStale(loadedStamp)) return
+        page.loadWorkspace()
     }
 
     function selectScene(id) {
@@ -119,6 +130,9 @@ Item {
             previs = ({})
             return
         }
+        // 读的是这一场的镜头快照：读完就是最新的，顺手把数据戳记上，免得「在本页改了
+        // 一镜，切走再切回」被当成「别处改过」而白重读一遍场次清单。
+        loadedStamp = bridge.dataStamp()
         // 槽位是同步的：返回值就是快照，深拷贝一份，免得 QML 侧改到桥里的对象。
         table = JSON.parse(JSON.stringify(bridge.shotTable(unitId)))
         if (table.ok !== true) {
@@ -356,7 +370,7 @@ Item {
 
     // 懒创建：创建时一出生就可见，不会再触发 onVisibleChanged。
     Component.onCompleted: if (visible && app) loadWorkspace()
-    onVisibleChanged: if (visible && app) loadWorkspace()
+    onVisibleChanged: if (visible && app) page.ensureLoaded()
 
     // 换工程时把旧场次与旧快照全部清掉：留着上一场的镜头最容易看错。
     Connections {

@@ -16,6 +16,9 @@ Item {
     property string unitId: ""
     property var board: ({})
     property var shots: board.shots || []
+    // 上次读剧本工作区时的工程数据戳（见 Main.qml 的 pageStale）。
+    property real loadedStamp: 0
+
     readonly property bool ready: !!unitId && board.unit_id === unitId
     readonly property bool approved: board.approved === true
     readonly property var scenes: (workspace.document?.segments || []).reduce((all, segment) =>
@@ -160,7 +163,13 @@ Item {
         bridge.storyboardAction(op, args, token)
     }
     function reload() {
-        if (unitId && visible) request("read_storyboard", {unit_id:unitId})
+        if (unitId && visible) {
+            // 读的是当前这一场的分镜：读完就是最新的，顺手把数据戳记上。这样「在本页
+            // 改了一镜，切走再切回」不会被当成「别处改过」而白重读一遍工作区（那一遍
+            // 会 resetView 清掉播放头与选中的镜）。
+            loadedStamp = bridge.dataStamp()
+            request("read_storyboard", {unit_id:unitId})
+        }
     }
     // 拆镜由模型判断，不由程序按段落切：把「按正文把这个场拆成镜头」交给协作者，
     // 程序只负责把当前场次与要求说清楚。镜头怎么分、分几个、每镜多长，都由模型决定。
@@ -203,7 +212,20 @@ Item {
         resetView()
         workspace = ({})
         unitId = ""
-        if (app.mode === "workspace" && visible) bridge.loadScreenplayWorkspace(id)
+        if (app.mode === "workspace" && visible) {
+            // 这次读数据时的工程数据戳（见 Main.qml 的 pageStale）：切走再切回时据此
+            // 判断要不要重读。这一页重读的代价最贵——loadScreenplay 会 resetView()，
+            // 播放头、选中的镜、打开的对话框全被清掉，所以「没变就别读」在这里不只是
+            // 省一次磁盘读，而是保住用户正看着的现场。
+            loadedStamp = bridge.dataStamp()
+            bridge.loadScreenplayWorkspace(id)
+        }
+    }
+
+    // 切回来时走这里：第一次可见要读；之后只有工程库在离开期间被写过才重读。
+    function ensureLoaded() {
+        if (!app.pageStale(loadedStamp)) return
+        desk.loadScreenplay(desk.app.screenplayId || "")
     }
     function save(change) {
         if (!ready || busy) return
@@ -243,7 +265,8 @@ Item {
     // 懒创建：创建时一出生就可见，不会触发 onVisibleChanged。
     Component.onCompleted: if (visible && app) loadScreenplay(app.screenplayId || "")
     onVisibleChanged: {
-        if (visible && app) loadScreenplay(app.screenplayId || "")
+        // 切回来不重读：数据没变就直接复用现有现场（见 ensureLoaded 的说明）。
+        if (visible && app) desk.ensureLoaded()
         else {
             usageTips.close()
             if(ready&&shot.id)app.storyboardSelection={project_path:app.project.path,screenplay_id:app.screenplayId,unit_id:unitId,shot_id:shot.id,offset_ms:localTime};
