@@ -66,6 +66,7 @@
 | 测试分层与默认套件边界 | [TESTING.md](TESTING.md) |
 | 需求总表（agent 归纳，未经用户确认） | [REQUIREMENTS.md](requirements/REQUIREMENTS.md) |
 | 剧情 / 剧本 / 分镜专题 | [SCREENPLAY_DATA_DESIGN.md](screenplay/SCREENPLAY_DATA_DESIGN.md)、[SCREENPLAY_PHASE_PLAN.md](screenplay/SCREENPLAY_PHASE_PLAN.md)、[PRODUCTION_DRAFT_DATA_DESIGN.md](screenplay/PRODUCTION_DRAFT_DATA_DESIGN.md)、[STORYBOARD_DIRECTOR.md](screenplay/STORYBOARD_DIRECTOR.md)、[STORYBOARD_TIMING.md](screenplay/STORYBOARD_TIMING.md)、[STORYBOARD_STYLE_PROVIDER.md](screenplay/STORYBOARD_STYLE_PROVIDER.md)、[STORYBOARD_VIDEO.md](screenplay/STORYBOARD_VIDEO.md)、[SKETCH_STYLE.md](screenplay/SKETCH_STYLE.md)、[ASSET_STANDARD.md](screenplay/ASSET_STANDARD.md)、[DIRECTOR_WORKSPACE.md](screenplay/DIRECTOR_WORKSPACE.md) |
+| 图像与视频模型选型调研（FLUX 3 Image Klein、Qwen-Image-2.1、Krea 2、MOSS-Image、MiniMax H3：能力对照、框/掩码喂法、许可与风险） | [MODELS_IMAGE.md](MODELS_IMAGE.md) |
 | 开发与验收约定（仓库根） | [AGENTS.md](../AGENTS.md) |
 | 新会话交接（仓库根） | [PROJECT_HANDOFF.md](../PROJECT_HANDOFF.md) |
 
