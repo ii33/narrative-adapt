@@ -107,7 +107,9 @@ def tool_family(name: str) -> str:
     # 生成执行器与框图读写都不带 storyboard 字样，但服务的是分镜业务。
     if name in {'run_generation_task', 'read_storyboard_layout',
                 'read_previs', 'set_shot_previs', 'capture_previs_layout',
-                'read_scene_set', 'set_scene_layout'} or 'storyboard' in name:
+                'read_scene_set', 'set_scene_layout', 'save_location_set',
+                'bind_unit_set', 'read_unit_set', 'apply_location_set',
+                'read_location_set'} or 'storyboard' in name:
         return 'storyboard'
     if name in {'compile_screenplay', 'export_screenplay'}:
         return 'output'

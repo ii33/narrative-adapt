@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 from contextlib import ExitStack
 from copy import deepcopy
@@ -12,6 +13,7 @@ from uuid import uuid4
 from PIL import Image
 
 from .asset_needs import gap_view, merge_needs
+from .asset_needs import unit_set_status as compute_set_status
 from .asset_needs import validate_needs as validate_asset_needs
 from .content_errors import (
     ContentConflictError,
@@ -198,6 +200,91 @@ def _shot_in_scene(board, identifier):
     if shot is None:
         raise ContentGuardError('指定的镜头不属于本场')
     return shot
+
+
+# 省略与显式 null 是两件事（一个是忘写，一个是解绑），用哨兵分开——与 set_shot_previs 同一口径。
+_UNSET = object()
+
+
+def _previs_block(row, index):
+    """资产布景的盒体 → 预演页的盒体（米、y 向上、底面贴 y，与``previs_tools``同一口径）。
+
+    道具的 ``scale`` 是全尺寸、底面贴在 position.y 上；人物用 ``height``。资产侧只写宽深高，
+    名字由这里补：写布景的人不关心预演页里这台实体的显示名。
+    """
+    position = [row['x'], row.get('y', 0.0), row['z']]
+    if row['kind'] == 'actor':
+        item = {'kind': 'actor', 'name': f'人物{index + 1}', 'position': position, 'height': row['h']}
+    else:
+        item = {'kind': 'prop', 'name': f'道具{index + 1}', 'position': position,
+                'scale': [row['w'], row['h'], row['d']]}
+    if row.get('rotation'):
+        # 资产侧用角度制（人读方便），预演的实体 rotation 是弧度制的欧拉角。
+        item['rotation'] = [0.0, math.radians(row['rotation']), 0.0]
+    return item
+
+
+def _camera_entity_map(asset_cameras, requested, page_cameras):
+    """资产机位 → 页面实体编号：带 id 的照旧，新加的按名字配对。
+
+    为什么能按名字：同一套布景里机位 name 唯一（保存时校验过），而页面只回「新增成功、
+    编号是 gen-N」，不告诉我们哪一条对应哪一台；名字是两边都有的稳定线索。
+    """
+    claimed = {row['id'] for row in requested if row.get('id')}
+    available = {}
+    for row in page_cameras:
+        available.setdefault(str(row.get('name') or ''), []).append(row.get('camera_id'))
+    mapping = {}
+    for camera, wanted in zip(asset_cameras, requested, strict=False):
+        if wanted.get('id'):
+            mapping[camera['camera_id']] = wanted['id']
+            continue
+        identifier = next((value for value in available.get(camera['name'], [])
+                           if value and value not in claimed), None)
+        if identifier:
+            claimed.add(identifier)
+            mapping[camera['camera_id']] = identifier
+    return mapping
+
+
+def _block_entity_map(requested, page_blocks):
+    """盒体序号 → 页面实体编号：带 id 的照旧，新加的按名字配对（名字由序号派生，稳定）。
+
+    盒体在资产里没有编号（墙不是可被镜头绑定的对象），所以映射按序号记；名字在两边都能对上，
+    因此重铺同一套布景时不会把同样的墙再添一遍。
+    """
+    claimed = {row['id'] for row in requested if row.get('id')}
+    available = {}
+    for row in page_blocks:
+        available.setdefault(str(row.get('name') or ''), []).append(row.get('id'))
+    mapping = {}
+    for index, row in enumerate(requested):
+        if row.get('id'):
+            mapping[index] = row['id']
+            continue
+        identifier = next((value for value in available.get(row.get('name'), [])
+                           if value and value not in claimed), None)
+        if identifier:
+            claimed.add(identifier)
+            mapping[index] = identifier
+    return mapping
+
+
+def _room_difference(wanted, current):
+    """资产声明的房间与页面房间不一致时的一句话提示；任一缺失或相同都返回空串。"""
+    if not isinstance(wanted, dict) or not isinstance(current, dict):
+        return ''
+    pairs = (('w', 'width'), ('d', 'depth'), ('h', 'height'))
+    try:
+        differ = any(abs(float(wanted[key]) - float(current.get(page_key) or 0.0)) > 1e-6
+                     for key, page_key in pairs)
+    except (KeyError, TypeError, ValueError):
+        return ''
+    if not differ:
+        return ''
+    return ('资产里的房间尺寸' + str({key: wanted[key] for key, _ in pairs})
+            + '与预演页' + str(current) + '不同；预演接口v1改不了房间，以页面为准')
+
 
 
 def _timeline_plan(shot):
@@ -515,6 +602,8 @@ def _timeline_derived(shot):
 def apply_timeline_views(board):
     """把派生视图贴到读结果上；存储里的 board 不动，老数据因此保持原样。"""
     board.setdefault('asset_needs', [])
+    # 布景依赖（set_ref）与需求同级：没绑过就报 null，读的人不必自己去猜缺字段。
+    board.setdefault('set_ref', None)
     for shot in board['shots']:
         shot.setdefault('asset_needs', [])
         shot.setdefault('handoff', None)
@@ -721,6 +810,181 @@ class StoryboardOperationsMixin(StoryboardPrevisMixin, StoryboardAssetsMixin, St
     def read_asset_needs(self, unit_id):
         """只读：本场需求、已落实的绑定、引用悬空与计数。"""
         return gap_view(self.read_storyboard(unit_id), self.get_asset)
+
+    # -- 布景依赖：场 → 地点资产的 set -----------------------------------------
+
+    def unit_set_status(self, unit_id):
+        """只读：本场布景依赖状态（bound/stale/no_set/missing_asset/unbound）。
+
+        与 ``read_unit_set`` 的区别只是粗细：要状态用这个，要布景清单用那个。
+        """
+        return compute_set_status(self.read_storyboard(unit_id), self.get_asset)
+
+    def read_unit_set(self, unit_id):
+        """只读：本场绑定的布景资产、依赖状态与布景规模。
+
+        与 ``read_scene_set`` 分工：那个读**预演页里现在是什么**（页面状态、pending_change），
+        这个读**这场该依据什么**（资产里的布景）。两边不一致正是要处理的事，所以两个都只读。
+
+        预演台没开也能用：绑定与布景都在工程数据里，不依赖页面。
+        """
+        board = self.read_storyboard(unit_id)
+        dependency = compute_set_status(board, self.get_asset)
+        card = None
+        if dependency['asset_id'] and dependency['status'] != 'missing_asset':
+            try:
+                card = self.get_asset(dependency['asset_id'])
+            except (ContentGuardError, KeyError):
+                card = None
+        data = card.get('set') if isinstance(card, dict) and isinstance(card.get('set'), dict) else None
+        asset = None if card is None else {
+            'asset_id': card['id'], 'title': card.get('title', ''), 'category': card.get('category'),
+            'set_revision': (data or {}).get('revision') or 0,
+            'block_count': len((data or {}).get('blocks') or []),
+            'camera_count': len((data or {}).get('cameras') or []),
+            'updated_at': (data or {}).get('updated_at') or ''}
+        return {'unit_id': unit_id, 'bound': dependency['asset_id'] is not None,
+                'set_ref': ({'asset_id': dependency['asset_id'], 'revision': dependency['bound_revision']}
+                            if dependency['asset_id'] else None),
+                'asset_id': dependency['asset_id'], 'asset': asset,
+                'status': dependency['status'], 'message': dependency['message'],
+                'revision': dependency['revision'], 'bound_revision': dependency['bound_revision'],
+                'storyboard_revision': board['revision'],
+                'room': (data or {}).get('room'), 'block_count': dependency['block_count'],
+                'camera_count': dependency['camera_count'],
+                'blocks': (data or {}).get('blocks') or [],
+                'cameras': (data or {}).get('cameras') or [],
+                'used_by': (self.location_set_usage(card['id']) if card is not None else [])}
+
+    @content_write
+    def bind_unit_set(self, unit_id, revision, asset_id=_UNSET):
+        """场绑定／解绑布景资产：只写 ``board['set_ref']``，不动镜头、不动布景本身。
+
+        ``asset_id=null`` 解绑。绑的是「哪张地点资产的哪一版布景」：revision 记资产当前的
+        ``set.revision``（还没写布景记 0）；资产之后改了布景，这场就变成 stale——那是提示
+        「该看一眼」，而不是悄悄跟着资产一起变。
+
+        为什么也要 revision 参数：绑定决定这场画面依据是什么，别人正在改分镜时不该被顶掉。
+        """
+        if asset_id is _UNSET:
+            raise ValueError('请明确asset_id：给地点资产编号表示绑定，显式传null表示解绑（省略无法区分）')
+        card = None
+        if asset_id is not None:
+            if not isinstance(asset_id, str) or not asset_id.strip():
+                raise ValueError('asset_id须为非空文本或null；解绑请显式传null')
+            card = self.get_asset(asset_id.strip())
+            if card.get('category') != 'location':
+                raise ContentGuardError('场只能绑定地点资产的布景；' + str(card.get('title') or card['id'])
+                                        + ' 的类别是' + str(card.get('category')))
+        root = layout(self._store.path).material / 'storyboard'
+        with self._store.connect(write=True) as db:
+            board = _load(db, unit_id, root)
+            if type(revision) is not int or revision != board['revision']:
+                raise ContentConflictError('分镜已修改，请刷新后重试')
+            if card is None:
+                board.pop('set_ref', None)
+                action, reason = 'unbind_unit_set', '解绑布景资产'
+            else:
+                data = card.get('set') if isinstance(card.get('set'), dict) else None
+                board['set_ref'] = {'asset_id': card['id'], 'revision': int((data or {}).get('revision') or 0)}
+                action, reason = 'bind_unit_set', '绑定地点布景'
+            board['revision'] += 1
+            summary = {'unit_id': unit_id, 'set_ref': board.get('set_ref'),
+                       'storyboard_revision': board['revision']}
+            db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)",
+                       ('storyboard:' + unit_id, json.dumps(board, ensure_ascii=False)))
+            graph_revision = db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0]
+            db.execute('INSERT INTO actions(id,revision,action,reason,summary) VALUES(?,?,?,?,?)',
+                       (uuid4().hex, graph_revision, action, reason, json.dumps(summary, ensure_ascii=False)))
+        return {'unit_id': unit_id, 'set_ref': board.get('set_ref'),
+                'storyboard_revision': board['revision'],
+                'dependency': compute_set_status(board, self.get_asset)}
+
+    def apply_location_set(self, unit_id, overwrite=False):
+        """把本场绑定的布景铺进预演页：一次 ``applyBatch``，失败时页面/资产/场三处都不变。
+
+        ``overwrite=False``（默认）走到 ``set_scene_layout(replace=False)``：只增改不删，页面
+        里多出来的盒体/机位留着——预演页也是人在动的地方，机器不该顺手抹掉人的东西。
+        ``overwrite=True`` 才是「整场就是这套布景」，没列出的实体删除。
+
+        机位靠 ``camera_id → previs_entity_id`` 的映射铺：已知实体直接 ``setCamera`` 就地
+        更新，镜头绑定因此在多场之间稳定；页面里已有同名机位就先认领而不是再添一台；
+        新机位由页面发号，**铺成功之后**才写回资产。
+        """
+        current = self.read_unit_set(unit_id)
+        if not current['bound']:
+            raise ContentGuardError('本场还没有绑定布景资产：先read_storyboard拿到revision，'
+                                    '再bind_unit_set(unit_id, revision, asset_id)绑定地点资产')
+        if current['status'] == 'missing_asset':
+            raise ContentGuardError('本场绑定的布景资产已不存在：' + str(current['asset_id'])
+                                    + '；请重新绑定（bind_unit_set）或解绑')
+        if current['status'] == 'no_set':
+            raise ContentGuardError('绑定的地点资产还没有布景：先用save_location_set(asset_id, blocks, cameras)写一套')
+        page = self.read_scene_set(unit_id)
+        page_ids = {row.get('camera_id') for row in page.get('cameras') or []} if page.get('page') else set()
+        page_by_name = {}
+        for row in page.get('cameras') or []:
+            page_by_name.setdefault(str(row.get('name') or ''), []).append(row.get('camera_id'))
+        page_block_ids = {row.get('id') for row in page.get('blocks') or []} if page.get('page') else set()
+        page_blocks_by_name = {}
+        for row in page.get('blocks') or []:
+            page_blocks_by_name.setdefault(str(row.get('name') or ''), []).append(row.get('id'))
+        cameras, blocks, dropped, claimed = [], [], [], set()
+        for camera in current['cameras']:
+            entity = camera.get('previs_entity_id')
+            if entity and page.get('page') and entity not in page_ids:
+                # 页面里这台实体已经没了（场景重建/人删了）：别拿一个不存在的编号去 setCamera。
+                dropped.append({'kind': 'camera', 'camera_id': camera['camera_id'], 'previs_entity_id': entity})
+                entity = None
+            if not entity and page.get('page'):
+                # 页面里已经有同名机位就先认领：同一台机位不该因为没记过映射就重复加一台。
+                entity = next((identifier for identifier in page_by_name.get(camera['name'], [])
+                               if identifier and identifier not in claimed), None)
+            if entity:
+                claimed.add(entity)
+            row = {'id': entity, 'name': camera['name'], 'position': camera['position'],
+                   'target': camera['target'], 'focal': camera['focal']}
+            if camera.get('framing'):
+                row['framing'] = camera['framing']
+            cameras.append(row)
+        claimed_blocks = set()
+        for index, block in enumerate(current['blocks']):
+            item = _previs_block(block, index)
+            entity = block.get('previs_entity_id')
+            if entity and page.get('page') and entity not in page_block_ids:
+                dropped.append({'kind': 'block', 'index': index, 'previs_entity_id': entity})
+                entity = None
+            if not entity and page.get('page'):
+                entity = next((identifier for identifier in page_blocks_by_name.get(item['name'], [])
+                               if identifier and identifier not in claimed_blocks), None)
+            if entity:
+                claimed_blocks.add(entity)
+            blocks.append(item | {'id': entity})
+        # room 不传给 set_scene_layout：接口 v1 没有改房间的操作，尺寸不同会整批拒绝；
+        # 房间仍由预演页维护，与资产声明的差异放在 warnings 里说清楚。
+        result = self.set_scene_layout(unit_id, blocks=blocks, cameras=cameras,
+                                       replace=bool(overwrite))
+        camera_map = _camera_entity_map(current['cameras'], cameras, result.get('cameras') or [])
+        block_map = _block_entity_map(blocks, result.get('blocks') or [])
+        # 铺成功之后才回写：set_scene_layout 失败会抛错，走不到这里，资产与场因此都不会留下半个状态。
+        written = self.remember_set_entities(current['asset_id'], camera_map, block_map)
+        warnings = list(result.get('warnings') or [])
+        if current['status'] == 'stale':
+            warnings.append('本场依据的是布景第' + str(current['bound_revision']) + '版，资产已到第'
+                            + str(current['revision']) + '版；铺进去的是当前版本，要更新依据请重新bind_unit_set')
+        if dropped:
+            warnings.append('这些实体的编号在预演页里已不存在，本次按新实体重铺：'
+                            + '、'.join(str(row.get('camera_id') or row.get('index')) for row in dropped))
+        room_note = _room_difference(current.get('room'), result.get('room'))
+        if room_note:
+            warnings.append(room_note)
+        return result | {'unit_id': unit_id, 'asset_id': current['asset_id'],
+                         'set_ref': current['set_ref'], 'set_revision': current['revision'],
+                         'overwrite': bool(overwrite), 'camera_map': camera_map,
+                         'block_map': block_map, 'camera_ids_written': written['cameras'],
+                         'block_ids_written': written['blocks'], 'dropped_entities': dropped,
+                         'dependencies': self.read_unit_set(unit_id),
+                         'warnings': warnings}
 
     def read_storyboard_layout(self, unit_id, shot_id):
         """只读：本镜全部框图、站位与哈希。

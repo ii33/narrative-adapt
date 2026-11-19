@@ -22,6 +22,7 @@
 | `setTime(ms)` | — | `{ok}` | 把播放头移到指定时刻（抓帧与预览对齐用） |
 | `captureFrame({width, height, cameraId, time_ms})` | — | `{png_base64}` | 按指定机位渲染一帧（离屏，不改播放状态） |
 | `onChange(cb)` | 回调 | `{ok}` | 场景变更后回调一次（用于主程序刷新框图缓存） |
+| `setReadability(options)` | `{persons?, roomOutlines?, kindColors?, labels?, all?}` | `{ok, applied}` | 可读性标注开关（只改显示，不写工程、不进撤销栈） |
 | `applyBatch(ops)` | `[{op:"add"\|"update"\|"remove"\|"setCamera"\|"setCuts", …}]` | `{ok, results[]}` | 批量事务：全部成功或全部不生效（助手铺场景用这一条） |
 
 ## 约定

@@ -90,6 +90,42 @@ def register(Tool, register_tool, validate):
         "cameras": objects | {"required": True, "description": "机位清单：{id?,name?,position,target,focal,framing?}"},
         "room": {"type": ["object", "null"], "description": "可选{width,depth,height}；只校验不改，尺寸不符整批拒绝"},
         "replace": {"type": "boolean", "description": "默认true：整场就是这个样子，没列出的实体删除"}}, writes=True)
+    set_block = {"type": "object", "additionalProperties": False, "required": ["kind", "x", "z", "w", "d"],
+                 "properties": {"kind": {"type": "string", "enum": ["prop", "actor"],
+                                         "description": "prop＝道具/墙/家具，actor＝站位人物"},
+                                "x": {"type": "number", "description": "场景平面x（米，与预演同原点）"},
+                                "z": {"type": "number", "description": "场景平面z（米）"},
+                                "y": {"type": "number", "description": "盒体底面高度（米），默认0"},
+                                "w": {"type": "number", "exclusiveMinimum": 0, "description": "宽（米）"},
+                                "d": {"type": "number", "exclusiveMinimum": 0, "description": "深（米）"},
+                                "h": {"type": "number", "exclusiveMinimum": 0,
+                                      "description": "高（米）；省略按人1.75、道具1.0"},
+                                "rotation": {"type": "number", "description": "朝向角（度，0＝面向-z）；可选"}}}
+    set_camera = {"type": "object", "additionalProperties": False,
+                  "required": ["name", "position", "target", "focal"],
+                  "properties": {"camera_id": text | {"description": "资产级机位编号；省略则沿用同名旧编号，跨场镜头绑定靠它"},
+                                 "name": text | {"description": "机位名，同一套布景内唯一"},
+                                 "position": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3,
+                                              "description": "[x,y,z]米，y向上"},
+                                 "target": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3,
+                                            "description": "注视点[x,y,z]米"},
+                                 "focal": {"type": "number", "exclusiveMinimum": 0, "description": "焦距毫米"},
+                                 "framing": text | {"description": "可选wide/medium/close或页面预设名"}}}
+    add("save_location_set", "写一套地点资产的可复用布景（房间/盒体/机位），整份替换，set.revision由程序+1、不接受手改。盒体与预演同口径（米、y向上、底面贴y）：{kind=prop|actor,x,z,y?,w,d,h?,rotation?}；机位{name,position,target,focal,framing?,camera_id?}，name在本套布景内唯一，camera_id是资产级标识（镜头绑的是它）。同一地点资产被多个场共用，改布景会让已绑定的场显示stale提示", {
+        "asset_id": text | {"required": True, "description": "地点资产编号（category=location）"},
+        "room": {"type": ["object", "null"], "description": "{w,d,h}米；null表示这套布景不声明房间"},
+        "blocks": {"type": "array", "items": set_block, "required": True, "description": "盒体清单；[]表示空场"},
+        "cameras": {"type": "array", "items": set_camera, "required": True, "description": "机位清单；[]表示没有固定机位"}}, writes=True)
+    add("read_location_set", "只读地点资产的布景与共用它的场：set（room/blocks/cameras/revision/updated_at，没写过为null）、asset_revision、used_by每项{unit_id,set_ref,status}。不修改任何数据、不碰预演页", {
+        "asset_id": text | {"required": True, "description": "地点资产编号"}})
+    add("bind_unit_set", "场绑定／解绑布景资产：只写分镜里的set_ref={asset_id,revision}，不动镜头与布景本身。asset_id传null解绑（不能省略）。绑定记的是资产当前set.revision（还没写布景记0）；资产之后改布景，该场显示stale（提示，不是错误）。revision须为read_storyboard返回的分镜修订号", {
+        "unit_id": text | {"required": True}, "revision": integer | {"required": True, "description": "分镜当前revision"},
+        "asset_id": {"type": ["string", "null"], "description": "地点资产编号；显式传null解绑，不能省略"}}, writes=True)
+    add("read_unit_set", "只读本场布景依赖：绑定set_ref、资产摘要、状态bound/stale/no_set/missing_asset/unbound、盒体与机位数、资产里的blocks/cameras与房间，以及共用这套布景的其他场。预演台没开也能用；只读不改数据", {
+        "unit_id": text | {"required": True}})
+    add("apply_location_set", "把本场绑定的布景铺进预演页：一次applyBatch，失败时页面/资产/场三处都不变。机位按camera_id→previs_entity_id映射铺：已知实体就地更新，页面同名机位先认领，新机位由页面发号并在成功后写回资产，镜头绑定的camera_id因此跨场稳定。overwrite=false（默认）只增改不删，保留页面上多出来的盒体/机位；true才是整场按这套布景删多余实体。未绑定/资产丢失/无布景时报错并说明下一步；预演台必须已打开", {
+        "unit_id": text | {"required": True},
+        "overwrite": {"type": "boolean", "description": "默认false：只增改不删；true整场替换"}}, writes=True)
     add("read_storyboard_assets_context", "读取选中镜头及正文、全部资产对象目录，供逐镜分析人物具体形象/物品/场景；不自动建对象或猜测缺失内容。返回的asset_needs是本场需求与两类缺口摘要（需求未落实／引用悬空），只读", {
         "unit_id": text | {"required": True}, "shot_ids": strings | {"required": True, "minItems": 1}})
     add("submit_storyboard_assets", "只保存所选镜头的待确定元素需求，不创建或选择资产。每个visual_elements项仅含kind/name/usage，程序添加未绑定状态。保留所有原已确定资产行，新结果替换原未确定行，不按同名合并。允许空列表；必须覆盖shot_ids恰好一次。资产由用户在列表手动选择或建立。内容问题暂存并局部patch_content_submission修补", {
@@ -104,7 +140,7 @@ def register(Tool, register_tool, validate):
     need = {"type": "object", "additionalProperties": False, "required": ["kind", "name"],
             "properties": {"kind": {"type": "string", "enum": ["person", "prop", "location", "material"]},
                            "name": text, "variant": text, "note": text}}
-    add("read_asset_needs", "只读本场资产需求与缺口：needs每项含scope(unit|shot)/shot_id/kind/name/variant/note/bound_asset_id，dangling列出visual_elements引用悬空（asset_id不存在或资产无参考图），counts给计数。需求与引用分开存，读取不改数据", {
+    add("read_asset_needs", "只读本场资产需求与缺口：needs每项含scope(unit|shot)/shot_id/kind/name/variant/note/bound_asset_id，dangling列出visual_elements引用悬空（asset_id不存在或资产无参考图），set_missing列出布景缺口（未绑定/资产丢失/无布景），set_stale只是版本提示不算错误，counts给计数。需求与引用分开存，读取不改数据", {
         "unit_id": text | {"required": True}})
     add("declare_asset_needs", "声明场级或镜级资产需求（kind=person|prop|location|material、name、可选variant/note），只描述要什么，不建卡、不绑卡、不改visual_elements引用。replace=true（默认）整体替换该范围原需求，false按同对象同形态去重后追加；没给的一侧保持不动。需求落实靠引用：用户在元素列表选资产，或create_missing_storyboard_assets补建", {
         "unit_id": text | {"required": True}, "revision": integer | {"required": True},

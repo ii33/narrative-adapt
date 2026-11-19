@@ -9,6 +9,9 @@
 
 两类缺口都是**派生视图**，绝不回写：需求留在 ``board['asset_needs']`` /
 ``shot['asset_needs']``，引用留在既有的 ``shot['visual_elements']`` 与场平面对象里。
+
+第三类缺口是**布景依赖**：场通过 ``board['set_ref'] = {asset_id, revision}`` 指向一张
+地点资产的布景（``asset['set']``），状态同样现算（见 ``unit_set_status``）。
 """
 from __future__ import annotations
 
@@ -90,6 +93,76 @@ def _has_image(card):
     return bool(card.get('images') or card.get('reference_images'))
 
 
+# 场的布景依赖状态：五种取值，派生不落库（见 ``unit_set_status``）。
+# set_missing 三种（unbound/no_set/missing_asset）是要人处理的缺口；stale 只是提示。
+SET_STATUS = ('bound', 'stale', 'no_set', 'missing_asset', 'unbound')
+SET_MISSING = ('unbound', 'no_set', 'missing_asset')
+
+
+def set_ref_of(board):
+    """场的布景依赖 ``{asset_id, revision}``；形状坏掉时按未绑定处理。
+
+    为什么坏形状不报错：这是派生视图，读盘的历史数据不该因为一个字段缺半截就让整页打不开；
+    真要修，缺口视图会把它列为「未绑定」，人看得见。
+    """
+    ref = board.get('set_ref') if isinstance(board, dict) else None
+    if not isinstance(ref, dict):
+        return None
+    asset_id = ref.get('asset_id')
+    if not isinstance(asset_id, str) or not asset_id.strip():
+        return None
+    revision = ref.get('revision')
+    return {'asset_id': asset_id.strip(),
+            'revision': revision if isinstance(revision, int) and not isinstance(revision, bool) else None}
+
+
+def _set_row(card):
+    value = card.get('set') if isinstance(card, dict) else None
+    return value if isinstance(value, dict) else None
+
+
+def unit_set_status(board, lookup):
+    """场的布景依赖状态：bound/stale/no_set/missing_asset/unbound。
+
+    为什么现算而不落库：``set_ref.revision`` 只说明「这场当时依据哪一版布景」，资产里的
+    布景此后可能还被改过；把状态写回库里，两边就各自维护一份会过期的判断。
+
+    ``lookup`` 是资产查询（``get_asset``）；查不到的资产按 missing_asset 报，不当异常。
+    """
+    ref = set_ref_of(board)
+    row = {'unit_id': board.get('unit_id') if isinstance(board, dict) else None,
+           'status': 'unbound', 'asset_id': None, 'bound_revision': None, 'revision': None,
+           'block_count': 0, 'camera_count': 0, 'room': None, 'asset': None,
+           'message': '本场还没有绑定布景资产'}
+    if ref is None:
+        return row
+    row |= {'asset_id': ref['asset_id'], 'bound_revision': ref['revision']}
+    try:
+        card = lookup(ref['asset_id'])
+    except (ContentGuardError, KeyError, ValueError):
+        return row | {'status': 'missing_asset',
+                      'message': '绑定的布景资产不存在：' + ref['asset_id'] + '；请重新绑定或解除依赖'}
+    row['asset'] = {'asset_id': card.get('id') or ref['asset_id'],
+                    'title': card.get('title') or '', 'category': card.get('category') or ''}
+    data = _set_row(card)
+    if card.get('category') != 'location':
+        return row | {'status': 'no_set', 'message': '绑定的资产不是地点资产，没有布景'}
+    if data is None:
+        return row | {'status': 'no_set', 'message': '地点资产已绑定，但还没有布景（用save_location_set写一套）'}
+    revision = data.get('revision') if isinstance(data.get('revision'), int) else 0
+    blocks = data.get('blocks') or []
+    cameras = data.get('cameras') or []
+    row |= {'revision': revision, 'block_count': len(blocks), 'camera_count': len(cameras),
+            'room': data.get('room')}
+    if row['bound_revision'] is not None and row['bound_revision'] < revision:
+        return row | {'status': 'stale',
+                      'message': '本场依据的是布景第' + str(row['bound_revision']) + '版，资产已到第'
+                                 + str(revision) + '版（提示，不是错误）'}
+    return row | {'status': 'bound',
+                  'message': '布景已绑定：第' + str(revision) + '版，' + str(len(blocks))
+                             + '个盒体、' + str(len(cameras)) + '台机位'}
+
+
 def gap_view(board, lookup):
     """派生缺口视图；两类缺口分开列，计数便于界面直接显示。
 
@@ -153,7 +226,13 @@ def gap_view(board, lookup):
         for need in rows:
             resolve(need, scope='shot', shot_id=shot['id'])
     unresolved = sum(1 for row in needs if not row['bound_asset_id'])
+    # 布景依赖单列一类缺口：它跟「人物形象缺参考图」不是一回事，混进 dangling 会让人
+    # 在资产列表里找一个根本不存在的对象。stale 只作提示——不能因为资产改了布景就拦人写作。
+    dependency = unit_set_status(board, card_of)
     return {'unit_id': board.get('unit_id'), 'revision': board.get('revision'), 'needs': needs, 'dangling': dangling,
+            'set_dependency': dependency,
+            'set_missing': [dependency] if dependency['status'] in SET_MISSING else [],
+            'set_stale': [dependency] if dependency['status'] == 'stale' else [],
             'counts': {'unit': len(unit_items), 'shot': sum(len(rows) for _, rows in shot_items),
                        'total': len(needs), 'resolved': len(needs) - unresolved, 'unresolved': unresolved,
                        'dangling': len(dangling)}}

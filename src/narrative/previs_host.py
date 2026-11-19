@@ -235,6 +235,24 @@ class PrevisHost:
         self.hello()
         return _require_ok(self._call('setCuts', {'cuts': rows}), 'setCuts')
 
+    READABILITY_FLAGS = ('persons', 'roomOutlines', 'kindColors', 'labels')
+
+    def set_readability(self, flags: dict) -> dict:
+        """开关预演画面的可读性标注（人形标记/房间轮廓/分类配色/名称标签）。
+
+        页面只提供了写、没有读——所以"当前是什么状态"由调用方自己记；
+        这里只把给定的键原样下发，未知键直接拒绝（免得拼错一个键却以为生效了）。
+        """
+        if not isinstance(flags, dict) or not flags:
+            raise ValueError('可读性开关要给出至少一项：' + '、'.join(self.READABILITY_FLAGS))
+        unknown = [key for key in flags if key not in self.READABILITY_FLAGS and key != 'all']
+        if unknown:
+            raise ValueError('不认识的可读性开关：' + '、'.join(sorted(unknown))
+                             + '（可用：' + '、'.join(self.READABILITY_FLAGS) + '、all）')
+        payload = {key: bool(value) for key, value in flags.items()}
+        self.hello()
+        return _require_ok(self._call('setReadability', payload), 'setReadability')
+
     def set_time(self, time_ms: int) -> dict:
         """把播放头移到指定时刻（抓帧与预览对齐用）。"""
         value = _millis(time_ms, 'time_ms')

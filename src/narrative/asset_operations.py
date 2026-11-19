@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import sqlite3
 import tempfile
 from contextlib import ExitStack, contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -22,6 +24,164 @@ from .readable_ids import allocate_id
 
 CATEGORIES = {"appearance": "person", "item": "item", "location": "location", "material": None}
 ASSET_PREFIXES = {"appearance": "appearance-", "item": "item-design-", "location": "location-design-", "material": "material-"}
+
+# 布景（预演的房间/盒体/机位）是地点资产的一个字段：一个地点一套布景，多个场共用同一套。
+# 盒体的 kind 与预演页同一套说法；这里不复用 ``previs_tools`` 的常量——资产层不该为了
+# 一个元组把整条分镜/预演 import 链拖进来，那会让资产库的读写也依赖预演页。
+SET_BLOCK_KINDS = ('prop', 'actor')
+SET_BLOCK_FIELDS = ('kind', 'x', 'z', 'y', 'w', 'd', 'h', 'rotation')
+SET_CAMERA_FIELDS = ('camera_id', 'name', 'position', 'target', 'focal', 'framing')
+DEFAULT_ACTOR_HEIGHT = 1.75
+DEFAULT_BLOCK_HEIGHT = 1.0
+
+
+def _set_number(value, label, *, positive=False):
+    """布景里的数值：拒绝 bool（它是 int 的子类）与非有限值，免得 NaN 进库后每处都要防。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f'{label}须为有限数值，实际是{value!r}')
+    number = float(value)
+    if positive and not number > 0:
+        raise ValueError(f'{label}须大于0，实际是{value!r}')
+    return number
+
+
+def _set_vec3(value, label):
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValueError(f'{label}须为[x, y, z]三元数组，实际是{value!r}')
+    return [_set_number(item, f'{label}[{index}]') for index, item in enumerate(value)]
+
+
+def _set_room(room):
+    """房间尺寸 ``{w, d, h}``；null 表示「这套布景不声明房间」（房间仍归预演页管）。"""
+    if room is None:
+        return None
+    if not isinstance(room, dict) or set(room) != {'w', 'd', 'h'}:
+        raise ValueError('room须为{w, d, h}对象或null；尺寸单位为米')
+    return {key: _set_number(room[key], f'room.{key}', positive=True) for key in ('w', 'd', 'h')}
+
+
+def _set_blocks(rows, previous=()):
+    """盒体 ``{kind, x, z, y?, w, d, h?, rotation?}``：米、y 向上、y 是盒体底面高度。
+
+    为什么用「宽深高」而不是预演的 ``scale``：写布景的人想的是「这堵墙 4 米宽、2.8 米高」，
+    铺场时按预演同一口径换成 ``position``/``scale``（``previs_tools`` 的盒体是
+    ``scale`` 为全尺寸、底面贴 y）。
+
+    盒体没有资产级编号（它是「一面墙」而不是一台可被镜头绑定的机位），但预演页的实体编号
+    仍然要记着，否则每次铺场都会再添一份同样的墙。这里按几何签名沿用同位置的旧实体编号：
+    位置尺寸都没变的墙还是原来那面；改过尺寸的墙就是新墙（旧的那面由 ``overwrite=true``
+    的一次整场替换清掉）。
+    """
+    if not isinstance(rows, list):
+        raise ValueError('blocks须为数组；要清空请显式传[]')
+    prior = {}
+    for row in previous if isinstance(previous, (list, tuple)) else ():
+        if isinstance(row, dict):
+            prior.setdefault(_block_signature(row), row.get('previs_entity_id'))
+    result = []
+    for index, row in enumerate(rows):
+        label = f'blocks第{index + 1}项'
+        if not isinstance(row, dict):
+            raise ValueError(f'{label}须为对象')
+        extra = set(row) - set(SET_BLOCK_FIELDS)
+        if extra:
+            raise ValueError(f'{label}有不认识的字段：' + '、'.join(sorted(extra))
+                             + '；允许：' + '、'.join(SET_BLOCK_FIELDS))
+        kind = row.get('kind')
+        if kind not in SET_BLOCK_KINDS:
+            raise ValueError(f'{label}的kind须为' + '/'.join(SET_BLOCK_KINDS) + f'，实际是{kind!r}')
+        item = {'kind': kind, 'x': _set_number(row.get('x'), f'{label}的x'),
+                'z': _set_number(row.get('z'), f'{label}的z'),
+                'y': _set_number(row.get('y', 0.0), f'{label}的y'),
+                'w': _set_number(row.get('w'), f'{label}的w', positive=True),
+                'd': _set_number(row.get('d'), f'{label}的d', positive=True)}
+        if row.get('h') is not None:
+            item['h'] = _set_number(row.get('h'), f'{label}的h', positive=True)
+        else:
+            # 省略高度按预演默认值：人 1.75 米，道具 1 米——写布景时常只记得宽深。
+            item['h'] = DEFAULT_ACTOR_HEIGHT if kind == 'actor' else DEFAULT_BLOCK_HEIGHT
+        if row.get('rotation') is not None:
+            # 角度制（人读方便）；铺场时换成预演的弧度。
+            item['rotation'] = _set_number(row.get('rotation'), f'{label}的rotation')
+        entity = prior.get(_block_signature(item))
+        if isinstance(entity, str) and entity.strip():
+            item['previs_entity_id'] = entity.strip()
+        result.append(item)
+    return result
+
+
+def _block_signature(row):
+    """盒体的几何签名：同位置同尺寸当作同一面墙，用来认领旧的预演实体编号。"""
+    return (row.get('kind'), row.get('x'), row.get('z'), row.get('y', 0.0),
+            row.get('w'), row.get('d'), row.get('h'), row.get('rotation'))
+
+
+def _set_cameras(rows, previous=()):
+    """机位 ``{camera_id?, name, position, target, focal, framing?}``。
+
+    ``camera_id`` 是**资产级**标识：镜头绑定的是它，不是预演页里会变的实体编号。
+    省略时先按同名沿用旧编号（改名不改身份，绑定才稳得住），再不够才按序发放。
+    ``previs_entity_id`` 由程序回写，不接受手改（见 ``remember_set_entities``）。
+    """
+    if not isinstance(rows, list):
+        raise ValueError('cameras须为数组；要清空请显式传[]')
+    prior = [row for row in previous if isinstance(row, dict)]
+    by_id = {row.get('camera_id'): row for row in prior}
+    by_name = {str(row.get('name') or ''): row for row in prior}
+    result, ids, names = [], set(), set()
+    for index, row in enumerate(rows):
+        label = f'cameras第{index + 1}项'
+        if not isinstance(row, dict):
+            raise ValueError(f'{label}须为对象')
+        extra = set(row) - set(SET_CAMERA_FIELDS)
+        if extra:
+            raise ValueError(f'{label}有不认识的字段：' + '、'.join(sorted(extra))
+                             + '；允许：' + '、'.join(SET_CAMERA_FIELDS))
+        name = row.get('name')
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f'{label}的name须为非空文本')
+        name = name.strip()
+        if name in names:
+            raise ValueError('同一布景里的机位name不能重复：' + name)
+        names.add(name)
+        camera_id = row.get('camera_id')
+        camera_id = camera_id.strip() if isinstance(camera_id, str) else ''
+        if not camera_id:
+            camera_id = str((by_name.get(name) or {}).get('camera_id') or '')
+        if not camera_id:
+            number = index + 1
+            while f'cam-{number}' in ids:
+                number += 1
+            camera_id = f'cam-{number}'
+        if camera_id in ids:
+            raise ValueError('同一布景里的机位camera_id不能重复：' + camera_id)
+        ids.add(camera_id)
+        framing = row.get('framing')
+        if framing is not None and (not isinstance(framing, str) or not framing.strip()):
+            raise ValueError(f'{label}的framing须为非空文本或省略')
+        item = {'camera_id': camera_id, 'name': name,
+                'position': _set_vec3(row.get('position'), f'{label}的position'),
+                'target': _set_vec3(row.get('target'), f'{label}的target'),
+                'focal': _set_number(row.get('focal'), f'{label}的focal', positive=True)}
+        if framing is not None:
+            item['framing'] = framing.strip()
+        # 同编号（或同名）旧机位的页面实体编号一并沿用：只挪机位不该丢掉已有映射。
+        entity = (by_id.get(camera_id) or by_name.get(name) or {}).get('previs_entity_id')
+        if isinstance(entity, str) and entity.strip():
+            item['previs_entity_id'] = entity.strip()
+        result.append(item)
+    return result
+
+
+def location_set_row(previous, room, blocks, cameras):
+    """把一次布景写入规范成落库形状：``revision`` 与 ``updated_at`` 由程序给，不接受手改。"""
+    prior = previous if isinstance(previous, dict) else {}
+    return {'room': _set_room(room),
+            'blocks': _set_blocks(blocks, prior.get('blocks') or []),
+            'cameras': _set_cameras(cameras, prior.get('cameras') or []),
+            'revision': int(prior.get('revision') or 0) + 1,
+            'updated_at': datetime.now(UTC).isoformat(timespec='seconds')}
+
 
 
 class _AttachedAssetDb:
@@ -165,6 +325,117 @@ class AssetOperationsMixin:
                         found.append({'unit_id': unit_id, 'object_id': obj.get('id'), 'kind': 'object',
                                       'name': obj.get('name'), 'asset_id': obj['asset_id']})
         return found
+
+    def _location_card(self, asset_id: str) -> dict:
+        """取地点资产卡：别的类别没有布景这回事，越早拒绝越省事。"""
+        if not isinstance(asset_id, str) or not asset_id.strip():
+            raise ContentGuardError('请提供地点资产编号')
+        card = self.get_asset(asset_id.strip())
+        if card.get('category') != 'location':
+            raise ContentGuardError('只有地点资产才有布景；' + str(card.get('title') or card['id'])
+                                    + ' 的类别是' + str(card.get('category')))
+        return card
+
+    def location_set_usage(self, asset_id: str) -> list[dict]:
+        """这套布景被哪些场用着。改布景之前先看这里——「三场共用」得说得出是哪三场。"""
+        from .asset_needs import unit_set_status
+
+        rows = []
+        with self._store.connect() as db:
+            for key, value in db.execute("SELECT key, value FROM meta WHERE key LIKE 'storyboard:%'"):
+                board = json.loads(value)
+                ref = board.get('set_ref')
+                if not isinstance(ref, dict) or ref.get('asset_id') != asset_id:
+                    continue
+                rows.append({'unit_id': board.get('unit_id') or key.split(':', 1)[1],
+                             'set_ref': {'asset_id': ref.get('asset_id'), 'revision': ref.get('revision')},
+                             'status': unit_set_status(board, self.get_asset)['status']})
+        rows.sort(key=lambda row: row['unit_id'])
+        return rows
+
+    def read_location_set(self, asset_id: str) -> dict:
+        """只读地点资产的布景与共用它的场；没写过布景时 ``set`` 为 null。"""
+        card = self._location_card(asset_id)
+        return {'asset_id': card['id'], 'title': card.get('title', ''), 'category': 'location',
+                'set': card.get('set'), 'asset_revision': card.get('revision'),
+                'used_by': self.location_set_usage(card['id'])}
+
+    @content_write
+    def save_location_set(self, asset_id: str, blocks, cameras, room=None) -> dict:
+        """写一套地点布景（整份替换），``set.revision`` 由程序 +1。
+
+        为什么整份替换而不是打补丁：布景是「这个房间长什么样」的一整套描述，一半新一半旧
+        比没有更难判断；写的人手里本来就有整份。
+
+        revision 不接受手改：它是场的依赖依据（``unit.set_ref.revision``）。手写一个更大的
+        数就能让「绑的版本早于资产当前版本」这个判断失真，所以只由程序自增。
+        """
+        if not isinstance(asset_id, str) or not asset_id.strip():
+            raise ContentGuardError('请提供地点资产编号')
+        with self._asset_db(write=True) as db:
+            row = db.execute("SELECT data FROM assets WHERE id=?", (asset_id.strip(),)).fetchone()
+            if row is None:
+                raise ContentGuardError('资产不存在')
+            card = json.loads(row[0])
+            if card.get('category') != 'location':
+                raise ContentGuardError('只有地点资产才有布景；' + str(card.get('title') or card['id'])
+                                        + ' 的类别是' + str(card.get('category')))
+            previous = card.get('set') if isinstance(card.get('set'), dict) else None
+            card['set'] = location_set_row(previous, room, blocks, cameras)
+            revision = db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0] + 1
+            db.execute("INSERT INTO assets VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                       (card['id'], json.dumps(card, ensure_ascii=False)))
+            db.execute("UPDATE meta SET value=? WHERE key='revision'", (revision,))
+            db.execute("INSERT INTO audit(revision,action,asset_id,summary) VALUES(?,?,?,?)",
+                       (revision, 'location_set', card['id'], card.get('title') or card['id']))
+        return {'asset_id': card['id'], 'title': card.get('title', ''), 'set': card['set'],
+                'set_revision': card['set']['revision'], 'asset_revision': revision,
+                'used_by': self.location_set_usage(card['id'])}
+
+    def remember_set_entities(self, asset_id: str, camera_entities: dict,
+                              block_entities=None) -> dict:
+        """把预演页生成的实体编号记回布景：机位记在 ``cameras[i].previs_entity_id``，
+        盒体记在 ``blocks[i].previs_entity_id``（键为盒体序号）。
+
+        为什么要记：页面每次新增实体都自己发号，而这个号是镜头绑定（``shot.previs``）与
+        后续铺场要用的；机位在资产里的身份是 ``camera_id``，两者必须有人在中间搭一次桥。
+        记过之后下一次铺场就带着号直接 ``setCamera``/``update``，多场共用的机位与墙不会
+        每铺一次换一次身份、也不会重复堆一份。
+
+        为什么不涨 ``set.revision``：这只是「这台机位/这面墙在预演页叫什么」的回写，布景内容
+        一个字没变；涨了会让刚铺完的场立刻变成 stale，等于自己给自己发告警。资产库的全局
+        revision 仍然 +1 并留审计——数据确实动过，乐观并发要看得见。
+        """
+        camera_entities = camera_entities if isinstance(camera_entities, dict) else {}
+        block_entities = block_entities if isinstance(block_entities, dict) else {}
+        if not camera_entities and not block_entities:
+            return {'cameras': [], 'blocks': []}
+        wrote = {'cameras': [], 'blocks': []}
+        with self._asset_db(write=True) as db:
+            row = db.execute("SELECT data FROM assets WHERE id=?", (asset_id,)).fetchone()
+            if row is None:
+                return wrote
+            card = json.loads(row[0])
+            if not isinstance(card.get('set'), dict):
+                return wrote
+            for camera in card['set'].get('cameras') or []:
+                entity = camera_entities.get(camera.get('camera_id'))
+                if isinstance(entity, str) and entity and camera.get('previs_entity_id') != entity:
+                    camera['previs_entity_id'] = entity
+                    wrote['cameras'].append({'camera_id': camera['camera_id'], 'previs_entity_id': entity})
+            for index, block in enumerate(card['set'].get('blocks') or []):
+                entity = block_entities.get(index)
+                if isinstance(entity, str) and entity and block.get('previs_entity_id') != entity:
+                    block['previs_entity_id'] = entity
+                    wrote['blocks'].append({'index': index, 'previs_entity_id': entity})
+            if wrote['cameras'] or wrote['blocks']:
+                revision = db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0] + 1
+                db.execute("INSERT INTO assets VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                           (asset_id, json.dumps(card, ensure_ascii=False)))
+                db.execute("UPDATE meta SET value=? WHERE key='revision'", (revision,))
+                db.execute("INSERT INTO audit(revision,action,asset_id,summary) VALUES(?,?,?,?)",
+                           (revision, 'location_set_entity', asset_id, '回写布景实体编号'))
+        return wrote
 
     def search_assets(self, keyword="", category="", node_id="", domain="adaptation",
                       has_images=None, unbound=False) -> dict:
@@ -373,6 +644,10 @@ class AssetOperationsMixin:
     def save_asset(self, payload: dict, expected_revision=None) -> dict:
         if not isinstance(payload, dict):
             raise ContentGuardError("资产路由须为明确对象")
+        if 'set' in payload:
+            # 布景有它自己的写入口（save_location_set）：revision 自增与校验都在那里，
+            # 从这里塞一份 set 只会绕开那两条，所以宁可拒绝也不静默忽略。
+            raise ContentGuardError('布景不能随资产卡一起保存：请用save_location_set写布景，revision由程序自增')
         with ExitStack() as rollback:
             with self._asset_db(write=True) as db:
                 revision = db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0]

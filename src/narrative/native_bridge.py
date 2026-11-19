@@ -2528,6 +2528,180 @@ class NativeBridge(QObject):
         profile.downloadRequested.connect(accept)
         self._previs_downloads_ready = True
 
+    # ---- 预演页工具条：可读性开关与铺布景 ---------------------------------------
+    # 这两件事原先只能绕到镜头表或助手去做。它们不该各长一条工具通道（工具是给模型
+    # 用的，会进审计），所以直接走同一份页面接口；界面只负责画开关与回执。
+
+    # 可读性四项与页面 setReadability 的键一一对应，顺序也按“人先看什么”排。
+    PREVIS_READABILITY_FLAGS = ("persons", "roomOutlines", "kindColors", "labels")
+
+    def _previs_readability(self) -> dict:
+        """四项可读性开关的宿主侧记录（缺省全开）。
+
+        为什么宿主自己记一份：接口 v1 只有 ``setReadability``，没有取值方法——页面
+        不回读，工具条就没有「现在是什么状态」可画。所以记最后一次成功下发的值；
+        页面回执里带了状态就以页面为准（页面自己动过也不算错）。
+        """
+        cached = getattr(self, "_previs_readability_flags", None)
+        if not isinstance(cached, dict):
+            cached = {key: True for key in self.PREVIS_READABILITY_FLAGS}
+            self._previs_readability_flags = cached
+        return cached
+
+    def _previs_page_call(self, method: str, payload: dict) -> dict:
+        """调一次预演页的方法体，失败一律变成可读原因（不抛到界面）。
+
+        为什么不走工具层：工具条点一下开关只是「顺手改一下页面」，不该为此铺一条
+        写审计的工具通道。为什么直接摸调用器：``PrevisHost`` 只给契约方法各包了一层，
+        ``setReadability`` 还没有包装，而``previs_host.py`` 不归这一路改——假宿主（测试
+        与将来换实现）暴露 ``call``，真宿主用 ``_call``；两种都认，免得为一个开关去改
+        别人的文件。
+        """
+        from . import previs_host
+
+        host = previs_host.installed()
+        if host is None:
+            raise previs_host.PrevisPageNotReady(
+                "预演页还没就绪：先在界面里打开本场预演台，页面加载完成后这个开关才起作用")
+        direct = getattr(host, "call", None)
+        try:
+            reply = direct(method, payload) if callable(direct) else host._call(method, payload)
+        except previs_host.PrevisHostError:
+            raise  # 超时/未就绪已经区分好了，不再套一层
+        except Exception as exc:  # noqa: BLE001 - 调用器什么异常都可能抛
+            raise previs_host.PrevisHostError(f"调用预演页 {method} 失败：{exc}") from exc
+        return reply if isinstance(reply, dict) else {}
+
+    @Slot(result="QVariantMap")
+    def previsReadability(self) -> dict:
+        """工具条画四个开关用的当前状态（纯读宿主记录，不碰页面）。
+
+        页面未就绪时不报错：开关的默认值（全开）本身就是可画的状态，界面的禁用
+        由 ``root.ready`` 决定，不需要这里再造一份失败语义。
+        """
+        flags = self._previs_readability()
+        return {**{key: bool(flags.get(key, True)) for key in self.PREVIS_READABILITY_FLAGS},
+                "ok": True, "error": ""}
+
+    @Slot("QVariantMap", result="QVariantMap")
+    def setPrevisReadability(self, flags) -> dict:
+        """把四项可读性开关下发给预演页，页面自己重绘。
+
+        只接受这四项里的键：多给的键忽略（不认识的开关发过去，页面只会静默丢掉，
+        界面却以为改成功了）。失败返回 ``ok:false`` + 中文原因，绝不抛——工具条的
+        开关点坏了只是「没改成」，就地显示一句就够，抛异常会打断 QML 的点击处理，
+        用户连提示都看不到。
+        """
+        from . import previs_host
+
+        current = self._previs_readability()
+        wanted = {key: bool(current.get(key, True)) for key in self.PREVIS_READABILITY_FLAGS}
+        requested = flags if isinstance(flags, dict) else {}
+        touched = False
+        for key in self.PREVIS_READABILITY_FLAGS:
+            if key in requested:
+                wanted[key] = bool(requested[key])
+                touched = True
+        if not touched:
+            return {"ok": False, "applied": dict(wanted),
+                    "error": "没有要改的开关：可读性只有 persons / roomOutlines / "
+                             "kindColors / labels 四项，传参里一个都没有"}
+        try:
+            reply = self._previs_page_call("setReadability", dict(wanted))
+        except previs_host.PrevisHostError as exc:
+            return {"ok": False, "applied": dict(current), "error": str(exc)}
+        if reply.get("ok") is False:
+            return {"ok": False, "applied": dict(current),
+                    "error": str(reply.get("error") or "预演页没有接受这次可读性设置")}
+        # 页面回执里带了状态（state / readability）就以页面为准：它可能顺手归一化过。
+        page_state = reply.get("state")
+        if not isinstance(page_state, dict):
+            page_state = reply.get("readability")
+        if isinstance(page_state, dict):
+            wanted = {key: bool(page_state.get(key, wanted[key]))
+                      for key in self.PREVIS_READABILITY_FLAGS}
+        self._previs_readability_flags = dict(wanted)
+        return {"ok": True, "applied": dict(wanted), "error": ""}
+
+    @Slot(result="QVariantMap")
+    def previsSceneSet(self) -> dict:
+        """工具条上「这页是哪一场」的摘要：场景名、盒体数、机位数、房间、页面修订号。
+
+        为什么读页面而不是读 ``.director``：工具条要显示的是**预演页上正在编的这一场**，
+        人工拖过的盒子还没导出过文件，读文件会给出对不上的旧快照。为什么用 ``get_scene``
+        而不是 ``snapshot``：它只读、不落盘——工具条会随时问一句，不该为看一眼场景
+        就往工程目录写快照文件。
+        """
+        from . import previs_host
+
+        base = {"ok": False, "error": "", "scene_id": "", "name": "",
+                "entity_count": 0, "camera_count": 0, "room": {}, "revision": 0}
+        host = previs_host.installed()
+        if host is None:
+            return base | {"error": "预演页还没就绪：先在界面里打开本场预演台，"
+                                    "页面加载完成后这里会显示当前场景"}
+        try:
+            raw = host.get_scene()
+            scene = previs_host.scene_from_page("", raw)
+        except Exception as exc:  # noqa: BLE001 - 页面/调用器什么异常都可能抛
+            return base | {"error": str(exc) or exc.__class__.__name__}
+        return base | {"ok": True, "error": "",
+                       "scene_id": scene.get("scene_id", "") or "",
+                       "name": scene.get("name", "") or "",
+                       # 盒体与机位分开数：页面里机位也是实体，混着数会让人以为多放了箱子。
+                       "entity_count": len(scene.get("entities") or []),
+                       "camera_count": len(scene.get("cameras") or []),
+                       "room": scene.get("room") or {},
+                       "revision": int(scene.get("page_revision") or 0)}
+
+    @Slot(str, result="QVariantMap")
+    def applySceneSet(self, unit_id: str) -> dict:
+        """把这一场绑定的布景（地点资产）铺进预演页。
+
+        只做「取绑定 → 调铺场工具」的接线：布景怎么算、怎么批量写都归工具层
+        （``read_unit_set`` / ``apply_location_set``），界面里不该长第二套布景逻辑。
+        默认不删多余实体（工具默认 ``overwrite=False``）：预演页上人手工摆的东西，
+        工具条一下点击就删掉不合适。
+        失败只回 ``ok:false`` + 中文原因（就地显示，不弹窗），也不发 errorOccurred：
+        这不是程序故障，而是「这一场还没绑布景」这类需要用户做一件具体事的状态。
+        """
+        base = {"ok": False, "error": "", "unit_id": unit_id, "asset_id": "",
+                "blocks": [], "cameras": [], "revision": 0}
+        unit = (unit_id or "").strip()
+        if not unit:
+            return base | {"error": "还没有当前场：先在镜头表里选一镜点「预演」，"
+                                    "或从分镜稿打开本场预演页"}
+        try:
+            ops = project_catalog.open_graph_project(self._project())
+        except Exception as exc:  # noqa: BLE001
+            return base | {"error": str(exc) or exc.__class__.__name__}
+        read_binding = getattr(ops, "read_unit_set", None)
+        apply_set = getattr(ops, "apply_location_set", None)
+        if not callable(read_binding) or not callable(apply_set):
+            # 正常安装里这两个方法就在 Operations 上（场 ↔ 地点资产的绑定与铺场）。
+            # 取不到只说明跑的程序版本与界面不一致，不在这里自己实现布景逻辑。
+            return base | {"error": "这个程序里没有布景铺放能力（read_unit_set / apply_location_set）："
+                                    "界面与工程库的版本可能不一致，请用同一版程序重新打开工程"}
+        try:
+            binding = read_binding(unit) or {}
+        except Exception as exc:  # noqa: BLE001 - 未绑布景/资产丢了都是可读的 ValueError
+            return base | {"error": str(exc) or exc.__class__.__name__}
+        status = str(binding.get("status") or "")
+        if status in {"unbound", "no_set", "missing_asset"}:
+            # 工具已经给了可显示的整句（含下一步点哪），原样带出去，不再另写措辞。
+            return base | {"error": str(binding.get("message") or "这一场还没有绑定布景"),
+                           "asset_id": str(binding.get("asset_id") or "")}
+        try:
+            result = apply_set(unit) or {}
+        except Exception as exc:  # noqa: BLE001
+            return base | {"error": str(exc) or exc.__class__.__name__}
+        blocks = result.get("blocks") or []
+        cameras = result.get("cameras") or []
+        return base | {"ok": True, "error": "",
+                       "asset_id": str(result.get("asset_id") or binding.get("asset_id") or ""),
+                       "blocks": blocks, "cameras": cameras,
+                       "revision": result.get("revision", 0) or 0}
+
     @Slot(str, str, str)
     def saveScreenplayExport(self, screenplay_id: str, export_format: str, path: str) -> None:
         def work(ops):
