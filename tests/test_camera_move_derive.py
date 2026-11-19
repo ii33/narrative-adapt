@@ -392,3 +392,34 @@ def test_the_new_kinds_are_in_the_vocabulary_and_in_the_official_terms():
     for kind in ('zoom_in', 'zoom_out', 'dolly_in', 'dolly_out', 'truck_left', 'truck_right',
                  'pedestal_up', 'pedestal_down'):
         assert kind in CAMERA_MOVES
+
+
+def test_ops_forwards_the_injected_snapshot(monkeypatch):
+    """``read_segment_motion(..., scene_snapshot=…)`` 必须真的把快照交给推导。
+
+    这条守住「快照是正式形参」：不靠开预演页、也不靠测试去改环境变量。
+    """
+    from narrative import storyboard_operations as so
+
+    captured = {}
+
+    def fake_derive(board_row, shot_row, from_ms, to_ms, *, scene=None):
+        captured['scene'] = scene
+        captured['range'] = (from_ms, to_ms)
+        return {'from_ms': from_ms, 'to_ms': to_ms, 'available': True, 'warnings': [],
+                'camera_move': {'kind': 'truck_right', 'source': 'previs', 'components': []}}
+
+    class FakeOps(so.StoryboardOperationsMixin):
+        def read_storyboard(self, unit_id):
+            return board(shot())
+
+    monkeypatch.setattr(so, 'derive_segment', fake_derive)
+    monkeypatch.setattr(so, 'validate_segment', lambda motion, limit: None)
+    monkeypatch.setattr(so, 'segment_prompt', lambda motion, kind: '提示词')
+
+    snapshot = scene(camera(path=[point(0, (0.0, 1.6, 0.0)), point(2, (0.35, 1.6, 0.0))]))
+    result = FakeOps().read_segment_motion('unit-1', 'shot-1', 0, 2000, scene_snapshot=snapshot)
+
+    assert captured['scene'] is snapshot
+    assert captured['range'] == (0, 2000)
+    assert result['motion']['camera_move']['source'] == 'previs'

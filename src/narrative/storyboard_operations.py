@@ -1009,7 +1009,7 @@ class StoryboardOperationsMixin(StoryboardPrevisMixin, StoryboardAssetsMixin, St
                 'keyframe_offsets': [row['offset_ms'] for row in shot['timeline']['keyframes']],
                 'layouts': rows, 'count': len(rows), 'keyframes': frames}
 
-    def read_segment_motion(self, unit_id, shot_id, from_ms, to_ms):
+    def read_segment_motion(self, unit_id, shot_id, from_ms, to_ms, *, scene_snapshot=None):
         """只读：某一段的运动推导、校验问题与它对应的视频提示词。
 
         派生值不落库，所以这里每次都现算：同一段读两次的结果只应因为框图或机位变了而变。
@@ -1018,10 +1018,14 @@ class StoryboardOperationsMixin(StoryboardPrevisMixin, StoryboardAssetsMixin, St
 
         ``prompt`` 里的官方对齐句用本段长度当请求时长（这里还不知道真要与服务要多长）；
         真正发请求时 build_task 会用 constraints.duration_ms 重算那一行。
+
+        ``scene_snapshot`` 是**可注入的预演场景快照**：给了就用它推导运镜，不给就自己向预演页
+        取（只读）。有这个形参，调用方与测试才不必为了「用一份已知的机位轨迹」去开预演页。
         """
         board = self.read_storyboard(unit_id)
         shot = _shot_in_scene(board, shot_id)
-        motion = derive_segment(board, shot, _integer(from_ms, '分段起点'), _integer(to_ms, '分段终点'))
+        motion = derive_segment(board, shot, _integer(from_ms, '分段起点'), _integer(to_ms, '分段终点'),
+                                scene=scene_snapshot)
         limit = _max_segment_ms(board)
         warnings = list(motion.get('warnings') or [])
         try:
