@@ -103,7 +103,7 @@ def _changes(tool, args, result):
                 'set_storyboard_animation', 'attach_storyboard_video', 'detach_storyboard_video',
                 'prepare_storyboard_video', 'submit_storyboard_video', 'refresh_storyboard_video',
                 'run_generation_task', 'read_storyboard_layout', 'set_keyframe_layout',
-                'set_shot_previs', 'capture_previs_layout'}:
+                'set_shot_previs', 'capture_previs_layout', 'set_scene_layout'}:
         add('saved', 'storyboard', args.get('unit_id'))
     elif tool in {'render_storyboard_animatic', 'export_storyboard_panel', 'export_storyboard_script'}:
         add('saved', 'file', row={'name': result.get('path') or result.get('output_path', '')})

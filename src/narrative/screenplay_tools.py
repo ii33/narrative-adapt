@@ -65,6 +65,14 @@ def register(Tool, register_tool, validate):
         "unit_id": text | {"required": True}, "shot_id": text | {"required": True},
         "offset_ms": integer | {"required": True},
         "overwrite": {"type": "boolean", "description": "默认false：保留已有手工框图"}}, writes=True)
+    add("read_scene_set", "只读本场预演页的实时布景摘要：房间尺寸、盒体数与清单、机位清单（编号/名称/焦距/位置）、cut数、快照revision与来源、是否已有预演工程。页面里的布景与上次入账的快照不一致时给pending_change/pending_revision，真正入账后才涨revision；本工具不落盘、不修改任何数据。预演台不可达时退回落盘的previs/<场次>/scene.state.json", {
+        "unit_id": text | {"required": True}})
+    add("set_scene_layout", "用一次applyBatch把本场预演的布景铺成blocks/cameras描述的样子（原子：全部成功或全部不生效，失败时快照与revision不变），成功后刷新快照并让revision自增，供分镜稿显示依赖。blocks每项{id?,kind=actor|prop,name?,asset?,position,rotation?,scale?,height?}，cameras每项{id?,name?,position,target,focal,framing?}；带id按id就地更新（机位走setCamera），不带id是新增（编号由页面生成，取自read_scene_set）。replace=true（默认）删掉没再出现的实体，false只增改不删。room只做一致性校验：接口v1没有改房间的操作，尺寸不同整批拒绝。预演台必须已打开", {
+        "unit_id": text | {"required": True},
+        "blocks": objects | {"required": True, "description": "盒体清单：{id?,kind,name?,asset?,position,rotation?,scale?,height?}"},
+        "cameras": objects | {"required": True, "description": "机位清单：{id?,name?,position,target,focal,framing?}"},
+        "room": {"type": ["object", "null"], "description": "可选{width,depth,height}；只校验不改，尺寸不符整批拒绝"},
+        "replace": {"type": "boolean", "description": "默认true：整场就是这个样子，没列出的实体删除"}}, writes=True)
     add("read_storyboard_assets_context", "读取选中镜头及正文、全部资产对象目录，供逐镜分析人物具体形象/物品/场景；不自动建对象或猜测缺失内容。返回的asset_needs是本场需求与两类缺口摘要（需求未落实／引用悬空），只读", {
         "unit_id": text | {"required": True}, "shot_ids": strings | {"required": True, "minItems": 1}})
     add("submit_storyboard_assets", "只保存所选镜头的待确定元素需求，不创建或选择资产。每个visual_elements项仅含kind/name/usage，程序添加未绑定状态。保留所有原已确定资产行，新结果替换原未确定行，不按同名合并。允许空列表；必须覆盖shot_ids恰好一次。资产由用户在列表手动选择或建立。内容问题暂存并局部patch_content_submission修补", {
