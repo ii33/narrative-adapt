@@ -393,7 +393,8 @@ kind=asset_design、模型 krea-2、许可 Krea 2（年营收门槛，商用待�
 
 ## 怎么跑
 - 先 write_asset_draft 写文字稿：只写图要用到的段落（appearance/costume/prop/location/
-  proportion/marks），每条考据附原文引用。文字稿是这张图的验收标准。
+  proportion/marks）。文化/历史/原理类考据可写可不写，写了就写清「查到了什么」。
+  文字稿是这张图的验收标准。
 - 再 run_asset_generation_task(kind='asset_design')；一次一个视角，view=front/side/back/none，
   需要多视角就分开再出一次，不要把多个视角挤进一帧。
 - prompt 只补本次要求（姿态、光线、背景处理），不重述文字稿里已经写清的形体。

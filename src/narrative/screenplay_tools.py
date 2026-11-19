@@ -191,11 +191,15 @@ def register(Tool, register_tool, validate):
         "prompt": text, "layout": {"type": ["object", "null"], "description": "省略用该帧已存框图"},
         "moment": obj, "constraints": obj | {"description": "可选覆盖aspect/resolution/duration_ms/first_frame/last_frame"}}, writes=True)
 
-    draft_source = {"type": "object", "required": True, "description": "原文考据：quote给逐字原文引用，可选note写自己的说明",
-                    "properties": {"quote": text, "note": text}, "additionalProperties": False}
-    add("write_asset_draft", "写（整份替换）一张资产的文字稿：先有文字稿再出设定图，跨镜一致性才有依据。sections只写图要用到的段落——人物appearance/costume/proportion/marks、道具prop/appearance/proportion/marks、地点location/appearance/marks，值须非空且不超过2000字；类别不允许的段落会被拒绝（人物不该写location）。sources是原文考据，每条quote须为非空原文引用、note可选。draft.revision由程序+1，并记下写稿时的项目风格与创作约定版本（style_ref）", {
-        "asset_id": text | {"required": True}, "sections": obj | {"required": True},
-        "sources": {"type": "array", "items": draft_source}}, writes=True)
+    research = {"type": "object", "properties": {
+        "topic": {"type": "string", "description": "这条考据针对什么（如「1940 年代上海弄堂」）"},
+        "note": {"type": "string", "description": "查到了什么（结论，不是引文）"},
+        "basis": {"type": "string", "description": "依据来源，可省：书名、纪录片、实地观察等"}},
+        "required": ["note"], "additionalProperties": False}
+    add("write_asset_draft", "写（整份替换）一张资产的文字稿：先有文字稿再出设定图，跨镜一致性才有依据。sections只写图要用到的段落——人物appearance/costume/proportion/marks、道具prop/appearance/proportion/marks、地点location/appearance/marks，值须非空且不超过2000字；类别不允许的段落会被拒绝（人物不该写location）。research是**可选**的文化/历史/原理类考据（不是作品原文引用），每条写清查到了什么，来源可省。draft.revision由程序+1，并记下写稿时的项目风格与创作约定版本（style_ref）", {
+        "asset_id": {"type": "string"},
+        "sections": {"type": "object", "additionalProperties": {"type": "string"}},
+        "research": {"type": "array", "items": research}}, writes=True)
     add("run_asset_generation_task", "按技能声明执行一次资产出图并写回资产卡：kind=asset_design（设定图，输入是文字稿段落＋项目风格＋资产参考图＋画幅，一次一个视角，需要多视角就按view再出一张）|asset_sketch（工作用线稿，必须以一张设定图为输入，优先view=front，可用design_path指定，缺设定图直接报错）。技能按「已启用且workflow.kind匹配、最近更新」选取，没有就回落到内置（回执标builtin）。成功后追加进designs/sketches（路径、prompt、依据的draft_revision、style_version、provider），失败不写任何产物、旧图保留；缺文字稿仍允许出图但回执带DRAFT_MISSING", {
         "asset_id": text | {"required": True},
         "kind": {"type": "string", "enum": ["asset_design", "asset_sketch"], "required": True},

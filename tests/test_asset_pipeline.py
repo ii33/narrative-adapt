@@ -81,12 +81,17 @@ def fake_sketch(monkeypatch, *, fail=None, calls=None):
 def test_write_asset_draft_replaces_and_bumps_revision(ops):
     card = ops.save_asset({'category': 'appearance', 'title': '少年'})
     first = ops.write_asset_draft(card['id'], {'costume': '灰布短褂', 'appearance': '瘦高，短发'},
-                                  [{'quote': '甲约好接乙。', 'note': '衣着朴素，不佩饰物'}])
+                                  [{'topic': '1930 年代江南学生装',
+                                    'note': '灰布短褂配深色长裤，学生不佩饰物',
+                                    'basis': '地方志与同期照片'}])
     assert first['draft_revision'] == 1 and first['asset_revision'] == card['revision'] + 1
     # 段落按白名单顺序落库：同一份文字稿因此总是同一份 JSON。
     assert list(first['draft']['sections']) == ['appearance', 'costume']
     assert first['draft']['sections'] == {'appearance': '瘦高，短发', 'costume': '灰布短褂'}
-    assert first['draft']['sources'] == [{'quote': '甲约好接乙。', 'note': '衣着朴素，不佩饰物'}]
+    # 考据记的是外部依据（查到了什么），不是作品原文引用。
+    assert first['draft']['research'] == [{'topic': '1930 年代江南学生装',
+                                           'note': '灰布短褂配深色长裤，学生不佩饰物',
+                                           'basis': '地方志与同期照片'}]
     # 写稿时的风格与约定版本由程序记，不接受手填。
     assert first['style_ref'] == {'project_style_version': 0, 'agreement_version': 0}
     # 与资产卡里其它时间（set.updated_at）同一口径：UTC 带显式偏移。
@@ -95,7 +100,9 @@ def test_write_asset_draft_replaces_and_bumps_revision(ops):
     second = ops.write_asset_draft(card['id'], {'proportion': '七头身，肩窄'})
     assert second['draft_revision'] == 2
     # 整份替换：旧段落与旧考据都不沿用，要留就一起重写。
-    assert second['draft']['sections'] == {'proportion': '七头身，肩窄'} and second['draft']['sources'] == []
+    assert second['draft']['sections'] == {'proportion': '七头身，肩窄'}
+    # 考据是可选的：不写就是空表，也不影响文字稿成立。
+    assert second['draft']['research'] == []
     stored = ops.get_asset(card['id'])['draft']
     assert stored == second['draft']
     # 改过风格约定后再写稿，记的是当时的版本。
@@ -106,8 +113,8 @@ def test_write_asset_draft_replaces_and_bumps_revision(ops):
 
 def test_write_asset_draft_rejects_bad_input(ops):
     card = ops.save_asset({'category': 'appearance', 'title': '少年'})
-    with pytest.raises(ValueError, match='quote须为非空原文引用'):
-        ops.write_asset_draft(card['id'], {'appearance': '瘦高'}, [{'quote': '  '}])
+    with pytest.raises(ValueError, match='note须为非空文本'):
+        ops.write_asset_draft(card['id'], {'appearance': '瘦高'}, [{'topic': '弄堂门朝哪开'}])
     with pytest.raises(ValueError, match='不认识的段落'):
         ops.write_asset_draft(card['id'], {'props': '黑伞'})
     with pytest.raises(ValueError, match='appearance资产不写location段'):
@@ -116,8 +123,8 @@ def test_write_asset_draft_rejects_bad_input(ops):
         ops.write_asset_draft(card['id'], {'appearance': '长' * 2001})
     with pytest.raises(ValueError, match='至少写一段'):
         ops.write_asset_draft(card['id'], {})
-    with pytest.raises(ValueError, match='sources第1条'):
-        ops.write_asset_draft(card['id'], {'appearance': '瘦高'}, ['甲约好接乙。'])
+    with pytest.raises(ValueError, match='research第1条'):
+        ops.write_asset_draft(card['id'], {'appearance': '瘦高'}, ['门朝南开'])
     # 每一次拒绝都不落库：卡片仍然没有文字稿。
     assert 'draft' not in ops.get_asset(card['id'])
 

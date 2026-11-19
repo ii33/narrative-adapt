@@ -194,8 +194,10 @@ DRAFT_SECTIONS = ('appearance', 'costume', 'prop', 'location', 'proportion', 'ma
 MAX_DRAFT_SECTION_CHARS = 2000
 # 考据引文的批次上限与 `source_location.locate_text` 的口径一致（一千条、合计二十万字）：
 # 同一句原文在两处都该被同样地接受或拒绝，不该因为写的是文字稿就换一套标准。
-MAX_DRAFT_SOURCES = 1000
-MAX_DRAFT_SOURCE_CHARS = 200000
+# 考据批次上限：它现在是「外部依据清单」而不是原文引文，条数不必卡太死，
+# 但仍要有上限，免得把整本书贴进资产卡。
+MAX_DRAFT_RESEARCH = 200
+MAX_DRAFT_RESEARCH_CHARS = 20000
 # 各类别允许写哪些段，按类别收窄：人物不该写地点、道具不该写服装——写进去的段落图用不上，
 # 却会让「文字稿已就绪」变成假信号。材料只留外观与标志性细节（它本来就不出形象图）。
 DRAFT_SECTIONS_BY_CATEGORY = {
@@ -233,44 +235,51 @@ def _draft_sections(category, sections):
     return {key: sections[key].strip() for key in DRAFT_SECTIONS if key in sections}
 
 
-def _draft_sources(sources):
-    """校验考据：每条必须是一句非空原文引用，可选自己的说明。
+def _draft_research(rows):
+    """校验考据：**可选**，记的是文化、历史、原理这类外部依据，不是作品原文。
 
-    引文不做定位核对：这里记的是「写稿人引了哪句」，逐字定位与校正仍归
-    `locate_source`（它有原文、改得动范围，而资产文字稿只有引文本身）。
+    作品是虚构的，原文没有可考据的东西；真正需要查的是「1940 年代上海弄堂的门朝哪开」
+    「宋代文官袍色怎么分」「枪机后坐是什么原理」这类现实依据。所以每条只要求「主题 +
+    结论」，来源（书名、纪录片、观察）可有可无；一条都不写也完全成立。
     """
-    if sources is None:
+    if rows is None:
         return []
-    if not isinstance(sources, list):
-        raise ValueError('sources须为[{quote, note}]数组；没有考据就显式传[]')
-    if len(sources) > MAX_DRAFT_SOURCES:
-        raise ValueError(f'考据最多{MAX_DRAFT_SOURCES}条')
+    if not isinstance(rows, list):
+        raise ValueError('research须为[{topic, note, basis}]数组；不写考据就省略或传[]')
+    if len(rows) > MAX_DRAFT_RESEARCH:
+        raise ValueError(f'考据最多{MAX_DRAFT_RESEARCH}条')
     result, total = [], 0
-    for index, row in enumerate(sources):
-        label = f'sources第{index + 1}条'
+    for index, row in enumerate(rows):
+        label = f'research第{index + 1}条'
         if not isinstance(row, dict):
             raise ValueError(f'{label}须为对象')
-        extra = set(row) - {'quote', 'note'}
+        extra = set(row) - {'topic', 'note', 'basis'}
         if extra:
-            raise ValueError(f'{label}有不认识的字段：' + '、'.join(sorted(extra)) + '；允许：quote、note')
-        quote = row.get('quote')
-        if not isinstance(quote, str) or not quote.strip():
-            raise ValueError(f'{label}的quote须为非空原文引用')
-        quote = quote.strip()
-        total += len(quote)
-        if total > MAX_DRAFT_SOURCE_CHARS:
-            raise ValueError(f'本批引文总长度不能超过{MAX_DRAFT_SOURCE_CHARS}字符')
-        item = {'quote': quote}
+            raise ValueError(f'{label}有不认识的字段：' + '、'.join(sorted(extra))
+                             + '；允许：topic、note、basis')
         note = row.get('note')
-        if note is not None:
-            if not isinstance(note, str) or not note.strip():
-                raise ValueError(f'{label}的note须为非空文本或省略')
-            item['note'] = note.strip()
+        if not isinstance(note, str) or not note.strip():
+            raise ValueError(f'{label}的note须为非空文本（这条考据查到了什么）')
+        note = note.strip()
+        total += len(note)
+        if total > MAX_DRAFT_RESEARCH_CHARS:
+            raise ValueError(f'本批考据总长度不能超过{MAX_DRAFT_RESEARCH_CHARS}字符')
+        item = {'note': note}
+        topic = row.get('topic')
+        if topic is not None:
+            if not isinstance(topic, str) or not topic.strip():
+                raise ValueError(f'{label}的topic须为非空文本或省略')
+            item['topic'] = topic.strip()
+        basis = row.get('basis')
+        if basis is not None:
+            if not isinstance(basis, str) or not basis.strip():
+                raise ValueError(f'{label}的basis须为非空文本或省略')
+            item['basis'] = basis.strip()
         result.append(item)
     return result
 
 
-def draft_row(previous, category, sections, sources, style_ref):
+def draft_row(previous, category, sections, research, style_ref):
     """把一次文字稿写入规范成落库形状：``revision`` 与 ``updated_at`` 由程序给。
 
     整份替换而不是打补丁：文字稿是「这个人物/道具/地点长什么样」的一整套描述，一半新一半
@@ -278,7 +287,7 @@ def draft_row(previous, category, sections, sources, style_ref):
     """
     prior = previous if isinstance(previous, dict) else {}
     return {'sections': _draft_sections(category, sections),
-            'sources': _draft_sources(sources),
+            'research': _draft_research(research),
             'style_ref': dict(style_ref or {}),
             'revision': int(prior.get('revision') or 0) + 1,
             'updated_at': datetime.now(UTC).isoformat(timespec='seconds')}
@@ -740,7 +749,7 @@ class AssetOperationsMixin:
                               'agreement_version': defaults['revision']}}
 
     @content_write
-    def write_asset_draft(self, asset_id: str, sections, sources=None) -> dict:
+    def write_asset_draft(self, asset_id: str, sections, research=None, sources=None) -> dict:
         """写一张资产的文字稿（整份替换），``draft.revision`` 由程序 +1。
 
         为什么先写文字稿：外观、服装、材质、比例、标志性细节这些「这张图必须画成什么样」
@@ -758,7 +767,8 @@ class AssetOperationsMixin:
             if row is None:
                 raise ContentGuardError('资产不存在')
             card = json.loads(row[0])
-            card['draft'] = draft_row(card.get('draft'), card.get('category'), sections, sources, style_ref)
+            card['draft'] = draft_row(card.get('draft'), card.get('category'), sections,
+                                      research if research is not None else sources, style_ref)
             revision = db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0] + 1
             db.execute("INSERT INTO assets VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
                        (card['id'], json.dumps(card, ensure_ascii=False)))

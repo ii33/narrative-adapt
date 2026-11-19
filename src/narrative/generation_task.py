@@ -225,7 +225,7 @@ def _expect(kind, expect):
 def _asset_draft(value):
     """文字稿进任务包的部分：段落与修订号。
 
-    考据（``sources``）与版本记录（``style_ref``）留在资产卡上：提示词要的是「画成什么
+    考据（``research``）与版本记录（``style_ref``）留在资产卡上：提示词要的是「画成什么
     样」，引文与版本是给人核对依据的，塞进提示词只会让模型去引用原文。
     """
     if not isinstance(value, dict):
