@@ -18,6 +18,11 @@
   换算要传感器尺寸，那是成像端的事，框图只存写下来的数。
 * ``unmet_needs`` 沿用需求层（person/prop/location/material）：这一帧还缺哪些资产。
 
+另有一层**输入**：``shot['timeline']['keyframes'][i]['subjects']``（见 ``normalize_subjects``）。
+框图是「结果」（谁落在画面哪一块），站位是「输入」（谁站在场景的哪个点、多高、朝哪）。
+两者刻意分开存：站位变了框图不会自己动，要重新推导（``previs_scene.derive_layout_from_subjects``）；
+没有预演时，站位就是出图的唯一空间依据。
+
 存哪：挂在该镜 ``shot['layouts'][str(offset_ms)]``。键是镜内时刻（相对镜首），必须
 是该镜时间轴上已存在的关键帧——框图没有独立的时间轴，它就是那一帧的一部分。
 因此本模块只管数据形状与哈希，不谈「哪个时刻合法」：那要问时间轴（见
@@ -30,17 +35,29 @@ import json
 import math
 from copy import deepcopy
 
-from .asset_needs import NEED_KINDS, validate_needs
+from .asset_needs import ELEMENT_TO_NEED, NEED_KINDS, validate_needs
 
 # 框图的全部字段。sharing/source/hash 都由程序补，模型只写 camera/objects/unmet_needs。
 FIELDS = ('shot_id', 'offset_ms', 'camera', 'objects', 'unmet_needs', 'source', 'hash')
 CAMERA_FIELDS = ('x', 'y', 'z', 'yaw', 'pitch', 'lens_mm', 'framing')
 OBJECT_FIELDS = ('asset_id', 'bbox', 'depth', 'kind')
-SOURCES = ('previs', 'manual')
+SOURCES = ('previs', 'manual', 'subjects')
+# 从站位推导出来的框图：界面据此说「这帧是从站位推的，不是从预演抓的」。
+SUBJECT_SOURCE = 'subjects'
 KINDS = NEED_KINDS
 CAMERA_DEFAULTS = {'x': 0.0, 'y': 1.6, 'z': 0.0, 'yaw': 0.0, 'pitch': 0.0, 'lens_mm': 35.0, 'framing': 'medium'}
 # 哈希只算前 16 位：够区分，又不至于让读视图和错误消息被长串十六进制淹掉。
 HASH_CHARS = 16
+
+# -- 站位（subjects）：投影的输入 -------------------------------------------------
+# 字段就是全部可写项；x/z 是场景平面坐标（米），y 是脚下高度，height 是盒体高，
+# facing 是朝向角（度，0＝面向 -z，与预演 yaw 同一套），kind 与本场的视觉元素同一套三分类。
+SUBJECT_FIELDS = ('asset_id', 'x', 'y', 'z', 'height', 'facing', 'kind')
+SUBJECT_KINDS = tuple(ELEMENT_TO_NEED)
+# 框图 objects.kind 用需求层那四个；set 落到 location（与 asset_needs 同一份映射，不另立一套）。
+SUBJECT_KIND_TO_LAYOUT = dict(ELEMENT_TO_NEED)
+# 缺省身高按成人算：站位通常只给坐标，身高是可选细节。
+SUBJECT_DEFAULT_HEIGHT = 1.75
 
 
 def _number(value, label, *, minimum=None, maximum=None):
@@ -109,6 +126,61 @@ def _object(row, index):
             'depth': _number(row['depth'], f'{label}的depth'), 'kind': kind}
 
 
+def _check_room(subject, room):
+    """站位是场景平面坐标：房间已知时不许站到墙外。
+
+    房间未知（本场还没有预演快照）就**不校验**：没有尺寸可依据，编一个范围只会拒绝合法站位。
+    约定与预演同一套：房间以原点为中心，x 落在 ±width/2、z 落在 ±depth/2 之内。
+    只查平面，不查 y：脚下高度可以是台阶、桌面，那由场景自己说了算。
+    """
+    if not isinstance(room, dict):
+        return
+    spans = {}
+    for axis, field in (('x', 'width'), ('z', 'depth')):
+        size = room.get(field)
+        if type(size) not in (int, float) or not math.isfinite(size) or size <= 0:
+            return  # 尺寸不全当未知：半份尺寸推不出边界
+        spans[axis] = size / 2
+    for axis, half in spans.items():
+        if abs(subject[axis]) > half:
+            raise ValueError(f'站位的{axis}={subject[axis]:g}m超出房间（房间宽{spans["x"] * 2:g}m、'
+                             f'深{spans["z"] * 2:g}m，{axis}须在±{half:g}m之内）')
+
+
+def _subject(row, index, room):
+    """单个站位：坐标是场景平面米数，height 缺省按成人身高，kind 缺省 person。"""
+    label = f'站位第{index + 1}项'
+    if not isinstance(row, dict):
+        raise ValueError(f'{label}须为对象')
+    extra = set(row) - set(SUBJECT_FIELDS)
+    if extra:
+        raise ValueError(f'{label}有不认识的字段：' + '、'.join(sorted(extra))
+                         + '；允许：' + '、'.join(SUBJECT_FIELDS))
+    identifier = row.get('asset_id')
+    if not isinstance(identifier, str) or not identifier.strip():
+        raise ValueError(f'{label}需要asset_id（这一帧站着的资产卡编号）')
+    kind = row.get('kind', 'person')
+    if kind not in SUBJECT_KINDS:
+        raise ValueError(f'{label}的kind须为' + '、'.join(SUBJECT_KINDS))
+    missing = [axis for axis in ('x', 'z') if axis not in row]
+    if missing:
+        raise ValueError(f'{label}需要' + '、'.join(missing) + '（场景平面坐标，米；y向上，x/z为地面）')
+    result = {'asset_id': identifier.strip(),
+              'x': _number(row['x'], f'{label}的x'),
+              # 脚下高度默认 0：站位通常只关心"站在地面哪个点"。
+              'y': _number(row.get('y', 0.0), f'{label}的y'),
+              'z': _number(row['z'], f'{label}的z'),
+              'height': _number(row.get('height', SUBJECT_DEFAULT_HEIGHT), f'{label}的height'),
+              'kind': kind}
+    if not result['height'] > 0:
+        raise ValueError(f'{label}的height须大于0米')
+    if 'facing' in row:
+        # 朝向角归一到 [0,360)：0 与 360 是同一个朝向，存两个数会算出两份不同的库文本。
+        result['facing'] = round(_number(row['facing'], f'{label}的facing') % 360.0, 3)
+    _check_room(result, room)
+    return result
+
+
 def body(layout):
     """哈希的输入＝除 ``hash`` 以外的全部字段；哈希不能把自己算进去。"""
     return {key: value for key, value in layout.items() if key != 'hash'}
@@ -162,6 +234,35 @@ def normalize_layout(raw, *, shot_id=None, offset_ms=None):
               'source': source}
     result['hash'] = layout_hash(result)
     return result
+
+
+def normalize_subjects(raw, *, room=None):
+    """校验并规范化一帧的站位清单（整体替换语义：给什么就是什么，``[]`` 即清空）。
+
+    ``room`` 是房间尺寸 ``{width, depth, height}``；``None`` 表示房间未知，这时不查越界
+    （见 ``_check_room``）。站位与框图互不影响：写站位不碰 ``layouts``，写框图不碰站位。
+    """
+    if not isinstance(raw, list):
+        raise ValueError('站位须为数组：整体替换，清空传[]')
+    subjects = [_subject(row, index, room) for index, row in enumerate(raw)]
+    seen = set()
+    for row in subjects:
+        if row['asset_id'] in seen:
+            # 同一帧里同一个资产只能站一个点：两个点该是两段调度，不是两个同名主体。
+            raise ValueError('同一帧里asset_id不能重复：' + row['asset_id'])
+        seen.add(row['asset_id'])
+    return subjects
+
+
+def subjects_at(shot, offset_ms):
+    """该时刻的站位（深拷贝，调用方改不到存储）；没有就 ``[]``。"""
+    timeline = (shot or {}).get('timeline')
+    if not isinstance(timeline, dict):
+        return []
+    for row in timeline.get('keyframes') or []:
+        if isinstance(row, dict) and row.get('offset_ms') == offset_ms and isinstance(row.get('subjects'), list):
+            return deepcopy(row['subjects'])
+    return []
 
 
 def layout_at(shot, offset_ms):

@@ -131,7 +131,7 @@ _LAYOUT = {'type': ['object', 'null'],
            'properties': {'shot_id': _ID, 'offset_ms': _MS, 'camera': _LAYOUT_CAMERA,
                           'objects': {'type': 'array', 'items': _LAYOUT_OBJECT},
                           'unmet_needs': {'type': 'array', 'items': _NEED},
-                          'source': {'type': 'string', 'enum': ['previs', 'manual']},
+                          'source': {'type': 'string', 'enum': ['previs', 'manual', 'subjects']},
                           'hash': {'type': 'string'}},
            'description': 'layout=null 清除该帧框图。bbox 为归一化画面坐标[x0,y0,x1,y1]（0..1，原点左上，须x0<x1、y0<y1）；depth 为相对镜头的景深（米）；hash 由程序重算，不用填'}
 _ACTIONS.extend([
@@ -139,6 +139,20 @@ _ACTIONS.extend([
             ['shot_id', 'offset_ms', 'layout']),
     _action('clear_keyframe_layouts', {'shot_id': _ID}, ['shot_id']),
 ])
+# B2c 站位：这一帧谁站在场景哪个点（投影的输入，不是结果）。x/z 为场景平面米数
+# （y 向上、x/z 为地面，与 .director 同一原点），y 为脚下高度，height 缺省按成人，
+# facing 为朝向角（度，0＝面向 -z），kind 与视觉元素同一套三分类。
+_SUBJECT = {'type': 'object', 'additionalProperties': False, 'required': ['asset_id', 'x', 'z'],
+            'properties': {'asset_id': _ID, 'x': {'type': 'number'}, 'z': {'type': 'number'},
+                           'y': {'type': 'number'},
+                           'height': {'type': 'number', 'exclusiveMinimum': 0},
+                           'facing': {'type': 'number'},
+                           'kind': {'type': 'string', 'enum': ['person', 'prop', 'set']}}}
+_ACTIONS.append(_action('set_keyframe_subjects', {
+    'shot_id': _ID, 'offset_ms': _MS,
+    'subjects': {'type': 'array', 'items': _SUBJECT,
+                 'description': '整体替换这一帧的站位；空数组清空。站位不动框图，框图由derive_keyframe_layout从站位推'}},
+    ['shot_id', 'offset_ms', 'subjects']))
 # B2b 分段运镜：运动在段之间，只发布人给的那两项（kind/speed）与一句备注；
 # 主体位移、方向、景别差与机位位移全部由前后两帧框图现算，不接受模型填数字。
 _SEGMENT_MOVE = {'type': 'object', 'additionalProperties': False,

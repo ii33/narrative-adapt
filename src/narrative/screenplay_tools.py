@@ -47,7 +47,7 @@ def register(Tool, register_tool, validate):
 
     add("read_storyboard", "按场读取分镜、静帧、预演帧率和共享二维调度对象/动作轨。毫秒区分剪辑时间、镜内offset_ms和场内动作time_ms；revision用于下一次原子编辑。每镜timeline.keyframes[i].layout是该帧框图（没有则null）；shots[i].segments每段附带motion（该段由前后两帧框图现算的位移/景别/机位差，算不出来时available=false）", {
         "unit_id": text | {"required": True}})
-    add("read_storyboard_layout", "只读某镜全部框图与哈希：每项offset_ms＋hash＋layout（camera机位、objects的归一化bbox[x0,y0,x1,y1]与景深、unmet_needs、source）。供界面画近似previs与助手核对这一帧该有什么；不修改任何数据", {
+    add("read_storyboard_layout", "只读某镜全部框图与哈希：每项offset_ms＋hash＋layout（camera机位、objects的归一化bbox[x0,y0,x1,y1]与景深、unmet_needs、source）。keyframes逐帧给subjects（站位：asset_id,x,y,z,height,facing,kind）与source（previs=从预演抓的、subjects=从站位推的、manual=人写的，没有框图为null）。供界面画近似previs与助手核对这一帧该有什么；不修改任何数据", {
         "unit_id": text | {"required": True}, "shot_id": text | {"required": True}})
     add("read_segment_motion", "只读某镜某一段的运动推导：按asset_id配对的前后bbox、水平方向left/right/center/none、表观运动approach/recede/lateral/none、两端景别与机位/焦距位移，附校验问题、运镜与框图不一致的警告，以及拼好的视频提示词。派生值一律现算不落库，只读不写", {
         "unit_id": text | {"required": True}, "shot_id": text | {"required": True},
@@ -62,6 +62,23 @@ def register(Tool, register_tool, validate):
         "scene_id": {"type": ["string", "null"], "description": "预演场景编号或文件名；目录里只有一个.director时可省略"},
         "time_offset_ms": {"type": ["integer", "null"], "description": "镜头第0毫秒对应的预演时刻（毫秒），省略为0"}}, writes=True)
     add("capture_previs_layout", "按该镜已绑定的预演机位，把镜内offset_ms这一帧投影成框图并写入（source=previs，bbox为归一化画面坐标、depth为米，机位来自预演、景别按主体占比粗判）。offset_ms须是该镜已有关键帧。已有手工框图默认不覆盖，确认替换传overwrite=true；上次预演投影可直接重算", {
+        "unit_id": text | {"required": True}, "shot_id": text | {"required": True},
+        "offset_ms": integer | {"required": True},
+        "overwrite": {"type": "boolean", "description": "默认false：保留已有手工框图"}}, writes=True)
+    subject = {"type": "object", "additionalProperties": False, "required": ["asset_id", "x", "z"],
+               "properties": {"asset_id": text | {"description": "这一帧站着的资产卡编号（同帧不可重复）"},
+                              "x": {"type": "number", "description": "场景平面坐标（米），与预演同一原点；y向上，x/z为地面"},
+                              "z": {"type": "number", "description": "场景平面坐标（米）；0＝预演原点，负值朝机位一侧按场景自身朝向"},
+                              "y": {"type": "number", "description": "脚下高度（米），默认0"},
+                              "height": {"type": "number", "exclusiveMinimum": 0, "description": "盒体高（米），默认1.75"},
+                              "facing": {"type": "number", "description": "朝向角（度），0＝面向-z，与预演yaw同一套；可选"},
+                              "kind": {"type": "string", "enum": ["person", "prop", "set"], "description": "默认person"}}}
+    add("set_keyframe_subjects", "整体替换某一帧的站位subjects：这一帧谁站在场景哪个点、多高、朝哪（投影的输入，不是框图）。x/z为场景平面米数、y为脚下高度、height缺省1.75、kind=person|prop|set缺省person、facing为朝向角（度，0＝面向-z，可选）。offset_ms须是该镜已有关键帧；x/z超出本场房间范围会被拒（未知房间不校验）；同帧asset_id不可重复。空数组清空。写站位不改框图，框路由derive_keyframe_layout从站位推", {
+        "unit_id": text | {"required": True}, "revision": integer | {"required": True},
+        "shot_id": text | {"required": True}, "offset_ms": integer | {"required": True},
+        "subjects": {"type": "array", "items": subject, "required": True,
+                     "description": "整体替换这一帧的站位；空数组清空"}}, writes=True)
+    add("derive_keyframe_layout", "算出该帧框图并写入：有预演走预演（source=previs），没有预演就用这一帧的站位按盒体投影推（source=subjects，camera取该帧框图机位或该镜绑定的预演机位）。offset_ms须是该镜已有关键帧；已有手工框图默认不覆盖，确认替换传overwrite=true；上一次机器算的可直接重算。既无可用预演又无站位/机位时报错分别说明缺什么", {
         "unit_id": text | {"required": True}, "shot_id": text | {"required": True},
         "offset_ms": integer | {"required": True},
         "overwrite": {"type": "boolean", "description": "默认false：保留已有手工框图"}}, writes=True)

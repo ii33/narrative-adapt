@@ -504,6 +504,10 @@ def test_marker_bound_frame_moves_the_named_moment(tmp_path, monkeypatch):
 def test_run_generation_task_reports_missing_skill_and_unsupported_warnings(tmp_path, monkeypatch):
     """产图按钮的两种结局：技能缺失说清缺什么；成功把 warnings 原样带回界面。"""
     monkeypatch.setenv("NARRATIVE_SKILLS_FILE", str(tmp_path / "skills.json"))
+    # 现在随程序带内置生成技能，所以「技能缺失」这条要把内置也一并摘掉才成立。
+    from narrative import skills as skills_module
+    monkeypatch.setattr(skills_module, "BUILTIN_SKILLS", ())
+    monkeypatch.setattr(skills_module, "BUILTIN_GENERATION_SKILLS", ())
     with transcript_shell(tmp_path, monkeypatch) as ui:
         ops, screenplay_id, unit_id, board = prepare(ui)
         first = board["shots"][0]["id"]

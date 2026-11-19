@@ -38,6 +38,8 @@ import json
 import math
 from pathlib import Path
 
+from .storyboard_layout import SUBJECT_KIND_TO_LAYOUT, SUBJECT_SOURCE, layout_at, subjects_at
+
 FORMAT = 'director-desk'
 # 与 DirectorDesk 的 camera.filmGauge 一致：传感器短边 36 mm（横画幅即宽度）。
 SENSOR_GAUGE_MM = 36.0
@@ -58,6 +60,8 @@ EDGE_MARGIN = 0.02
 WIDE_ASPECT = 1.9
 BBOX_DIGITS = 4
 DEPTH_DIGITS = 3
+# 机位角度/焦距写进框图时保留的小数位：与 ``previs_tools.CAMERA_DIGITS`` 同一精度。
+POSE_DIGITS = 3
 
 # 盒体的 8 个角与 6 个面：面用来对视锥六面做实心裁剪，见 _project_box。
 _CORNERS = tuple((x, y, z) for x in (0, 1) for y in (0, 1) for z in (0, 1))
@@ -300,6 +304,28 @@ def _angles(position, target):
     return yaw, pitch
 
 
+def camera_from_layout(camera):
+    """框图里写的机位 → ``project`` 要的 ``{position, target, focal}``。
+
+    框图存 x/y/z 与 yaw/pitch（度）：能人读、能直接画；投影要「位置 + 注视点」。
+    这里按 ``_angles`` 的反方向走同一套约定（yaw=0 看向 -z，pitch 为正即抬头）：
+
+        forward = (-sin(yaw)·cos(pitch), sin(pitch), -cos(yaw)·cos(pitch))
+
+    注视点取「机位 + 朝向」，只差单位长度：``_basis`` 只用方向，距离不进 bbox，
+    于是「用框图机位重算」与「当初从预演抓的那一帧」在同一台机器上给出同一画面。
+    """
+    defaults = {'x': 0.0, 'y': 1.6, 'z': 0.0, 'yaw': 0.0, 'pitch': 0.0, 'lens_mm': DEFAULT_FOCAL_MM}
+    values = {field: _number((camera or {}).get(field), f'机位{field}', default)
+              for field, default in defaults.items()}
+    yaw, pitch = math.radians(values['yaw']), math.radians(values['pitch'])
+    position = (values['x'], values['y'], values['z'])
+    forward = (-math.sin(yaw) * math.cos(pitch), math.sin(pitch), -math.cos(yaw) * math.cos(pitch))
+    return {'position': list(position),
+            'target': [position[index] + forward[index] for index in range(3)],
+            'focal': values['lens_mm'], 'yaw': values['yaw'], 'pitch': values['pitch']}
+
+
 # -- 投影 ---------------------------------------------------------------------
 
 def project(scene, camera, time_s, aspect=None):
@@ -470,6 +496,109 @@ def framing_of(bbox, aspect=None):
     if height >= CLOSE_HEIGHT or (cropped and height >= MEDIUM_HEIGHT):
         return 'close'
     return 'medium' if height >= MEDIUM_HEIGHT else 'wide'
+
+
+# -- 站位 → 框图 ---------------------------------------------------------------
+
+def project_boxes(boxes, camera, aspect=None):
+    """把一批世界盒体投影成 ``{label, bbox, depth}``，按 depth **从远到近**排序。
+
+    ``boxes`` 是 ``(label, low, high)`` 三元组序列（世界坐标，米）。
+    与 ``project`` 共用 ``_project_box``：站位推导没有场景实体，但针孔投影只有一份实现
+    ——再抄一套，迟早会在裁剪、景深与近裁剪面上和预演那条路分成两个结果。
+    """
+    ratio = _aspect_ratio(aspect if aspect is not None else DEFAULT_ASPECT)
+    position = _vector(camera.get('position'), '摄影机位置')
+    target = _vector(camera.get('target'), '摄影机注视点')
+    focal = _positive(camera.get('focal', DEFAULT_FOCAL_MM), '焦距（毫米）')
+    tan_h, tan_v = _fov_extents(focal, ratio)
+    basis = _basis(position, target)
+    rows = []
+    for label, low, high in boxes:
+        hit = _project_box(tuple(low), tuple(high), position, basis, tan_h, tan_v)
+        if hit is None:
+            continue  # 整体出画或在机位背后：这一帧它不在画面里，不占框图对象
+        bbox, depth = hit
+        rows.append({'label': label, 'bbox': bbox, 'depth': depth})
+    rows.sort(key=lambda row: (-row['depth'], row['label']))
+    return rows
+
+
+def subject_box(subject):
+    """站位 → 世界盒体：宽深都是 0.45 m、高 ``height``，底面贴在 ``y`` 上。
+
+    宽度沿用演员的肩宽（``SHOULDER_WIDTH_M``）：站位只声明「站在哪个点、多高」，
+    没有体积字段；道具也按同一底面算——站位是排位置，不是建模。
+    """
+    half = SHOULDER_WIDTH_M / 2
+    x, y, z = float(subject['x']), float(subject.get('y') or 0.0), float(subject['z'])
+    height = float(subject['height'])
+    return (x - half, y, z - half), (x + half, y + height, z + half)
+
+
+def _shot_aspect(shot):
+    """镜头画幅：与 ``storyboard_operations._shot_aspect`` 同一口径（两处都只读这两个字段）。"""
+    return next((shot[field].strip() for field in ('aspect_ratio', 'frame_aspect')
+                 if isinstance(shot.get(field), str) and shot[field].strip()), DEFAULT_ASPECT)
+
+
+def derive_layout_from_subjects(board, shot, offset_ms, *, scene=None):
+    """用一帧的站位推出框图（只算不写；形状可直接交给 ``set_keyframe_layout``）。
+
+    为什么放在本模块：这是「世界坐标 → 归一化 bbox」的同一件事，只是实体换成了人写的
+    站位；它要的机位反解、盒体投影、景别粗判全在这里，放到 ``storyboard_layout``
+    会让那个「只管数据形状与哈希」的模块长出投影依赖。
+
+    机位只有两个来源，都没有就**报错**，绝不编一个默认机位：
+
+    1. 这一帧已有的框图机位（``shot['layouts'][时刻].camera``，人写的或上次投影留下的）；
+    2. 该镜绑定的预演机位（``shot['previs']`` ＋ 调用方传进来的 ``scene``）。
+
+    ``board`` 用来核对这一镜确实属于这一场：调用方常把读视图里的一镜摘出来再传回来，
+    认错了镜就等于把别人的站位投进这一场。
+    """
+    if not any(row.get('id') == shot.get('id') for row in board.get('shots') or []):
+        raise ValueError('该镜不属于这一场，无法按站位推导框图')
+    if type(offset_ms) is not int or offset_ms < 0:
+        raise ValueError('镜内时刻必须是大于等于 0 的整数毫秒')
+    subjects = subjects_at(shot, offset_ms)
+    if not subjects:
+        raise ValueError(f'{offset_ms}ms这一帧没有站位（subjects为空）：先用set_keyframe_subjects写站位，'
+                         '或改用capture_previs_layout从预演投影')
+    previs = shot.get('previs') if isinstance(shot.get('previs'), dict) else None
+    existing = layout_at(shot, offset_ms)
+    camera = None
+    if isinstance(existing, dict) and isinstance(existing.get('camera'), dict):
+        camera = camera_from_layout(existing['camera'])
+    elif scene is not None and previs and previs.get('camera_id'):
+        time_ms = (previs.get('time_offset_ms') or 0) + offset_ms
+        camera = camera_at(scene, time_ms / 1000, previs['camera_id'])
+    if camera is None:
+        raise ValueError(f'{offset_ms}ms这一帧没有机位：本帧还没有框图机位（layout.camera），'
+                         '该镜也没有可用的预演机位；没有机位就算不出投影（这里不替你编一个默认机位）')
+    aspect = _shot_aspect(shot)
+    kinds = {subject['asset_id']: SUBJECT_KIND_TO_LAYOUT.get(subject.get('kind') or 'person', 'person')
+             for subject in subjects}
+    rows = project_boxes([(subject['asset_id'], *subject_box(subject)) for subject in subjects],
+                         camera, aspect)
+    objects = [{'asset_id': row['label'], 'bbox': row['bbox'], 'depth': row['depth'],
+                'kind': kinds[row['label']]} for row in rows]
+    # 景别看最近的演员（objects 已按远→近排序）；没人就看面积最大的对象。
+    people = [row for row in objects if row['kind'] == 'person']
+    subject_row = (min(people, key=lambda row: row['depth']) if people else
+                   max(objects, key=lambda row: (row['bbox'][2] - row['bbox'][0])
+                       * (row['bbox'][3] - row['bbox'][1])) if objects else None)
+    return {'shot_id': shot['id'], 'offset_ms': offset_ms, 'source': SUBJECT_SOURCE,
+            'camera': {'x': round(camera['position'][0], POSE_DIGITS),
+                       'y': round(camera['position'][1], POSE_DIGITS),
+                       'z': round(camera['position'][2], POSE_DIGITS),
+                       'yaw': round(camera['yaw'], POSE_DIGITS),
+                       'pitch': round(camera['pitch'], POSE_DIGITS),
+                       'lens_mm': round(camera['focal'], POSE_DIGITS),
+                       'framing': framing_of(subject_row['bbox'] if subject_row else None, aspect)},
+            'objects': objects,
+            # 站位不声明缺什么资产：需求层（asset_needs）才管这件事，这里留空不猜。
+            'unmet_needs': []}
 
 
 # -- 小工具 -------------------------------------------------------------------

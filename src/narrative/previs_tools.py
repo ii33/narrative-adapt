@@ -43,8 +43,16 @@ from uuid import uuid4
 from . import previs_host
 from .content_errors import ContentConflictError, ContentGuardError
 from .graph_store import GraphStore
-from .previs_scene import DEFAULT_FOCAL_MM, camera_at, framing_of, load_scene, project
+from .previs_scene import (
+    DEFAULT_FOCAL_MM,
+    camera_at,
+    derive_layout_from_subjects,
+    framing_of,
+    load_scene,
+    project,
+)
 from .project_package import layout
+from .storyboard_layout import SUBJECT_SOURCE
 
 ENV_ROOT = 'NARRATIVE_PREVIS_PROJECT_ROOT'
 PREVIS_DIR = 'previs'
@@ -348,6 +356,97 @@ class StoryboardPrevisMixin:
                 'time_ms': time_ms, 'framing': framing, 'projected': objects, 'layout': stored,
                 'snapshot_source': snapshot_source, 'state_path': scene.get('state_path') or ''}
 
+    # -- 写：站位（投影的输入）与按站位投影 -----------------------------------
+
+    def set_keyframe_subjects(self, unit_id, revision, shot_id, offset_ms, subjects):
+        """整体替换某一帧的站位（投影的**输入**，不是框图）。
+
+        为什么单开一个工具而不让模型直接写 ``apply_storyboard_changes``：站位是有预演/没预演
+        两条路的同一个入口，和它配套的还有 ``derive_keyframe_layout``；放在同一组工具里，
+        模型才找得到「这台机器没有预演时，空间依据靠站位给」这一步。写法本身仍走同一条
+        原子写入口，不另存一份数据，也不碰 ``layouts``。
+        """
+        offset = _offset(offset_ms, '镜内时刻', 0)
+        # 走公开写入口而不是 _write_storyboard：内容校验没过时它会返回暂存回执（problems 可局部修补），
+        # 而直接写内部入口会把这类内容问题变成一次硬错误，同一条数据两种处理口径。
+        written = self.apply_storyboard_changes(unit_id, revision, [
+            {'op': 'set_keyframe_subjects', 'shot_id': shot_id, 'offset_ms': offset, 'subjects': subjects}])
+        frame = _written_frame(written, shot_id, offset)
+        if frame is None:
+            # 内容没过校验：写入口给的是暂存回执（status=staged＋problems），原样交回去让人修。
+            return written
+        return {'unit_id': unit_id, 'shot_id': shot_id, 'offset_ms': offset,
+                'revision': written['revision'], 'subjects': frame.get('subjects') or [],
+                'layout': frame.get('layout'),
+                'note': '站位是投影的输入；要出框图再调derive_keyframe_layout'}
+
+    def derive_keyframe_layout(self, unit_id, shot_id, offset_ms, overwrite=False):
+        """算出这一帧的框图并写入：**有预演走预演，没预演用站位推**。
+
+        为什么一个工具管两条路：调用方要的是「这一帧的框图」这个结果，而「机位从哪来」
+        恰恰是它最容易判断错的地方（预演绑了但预演台没开、绑的机位被删了、文件还没放进来）。
+        两种来源分开标在框图里：``source=previs`` 是从预演抓的，``source=subjects`` 是从站位推的
+        ——界面因此说得出这一帧是谁算的。
+
+        已有**手工**框图默认不覆盖（``source=manual`` 是人写的），确认替换传 ``overwrite=true``；
+        上一次机器算出来的（previs/subjects）可以直接重算。
+        """
+        from .storyboard_operations import _shot_in_scene
+
+        board = self.read_storyboard(unit_id)
+        shot = _shot_in_scene(board, shot_id)
+        offset = _offset(offset_ms, '镜内时刻', 0)
+        offsets = [row['offset_ms'] for row in shot['timeline']['keyframes']]
+        if offset not in offsets:
+            raise ValueError(f'该镜在{offset}ms没有关键帧；先用apply_storyboard_changes的'
+                             f'add_timeline_keyframe或set_keyframe建立该时刻（现有：{offsets}ms）')
+        existing = (shot.get('layouts') or {}).get(str(offset))
+        if isinstance(existing, dict) and existing.get('source') == MANUAL_SOURCE and not overwrite:
+            raise ContentGuardError(f'该帧已有手工框图（hash {existing.get("hash")}），未覆盖；'
+                                    '确认要用机位重算请传overwrite=true')
+        previs = shot.get('previs') if isinstance(shot.get('previs'), dict) else None
+        previs_problem = ''
+        if previs and previs.get('camera_id'):
+            try:
+                captured = self.capture_previs_layout(unit_id, shot_id, offset, overwrite=True)
+            except ValueError as error:
+                # 预演绑了但读不到（没开预演台、工程文件不在、机位被删、超出场景时长）：
+                # 记下原因继续试站位；真算不出来时两边的缺口都要报出来，否则调用方不知道补哪边。
+                previs_problem = str(error)
+            else:
+                return captured | {'source': PREVIS_SOURCE, 'derived_from': PREVIS_SOURCE,
+                                   'previs_problem': ''}
+        try:
+            payload = derive_layout_from_subjects(board, shot, offset)
+        except ValueError as error:
+            missing = str(error)
+            if previs_problem:
+                missing += '；预演这条路也不通：' + previs_problem
+            elif not (previs and previs.get('camera_id')):
+                missing += '；该镜也没有绑定预演机位（set_shot_previs）'
+            raise ValueError('算不出这一帧的框图：' + missing) from error
+        written = self.apply_storyboard_changes(unit_id, board['revision'], [
+            {'op': 'set_keyframe_layout', 'shot_id': shot_id, 'offset_ms': offset, 'layout': payload}])
+        frame = _written_frame(written, shot_id, offset)
+        if frame is None:
+            return written  # 暂存回执：同上，交给调用方按 problems 修补
+        return {'unit_id': unit_id, 'shot_id': shot_id, 'offset_ms': offset, 'revision': written['revision'],
+                'source': SUBJECT_SOURCE, 'derived_from': SUBJECT_SOURCE, 'layout': frame.get('layout'),
+                'camera': payload['camera'], 'objects': payload['objects'],
+                'subjects': frame.get('subjects') or [],
+                'previs_problem': previs_problem}
+
+    def _subject_room(self, unit_id):
+        """站位校验用的房间尺寸（``{width, depth, height}``）；房间未知时返回 ``None``。
+
+        为什么从预演快照取：房间尺寸只有预演那边知道，而分镜写入口不该去开页面；
+        ``previs/<场次>/scene.state.json`` 是预演台自己落的那份，读它不需要页面在跑。
+        没预演、预演台从没落过快照时就是「房间未知」，站位不校验越界——没有尺寸可依据。
+        """
+        state = previs_host.read_state(previs_host.state_file(self._previs_dir(unit_id)))
+        room = state.get('room') if isinstance(state, dict) else None
+        return room if isinstance(room, dict) else None
+
     def _capture_scene(self, unit_id, previs):
         """抓帧要用的场景：先问页面，不可达再读 ``.director``。
 
@@ -417,6 +516,13 @@ class StoryboardPrevisMixin:
                 return path, scene_id
         raise ValueError('本场预演里没有场景' + scene_id + '；可用：'
                          + '、'.join(_previs_scene_labels(files)))
+
+
+def _written_frame(board, shot_id, offset_ms):
+    """从写入口返回的读视图里摘出这一帧：站位与框图都挂在时间轴关键帧上。"""
+    shot = next((row for row in board.get('shots') or [] if row['id'] == shot_id), None)
+    timeline = (shot or {}).get('timeline') if isinstance((shot or {}).get('timeline'), dict) else {}
+    return next((row for row in timeline.get('keyframes') or [] if row.get('offset_ms') == offset_ms), None)
 
 
 def _framing(scene, objects):

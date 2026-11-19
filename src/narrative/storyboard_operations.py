@@ -57,6 +57,7 @@ from .storyboard_layout import (
     layout_at,
     move_layout,
     normalize_layout,
+    normalize_subjects,
     store_layout,
     validate_layouts,
 )
@@ -81,6 +82,9 @@ LAYOUT_FIELDS = {
     'clear_keyframe_layouts': {'shot_id'},
 }
 NEED_FIELDS = {'set_asset_needs': {'needs'}, 'set_shot_asset_needs': {'shot_id', 'needs'}}
+# 站位：整体替换某一帧的主体位置（投影的输入）。它不动框图——框图是结果，
+# 由 derive_keyframe_layout 从站位现算，两者各存一份、互不覆盖。
+SUBJECT_FIELDS = {'set_keyframe_subjects': {'shot_id', 'offset_ms', 'subjects'}}
 # 分段运镜：只存人给的那几个字段（kind/speed/notes）。主体位移、景别差与机位位移都由前后
 # 两帧的框图现算（见 segment_motion），落库就等于存了第二份会过期的真相。
 MOTION_FIELDS = {'set_segment_motion': {'shot_id', 'from_ms', 'to_ms', 'camera_move', 'notes'}}
@@ -293,6 +297,32 @@ def apply_layout(board, change):
     store_layout(shot, normalize_layout(layout, shot_id=shot['id'], offset_ms=offset))
 
 
+def apply_subjects(board, change, room=None):
+    """站位整体替换：只写「这一帧谁站在哪」，不碰框图。
+
+    ``room`` 是本场房间尺寸（``{width, depth, height}``）；``None`` 表示房间未知，
+    这时不查越界（见 ``storyboard_layout._check_room``）。
+
+    为什么必须落在**显式**的时间轴关键帧上：站位存在计划行里，而读视图在没有计划时会
+    从静帧重新推导计划行——写在推导行上的站位下一秒就没了，等于存了一条读不到的数据。
+    只有静帧的场次，先 ``add_timeline_keyframe`` 建立这一帧。
+    """
+    shot = _shot_in_scene(board, change.get('shot_id'))
+    offset = _integer(change.get('offset_ms'), '站位所在的镜内时刻')
+    timeline = shot.get('timeline') if isinstance(shot.get('timeline'), dict) else {}
+    row = next((item for item in timeline.get('keyframes') or [] if item.get('offset_ms') == offset), None)
+    if row is None:
+        stills = {frame['offset_ms'] for frame in shot.get('keyframes') or []}
+        hint = '该时刻只有静帧、还没有时间轴关键帧' if offset in stills else '该时刻没有关键帧'
+        raise ValueError(f'{hint}：站位挂在时间轴关键帧上，先用add_timeline_keyframe建立{offset}ms这一帧')
+    subjects = normalize_subjects(change.get('subjects'), room=room)
+    if subjects:
+        row['subjects'] = subjects
+    else:
+        # 空数组＝清空：不留一个空列表，读的人就不用猜「空是真没站位还是写过又清掉」。
+        row.pop('subjects', None)
+
+
 def _max_segment_ms(board):
     """单段上限可配：场级 timeline_max_segment_ms 覆盖默认 2000ms。"""
     limit = board.get('timeline_max_segment_ms', DEFAULT_MAX_SEGMENT_MS)
@@ -415,9 +445,9 @@ def validate_timeline(board):
                 raise ValueError('关键帧计划须为列表')
             offsets = set()
             for row in plan:
-                if (not isinstance(row, dict) or set(row) - {'offset_ms', 'moment_name', 'description'}
+                if (not isinstance(row, dict) or set(row) - {'offset_ms', 'moment_name', 'description', 'subjects'}
                         or 'offset_ms' not in row):
-                    raise ValueError('关键帧计划须含offset_ms，可选moment_name与description')
+                    raise ValueError('关键帧计划须含offset_ms，可选moment_name、description与subjects')
                 offset = _integer(row['offset_ms'], '关键帧计划位置')
                 if offset > duration:
                     raise ValueError(f'关键帧计划位置{offset}ms超出镜头{shot["id"]}时长{duration}ms')
@@ -427,6 +457,10 @@ def validate_timeline(board):
                 for field in ('moment_name', 'description'):
                     if field in row and not isinstance(row[field], str):
                         raise ValueError('时刻命名与描述须为文本')
+                if 'subjects' in row:
+                    # 入库前再查一遍形状：站位是坐标数据，写到墙外或重复资产都算存坏了。
+                    # 这里不查房间（房间尺寸要有预演快照才知道），越界在写入口就拒掉了。
+                    normalize_subjects(row['subjects'])
                 _check_aspect(row, aspect)
             anchors |= offsets
             if 'segments' in timeline:
@@ -440,8 +474,14 @@ def timeline_view(board, shot):
     """读视图：老数据没有 timeline 时按 duration_ms 与现有关键帧推导，不迁移也不改写存储。"""
     duration = shot['duration_ms']
     stored = shot.get('timeline') if isinstance(shot.get('timeline'), dict) else {}
-    plan = [{'offset_ms': row['offset_ms'], 'moment_name': row.get('moment_name', ''),
-             'description': row.get('description', '')} for row in stored.get('keyframes') or []]
+    plan = []
+    for row in stored.get('keyframes') or []:
+        item = {'offset_ms': row['offset_ms'], 'moment_name': row.get('moment_name', ''),
+                'description': row.get('description', '')}
+        if isinstance(row.get('subjects'), list) and row['subjects']:
+            # 站位是存下来的输入，读视图原样带出；没有就不带，老场次的读视图一个字不变。
+            item['subjects'] = deepcopy(row['subjects'])
+        plan.append(item)
     if not plan:
         # 没有关键帧计划就看静帧：老场次只有关键帧，照样能说出「这一镜内部有几段」。
         plan = sorted(({'offset_ms': frame['offset_ms'], 'moment_name': '', 'description': ''}
@@ -543,7 +583,7 @@ def _video_generation_row(shot, task, receipt, basis_hash, prompt_text):
             'generated_by': {'skill': receipt['skill']['name'], 'kind': 'video'}}
 
 
-def _apply(db, board, change, block_ids):
+def _apply(db, board, change, block_ids, room=None):
     raw_op = change.get('op') if isinstance(change, dict) else None
     if board['approved'] and raw_op != 'set_approved' and not (raw_op == 'set_keyframe' and 'style_path' in change):
         raise ContentGuardError('请先解除定案再编辑镜头方案')
@@ -565,6 +605,10 @@ def _apply(db, board, change, block_ids):
         return
     if op in LAYOUT_FIELDS:
         apply_layout(board, change)
+        return
+    if op in SUBJECT_FIELDS:
+        # 站位是框图的输入，自己一组动作：写它不改 layouts，写 layouts 不改它。
+        apply_subjects(board, change, room=room)
         return
     if op in MOTION_FIELDS:
         apply_segment_motion(board, change)
@@ -679,20 +723,27 @@ class StoryboardOperationsMixin(StoryboardPrevisMixin, StoryboardAssetsMixin, St
         return gap_view(self.read_storyboard(unit_id), self.get_asset)
 
     def read_storyboard_layout(self, unit_id, shot_id):
-        """只读：本镜全部框图与哈希。
+        """只读：本镜全部框图、站位与哈希。
 
         `read_storyboard` 已经把框图贴在 `shot.timeline.keyframes[i].layout` 上；
         这里再单列一份「按时刻排序 + 明确哈希」的清单，供界面画近似 previs、助手核对
         「这一帧该有什么」时不必自己翻时间轴。
+
+        `keyframes` 逐帧给 `subjects`（投影的输入）与 `source`（框图从哪来：
+        previs＝从预演抓的、subjects＝从站位推的、manual＝人写的），界面据此说得出
+        「这帧的框图是怎么来的」。没有站位/框图的帧也在这里，不会因为layouts为空而消失。
         """
         board = self.read_storyboard(unit_id)
         shot = _shot_in_scene(board, shot_id)
         layouts = shot.get('layouts') if isinstance(shot.get('layouts'), dict) else {}
         rows = [{'offset_ms': int(key), 'hash': row['hash'], 'layout': row}
                 for key, row in sorted(layouts.items(), key=lambda item: int(item[0]))]
+        frames = [{'offset_ms': row['offset_ms'], 'subjects': row.get('subjects') or [],
+                   'source': (row.get('layout') or {}).get('source')}
+                  for row in shot['timeline']['keyframes']]
         return {'unit_id': unit_id, 'shot_id': shot_id, 'revision': board['revision'],
                 'keyframe_offsets': [row['offset_ms'] for row in shot['timeline']['keyframes']],
-                'layouts': rows, 'count': len(rows)}
+                'layouts': rows, 'count': len(rows), 'keyframes': frames}
 
     def read_segment_motion(self, unit_id, shot_id, from_ms, to_ms):
         """只读：某一段的运动推导、校验问题与它对应的视频提示词。
@@ -1070,11 +1121,16 @@ class StoryboardOperationsMixin(StoryboardPrevisMixin, StoryboardAssetsMixin, St
                     raise ValueError('媒体所属镜头不属于本场')
                 media_shot.update(deepcopy(media_patch['values']))
             block_ids = {r[0] for r in db.execute("SELECT id FROM script_blocks WHERE unit_id=?", (unit_id,))}
+            # 房间尺寸只有站位校验用得上，而取值要问预演层（见 _subject_room）：没有
+            # set_keyframe_subjects 的写入不该为它付一次文件读。
+            room = (self._subject_room(unit_id)
+                    if any(change.get('op') in SUBJECT_FIELDS for change in changes if isinstance(change, dict))
+                    else None)
             for index, change in enumerate(changes):
                 with content_item(['changes', index], change):
                     if 'visual_elements' in change:
                         validate_elements(change['visual_elements'], asset_lookup, path=['elements' if asset_analysis else 'changes', index, 'visual_elements'], required=False)
-                    _apply(db, board, change, block_ids)
+                    _apply(db, board, change, block_ids, room=room)
                     if asset_analysis and change.get('op') == 'update_shot':
                         next(shot for shot in board['shots'] if shot['id'] == change['shot_id'])['assets_analyzed'] = True
             if sketch_receipt is not None:

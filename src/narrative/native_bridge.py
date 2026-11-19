@@ -1908,6 +1908,9 @@ class NativeBridge(QObject):
                          "frame_id": frame.get("id", ""),
                          "marker_id": marker_id,
                          "has_layout": offset in layouts,
+                         # 站位是"输入"，框图是"结果"：界面要能分开显示，才知道这一帧
+                         # 的框图是从预演抓的、从站位推的，还是手工给的。
+                         "subjects": row.get("subjects") or [],
                          "draggable": not reason, "reason": reason, "moves": moves,
                          "min_offset_ms": 0, "max_offset_ms": max(0, ceiling)})
         return rows
