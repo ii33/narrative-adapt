@@ -7,6 +7,11 @@
 * ``derive_segment``：从段两端两帧的框图与机位**算出**主体位移、方向、画面占比变化、景别差
   与机位位移；人只给运镜种类、速度与一句备注（见 ``storyboard_operations.set_segment_motion``）。
   派生字段一律现算不落库，所以同一个段在界面、助手与生成任务里读到的是同一份推导。
+* ``camera_move_from_scene``：镜头绑了预演机位时，运镜**直接按预演的机位轨迹量**（焦距、
+  三轴位移、朝向），``source="previs"``。为什么它优先：框图的机位、焦距与朝向本来就是从预演
+  投影来的，再从两帧框图反推运镜等于把真值投影两次再猜回来——同一个推镜可能读成「主体变大」
+  也可能读成「焦距变长」。没有预演才回落到框图差量（``source="layout"``）；人工标注显式给了
+  ``kind`` 时覆盖两者（``source="manual"``），但量出来的分量照样返回，供人核对。
 * ``segment_prompt``：把这些字段折成「运镜／主体／环境／约束」四段。H3 没有结构化的运镜
   参数，运镜要写进提示词正文的自然英语动作里，且用官方词表（类型＋幅度＋速度，见
   ``docs/MINIMAX_H3_PROMPT.md``）：``endpoints``（首尾帧）先放官方 FL2VA 对齐句，
@@ -17,9 +22,9 @@
 """
 from __future__ import annotations
 
-from math import hypot
+from math import hypot, sqrt
 
-from .previs_scene import framing_of
+from .previs_scene import camera_at, framing_of
 from .storyboard_layout import CAMERA_DEFAULTS, layout_at
 
 # 运镜种类：给 schema、校验与警告消息共用一张表；中文说明只给人看（提示词用 H3 官方词表
@@ -33,16 +38,56 @@ CAMERA_MOVES = {
     'tilt_down': '下摇：俯仰压低，地平线上浮、下方景物进入画面',
     'track': '跟移：机位横向随主体平移，主体在画面里的位置基本不变、背景整体后退',
     'static': '固定：机位与焦距都不动，只有主体自身的动作',
+    # 预演推导用的是下面这几个更细的种类（官方词表 §3 本来就把 Zoom/Truck/Pedestal 单列）。
+    # 上面那几个留给人工标注，两套并存：判定时按「同一族」比较（见 _MOTION_FAMILIES），
+    # 所以人手写 push_in、机器量出 dolly_in 不算冲突。
+    'zoom_in': '变焦推近：机身不动，焦距变长，主体在画面里变大',
+    'zoom_out': '变焦拉远：机身不动，焦距变短，主体在画面里变小',
+    'dolly_in': '机身推进：机位沿视线向主体靠近（push_in 的预演口径）',
+    'dolly_out': '机身后拉：机位沿视线远离主体（pull_out 的预演口径）',
+    'truck_left': '左移：机位沿自身右轴的反方向水平横移',
+    'truck_right': '右移：机位沿自身右轴水平横移',
+    'pedestal_up': '升：整机沿世界竖直轴上升',
+    'pedestal_down': '降：整机沿世界竖直轴下降',
 }
+# 运镜的来源：预演轨迹 / 框图差量 / 人工标注。三种都放进 camera_move.source，
+# 读的人一眼看得出这个 kind 是真值、证据还是人写的。
+PREVIS_SOURCE = 'previs'
+LAYOUT_SOURCE = 'layout'
+MANUAL_SOURCE = 'manual'
+CAMERA_MOVE_SOURCES = (PREVIS_SOURCE, LAYOUT_SOURCE, MANUAL_SOURCE)
 CAMERA_SPEEDS = {'slow': '缓慢', 'medium': '匀速', 'fast': '快速'}
 # 画面归一化坐标下的判定阈值（框图 bbox 就是 0..1 的画面坐标，见 storyboard_layout）。
 LATERAL_THRESHOLD = 0.05   # 框中心 x 变化超过 5% 才算「横移」，低于它就只是取景抖动
 CENTER_BAND = (0.45, 0.55)  # 没横移又停在这条带里＝「居中不动」，否则是「不动但不在中心」
 AREA_THRESHOLD = 0.15      # 框面积相对变化 15% 才说「靠近／远离」，再小读成「横向」更诚实
 LENS_TOL_MM = 1.0          # 等效焦距差 1mm 起算变焦；更小的差多半是补默认值时的抖动
+# 朝向：偏航 2°、俯仰 1.5° 起算摇镜。理由——35mm 基准镜头的水平半视角是 27.2°，
+# 2° 偏航约等于画面内容横移 3.4% 宽（tan2°/tan27.2°），与框图口径的 LATERAL_THRESHOLD 5%
+# 同一量级；俯仰阈值取 1.5°，因为在 3m 工作距离上它对应画面上约 8cm 的纵向移动，再小就与
+# 轨迹取样抖动分不开。预演那条路也用这两个值，两条路的「摇了没有」因此一致。
 YAW_TOL_DEG = 2.0          # 偏航差 2° 起算摇镜
 PITCH_TOL_DEG = 1.5        # 俯仰差 1.5° 起算上下摇
 SHIFT_TOL_M = 0.10         # 机位水平位移 0.1m 起算「动了」：再小就是同一机位的抖动
+# ---- 预演机位轨迹（``camera_move_from_scene``）的阈值 ----
+# 为什么另起一组常量：上面那几条量的是**二维框图差量**（归一化画面坐标、从框图反解出的
+# 机位），下面这几条量的是**三维预演真值**（米、毫米、度）。量纲与数据来源都不同，混用会
+# 让同一个机位动作在两条路上判得不一样；但**量级刻意对齐**（见每条的说明），所以同一次改动
+# 在两条路上给出的「动了没有」不该打架。
+PREVIS_LENS_TOL_MM = 1.5   # 变焦：1.5mm 以下不认。35mm 基准镜头上 1.5mm 是 4.3% 的视角变化，
+#                            与框图口径的 LENS_TOL_MM=1.0 同一量级；比它小的差多半来自轨迹
+#                            插值取整与关键帧吸附，读成「变了焦」只是噪音。
+ZOOM_SMALL_RATIO = 0.15    # 变焦幅度按**相对量**（Δf / 起始焦距）分级：同样是 5mm，在 18mm
+#                            镜头上是大幅、在 85mm 上几乎看不出。0.15 与 AREA_THRESHOLD 同源
+#                            （画面占比 15% 才看得出变化），0.50 与 LARGE_AREA_RATIO 同源
+#                            （占比过半即「大」）——变焦与「主体在画面里变大」本是同一件事的两种量法。
+ZOOM_LARGE_RATIO = 0.50
+# 机位位移：三轴都按 0.10 m。理由——一张手掌宽（≈0.1m）在 3m 工作距离上占画面约 3.3%，
+# 与变焦阈值那 4.3% 同一量级；同时与框图差量法的 SHIFT_TOL_M 对齐，免得同一个机位动作在
+# 预演那条路上「动了」、在框图那条路上「没动」。三条分开写是为了以后能单轴调。
+DOLLY_TOL_M = 0.10         # 沿视线（推拉）
+TRUCK_TOL_M = 0.10         # 横向（机位自身右轴）
+PEDESTAL_TOL_M = 0.10      # 竖直（世界 y 轴）
 # 与 storyboard_operations 共用同一个上限默认值：分镜静帧本来就不该一格里塞满两秒以上的动作。
 DEFAULT_MAX_SEGMENT_MS = 2000
 # 景别由松到紧的顺序：只用来判「这一段在收紧还是松开」，阈值仍由 framing_of 决定。
@@ -58,7 +103,37 @@ H3_CAMERA_TERMS = {
     'tilt_down': 'Tilt Down',
     'track': 'Tracking Shot',
     'static': 'Static Shot',
+    'zoom_in': 'Zoom In',
+    'zoom_out': 'Zoom Out',
+    'dolly_in': 'Push In',
+    'dolly_out': 'Pull Out',
+    'truck_left': 'Truck Left',
+    'truck_right': 'Truck Right',
+    'pedestal_up': 'Pedestal Up',
+    'pedestal_down': 'Pedestal Down',
 }
+# 句内写法（官方 §3 的三条示例都是「The camera <动词短语> with small amplitude at slow speed」）：
+# 主分量用第三人称动词短语，次要分量用动名词从句跟在 while 后面。为什么不用大写的术语名：
+# 术语名是词表条目（Truck Right），摆在句子里就成了标签堆叠，官方明确要求写成镜内动作。
+H3_MOTION_PHRASES = {
+    'push_in': 'pushes in', 'pull_out': 'pulls out', 'dolly_in': 'pushes in', 'dolly_out': 'pulls out',
+    'zoom_in': 'zooms in', 'zoom_out': 'zooms out',
+    'pan_left': 'pans left', 'pan_right': 'pans right', 'tilt_up': 'tilts up', 'tilt_down': 'tilts down',
+    'truck_left': 'trucks left', 'truck_right': 'trucks right',
+    'pedestal_up': 'pedestals up', 'pedestal_down': 'pedestals down',
+    'track': 'tracks the subject', 'static': 'holds a Static Shot',
+}
+H3_MOTION_GERUNDS = {
+    'push_in': 'pushing in', 'pull_out': 'pulling out', 'dolly_in': 'pushing in', 'dolly_out': 'pulling out',
+    'zoom_in': 'zooming in', 'zoom_out': 'zooming out',
+    'pan_left': 'panning left', 'pan_right': 'panning right',
+    'tilt_up': 'tilting up', 'tilt_down': 'tilting down',
+    'truck_left': 'trucking left', 'truck_right': 'trucking right',
+    'pedestal_up': 'pedestaling up', 'pedestal_down': 'pedestaling down',
+    'track': 'tracking the subject',
+}
+# 次要分量的幅度副词：官方只有 small/medium/large 三档，中等默认不写。
+H3_AMPLITUDE_ADVERBS = {'small': 'slightly', 'large': 'strongly'}
 H3_SPEEDS = {'slow': 'at slow speed', 'fast': 'at fast speed'}
 H3_FRAMING_TERMS = {'wide': 'Wide Shot', 'medium': 'Medium Shot', 'close': 'Close-Up'}
 # 官方 FL2VA / I2VA 对齐句：必须逐字照抄，只换时长（S.SS 两位小数秒）与镜号。
@@ -79,6 +154,23 @@ SMALL_SHIFT_M = 0.2
 _DIRECTIONS = ('left', 'right', 'center', 'none')
 _ORDINALS = ('第一个主体', '第二个主体', '第三个主体')
 _KINDS = ('sketch', 'style', 'video')
+# camera_move 的字段：落库的人工标注只有前四个；带 source 的推导结果还能多带下面的派生字段
+# （不落库，见 validate_segment）。
+_MOVE_FIELDS = frozenset({'kind', 'speed', 'from_framing', 'to_framing'})
+_DERIVED_MOVE_FIELDS = frozenset({'source', 'components', 'primary', 'cuts', 'deltas', 'note'})
+# 同一族运镜：人工写 push_in、预演量出 dolly_in 不算冲突（官方把它们当同一类「机身推进」），
+# 但 push 与 zoom 是两件事（机身动 vs 机身不动），zoom 归自己一族。
+_MOTION_FAMILIES = {
+    'push_in': 'dolly_in', 'pull_out': 'dolly_out', 'dolly_in': 'dolly_in', 'dolly_out': 'dolly_out',
+    'zoom_in': 'zoom_in', 'zoom_out': 'zoom_out',
+    'pan_left': 'pan_left', 'pan_right': 'pan_right',
+    'tilt_up': 'tilt_up', 'tilt_down': 'tilt_down',
+    'track': 'lateral', 'truck_left': 'lateral', 'truck_right': 'lateral',
+    'pedestal_up': 'pedestal_up', 'pedestal_down': 'pedestal_down',
+    'static': 'static',
+}
+# 量的单位 → 中文单位（只用在给人看的警告里；提示词里一个数字都不出现）。
+_UNIT_WORDS = {'mm': '毫米', 'm': '米', 'deg': '度'}
 
 
 def camera_move_kinds():
@@ -167,22 +259,216 @@ def stored_motion(shot, from_ms, to_ms):
     return None
 
 
+# -- 预演推导 -----------------------------------------------------------------
+def camera_move_from_scene(shot, segment, scene):
+    """按预演的机位轨迹量这一段「镜头怎么动的」（只算不写）。
+
+    为什么以预演为准：框图的机位、焦距与朝向本来就是从预演投影来的；再从两帧框图反推运镜
+    （``derive_segment`` 的差量法）等于把真值投影两次再猜回来——同一个推镜可能被读成「主体
+    变大」也可能被读成「焦距变长」。这里直接量预演里的机位轨迹，判定只做一次换算。
+
+    判定（阈值见上面那组 PREVIS_* 常量与 YAW/PITCH_TOL_DEG）：
+
+    * 焦距变化 ≥ ``PREVIS_LENS_TOL_MM`` → ``zoom_in``/``zoom_out``；
+    * 机位位移分解成三轴 → 沿视线 ``dolly_in``/``dolly_out``、横向 ``truck_left``/``truck_right``、
+      竖直 ``pedestal_up``/``pedestal_down``（三轴阈值各写在上面的常量里，单位米）；
+    * 朝向变化（注视点或 ``targetPath`` 变了，取 ``camera_at`` 求出的 yaw/pitch）→
+      ``pan_left``/``pan_right``、``tilt_up``/``tilt_down``（阈值以度计）；
+    * 什么都没动 → ``static``。
+
+    返回值与 ``derive_segment`` 的 ``camera_move`` 同形（kind/speed/from_framing/to_framing），多出：
+
+    * ``source``：``"previs"``——读的人据此知道 kind 是真值，不是从框图猜的；
+    * ``components``：**全部分量**，每项 ``{kind, amplitude, value, unit}``，按幅度从大到小排
+      （同一档幅度再按「超出阈值几倍」排）。组合运镜必须留着次要分量：只报主运镜，提示词就
+      只剩一半动作；
+    * ``primary``：``components[0]``（幅度最大的一项），没有分量时为 None；``kind`` 就是它；
+    * ``deltas``：焦距/三轴位移/角度的原始量（带符号），报警与核对时引用；
+    * ``cuts``：段内切过机位时列出切点，此时 ``kind`` 为 ``"cut"``。
+
+    ``value`` 带符号，正负与 ``kind`` 一致（正＝朝那个 kind 的方向）；``unit`` 是 ``mm``/``m``/``deg``。
+    ``from_framing``/``to_framing``/``speed`` 一律留空：景别口径是全工程唯一的 ``framing_of``
+    （要 bbox），速度是人的判断（官方「慢/快」没有可量的分界），两者都不该由机位轨迹冒充。
+    """
+    if not isinstance(shot, dict):
+        raise ValueError('按预演推导运镜需要镜头对象（那一镜的 shot，带 previs 绑定）')
+    previs = shot.get('previs') if isinstance(shot.get('previs'), dict) else None
+    if not previs or not previs.get('camera_id'):
+        raise ValueError('该镜没有绑定预演机位；先用 set_shot_previs 绑定，或让推导回落框图差量')
+    if not isinstance(scene, dict) or not scene.get('cameras'):
+        raise ValueError('预演场景快照里没有摄影机；先用 read_previs 核对本场预演工程')
+    if not isinstance(segment, dict):
+        raise ValueError('分段须为对象（至少给 from_ms 与 to_ms）')
+    start = _offset(segment.get('from_ms'), '分段起点')
+    end = _offset(segment.get('to_ms'), '分段终点')
+    if start >= end:
+        raise ValueError(f'分段{start}..{end}ms的起点须小于终点')
+    offset = previs.get('time_offset_ms', 0)
+    if type(offset) is not int or offset < 0:
+        raise ValueError('预演时刻偏移 time_offset_ms 须为大于等于 0 的整数毫秒')
+    camera_id = previs['camera_id']
+    # 镜内时刻 → 预演时刻（秒）：shot.previs.time_offset_ms 是「镜头 0ms 对应的预演时刻」。
+    from_s, to_s = (offset + start) / 1000, (offset + end) / 1000
+    move = {'kind': 'static', 'speed': None, 'from_framing': None, 'to_framing': None,
+            'source': PREVIS_SOURCE, 'components': [], 'primary': None, 'deltas': {}}
+    cuts = _cuts_in(scene, from_s, to_s, offset)
+    if cuts:
+        # 段内切过机位：这一段的真值本身就跨了两个镜头，不假装成某一种运镜——把切点原样
+        # 交出去，让人把段拆开（见 derive_segment 的 SEGMENT_CROSSES_CUT 警告）。
+        move.update({'kind': 'cut', 'cuts': cuts,
+                     'note': '段内切过机位：首尾帧视频只有一个连续镜头，把这一段拆成两段分别生成'})
+        return move
+    before = camera_at(scene, from_s, camera_id)
+    after = camera_at(scene, to_s, camera_id)
+    components, deltas = _pose_components(before, after)
+    move['deltas'] = deltas
+    move['components'] = components
+    move['primary'] = dict(components[0]) if components else None
+    if components:
+        move['kind'] = components[0]['kind']
+    return move
+
+
+def _cuts_in(scene, from_s, to_s, offset_ms):
+    """窗口里真正换了机位的 cut（镜内毫秒 + 预演毫秒都给出）。
+
+    只算「换了机位」的 cut：``cuts[0]`` 是开场用哪台，不算切换。窗口取左开右闭
+    ``(from_s, to_s]``——正好落在段起点上的 cut 属于这一段的第一帧，不是段内的切换。
+    """
+    cuts = sorted((row for row in scene.get('cuts') or [] if type(row.get('time')) in (int, float)),
+                  key=lambda row: row['time'])
+    if len(cuts) < 2:
+        return []
+    rows = []
+    active = cuts[0].get('camera_id')
+    for cut in cuts[1:]:
+        time_s = float(cut['time'])
+        if cut.get('camera_id') != active and from_s < time_s <= to_s:
+            previs_ms = int(round(time_s * 1000))
+            rows.append({'time_ms': previs_ms - offset_ms, 'previs_ms': previs_ms,
+                         'camera_id': cut.get('camera_id')})
+        active = cut.get('camera_id')
+    return rows
+
+
+def _pose_components(before, after):
+    """两帧机位 → ``(分量清单, 原始量)``；三分量分解与幅度分级都在这里。
+
+    三轴怎么分：沿视线（推拉）、沿机位自身右轴（横移）、沿世界竖直轴（升降）。为什么升降
+    用世界 y 而不是机位自身的 up：官方的 Pedestal 就是整机上下，不随俯仰倾斜跟着转。
+    为什么先扣掉推拉在 y 上的投影：视线有俯仰角时，「推近」本身就带一点下降，不扣掉就会
+    把一个推镜读成「推近＋下降」两个动作。
+    """
+    step = [float(after['position'][index]) - float(before['position'][index]) for index in range(3)]
+    forward = _unit([float(before['target'][index]) - float(before['position'][index])
+                     for index in range(3)])
+    if forward is None:
+        raise ValueError('机位与注视点重合，量不出这一段的推拉方向；请在预演里把机位挪开或改注视点')
+    # right 与 previs_scene._basis 同一右手系（forward × 世界 up）：镜头朝 -z 时 right=+x，
+    # 与「机位向右平移，画面里的景物向左滑」是同一边。正俯视/仰视时 up 与视线平行，改拿 +z 当参考。
+    right = _unit(_cross(forward, (0.0, 1.0, 0.0))) or _unit(_cross(forward, (0.0, 0.0, 1.0)))
+    if right is None:
+        right = (1.0, 0.0, 0.0)
+    # 先按 3 位小数取整再判阈值（与 _camera_deltas 同一精度）：否则 0.1 米的位移会被浮点
+    # 算成 0.099999 米，明明卡在阈值上却报「没动」。
+    dolly = round(_dot(step, forward), 3)
+    truck = round(_dot(step, right), 3)
+    pedestal = round(step[1] - dolly * forward[1], 3)
+    lens = round(float(after['focal']) - float(before['focal']), 3)
+    yaw = round(_wrapped(float(after['yaw']) - float(before['yaw'])), 3)
+    pitch = round(float(after['pitch']) - float(before['pitch']), 3)
+    deltas = {'focal_mm': lens, 'dolly_m': dolly, 'truck_m': truck, 'pedestal_m': pedestal,
+              'yaw_deg': yaw, 'pitch_deg': pitch}
+    rows = []
+    if abs(lens) >= PREVIS_LENS_TOL_MM:
+        focal = float(before['focal'])
+        ratio = abs(lens) / focal if focal else 0.0
+        rows.append(({'kind': 'zoom_in' if lens > 0 else 'zoom_out',
+                      'amplitude': _grade(ratio, ZOOM_SMALL_RATIO, ZOOM_LARGE_RATIO),
+                      'value': lens, 'unit': 'mm'},
+                     abs(lens) / PREVIS_LENS_TOL_MM))
+    for value, tol, forward_kind, backward_kind in (
+            (dolly, DOLLY_TOL_M, 'dolly_in', 'dolly_out'),
+            (truck, TRUCK_TOL_M, 'truck_right', 'truck_left'),
+            (pedestal, PEDESTAL_TOL_M, 'pedestal_up', 'pedestal_down')):
+        if abs(value) >= tol:
+            rows.append(({'kind': forward_kind if value > 0 else backward_kind,
+                          'amplitude': _grade(abs(value), SMALL_SHIFT_M, LARGE_SHIFT_M),
+                          'value': value, 'unit': 'm'},
+                         abs(value) / tol))
+    if abs(yaw) >= YAW_TOL_DEG:
+        rows.append(({'kind': 'pan_left' if yaw > 0 else 'pan_right',
+                      'amplitude': _grade(abs(yaw), SMALL_YAW_DEG, LARGE_YAW_DEG),
+                      'value': yaw, 'unit': 'deg'},
+                     abs(yaw) / YAW_TOL_DEG))
+    if abs(pitch) >= PITCH_TOL_DEG:
+        rows.append(({'kind': 'tilt_up' if pitch > 0 else 'tilt_down',
+                      'amplitude': _grade(abs(pitch), SMALL_PITCH_DEG, LARGE_PITCH_DEG),
+                      'value': pitch, 'unit': 'deg'},
+                     abs(pitch) / PITCH_TOL_DEG))
+    # 排「主分量」：先比幅度档（官方的幅度就是构图变化范围），同档再比超出阈值几倍——不同单位
+    # 的量不能直接比大小，除掉各自的阈值就把单位约掉了。
+    rank = {'small': 0, 'medium': 1, 'large': 2}
+    rows.sort(key=lambda row: (rank[row[0]['amplitude']], row[1]), reverse=True)
+    return [row[0] for row in rows], deltas
+
+
+def _grade(value, small, large):
+    """幅度分级：低于 small 算小，达到 large 算大，其余中等（官方「中等」默认不写进正文）。"""
+    if value < small:
+        return 'small'
+    return 'large' if value >= large else 'medium'
+
+
+def _wrapped(degrees):
+    """角度差折到 (-180, 180]：摇过 180° 时 yaw 会从 +179 跳到 -179，差值不能当成 -358°。"""
+    return (degrees + 180.0) % 360.0 - 180.0
+
+
+def _unit(vector):
+    length = sqrt(sum(value * value for value in vector))
+    return None if length < 1e-9 else tuple(value / length for value in vector)
+
+
+def _cross(left, right):
+    return (left[1] * right[2] - left[2] * right[1],
+            left[2] * right[0] - left[0] * right[2],
+            left[0] * right[1] - left[1] * right[0])
+
+
+def _dot(left, right):
+    return sum(a * b for a, b in zip(left, right, strict=True))
+
+
 # -- 推导 ---------------------------------------------------------------------
-def derive_segment(board, shot, from_ms, to_ms):
+def derive_segment(board, shot, from_ms, to_ms, *, scene=None):
     """从段两端两帧的框图算出这一段「发生了什么」。
+
+    运镜有三种来源，优先级从高到低（见 ``camera_move.source``）：
+
+    1. ``manual``：人工在 ``segment_motions`` 里显式给了 ``kind``，它覆盖推导——人是意图，
+       机器是事实。被覆盖的推导分量仍在 ``components`` 里，供人核对「我写的和量出来的差在哪」；
+    2. ``previs``：镜头绑了预演机位（``shot.previs``）且拿得到场景快照时，运镜直接按预演轨迹量
+       （``camera_move_from_scene``）；
+    3. ``layout``：没有预演才退回框图差量法（焦距差／面积变化／景别变化）。这一路只给证据、
+       不给 ``kind``——两帧框图读不出「这是推镜还是变焦」。
+
+    ``scene`` 省略时，镜头绑了预演就试着向预演页要一份只读快照（见 ``_page_scene``）；
+    取不到就回落框图差量，并在 ``previs_problem`` 里说明为什么。
 
     输出形状（``available`` 为真时）::
 
         {from_ms, to_ms, duration_ms,
-         camera_move: {kind, speed, from_framing, to_framing},
+         camera_move: {kind, speed, from_framing, to_framing, source,
+                       components: [{kind, amplitude, value, unit}], primary},
          subject_moves: [{subject, kind, from_bbox, to_bbox, direction, apparent_motion,
                           area_ratio, depth_delta}],
          camera: {dx_m, dz_m, shift_m, lens_delta_mm, yaw_delta_deg, pitch_delta_deg},
          framing_change: closer|farther|same,
-         from_description, to_description, notes, warnings: [{code, message, ...}]}
+         from_description, to_description, notes, previs_problem, warnings: [{code, message, ...}]}
 
     ``board`` 除了在 ``shot`` 传镜头编号时用来查那条镜头以外不参与推导：推导只认这一镜的
-    框图与关键帧，免得同一段在两个入口算出两个结果。
+    框图、关键帧与预演绑定，免得同一段在两个入口算出两个结果。
     """
     shot = _shot_of(board, shot)
     start, end = _offset(from_ms, '分段起点'), _offset(to_ms, '分段终点')
@@ -191,23 +477,39 @@ def derive_segment(board, shot, from_ms, to_ms):
     from_layout, to_layout = layout_at(shot, start), layout_at(shot, end)
     stored = stored_motion(shot, start, end) or {}
     given = stored.get('camera_move') if isinstance(stored.get('camera_move'), dict) else {}
-    camera_move = {'kind': given.get('kind'), 'speed': given.get('speed'),
-                   'from_framing': None, 'to_framing': None}
+    previs = _previs_move(board, shot, start, end, scene)
+    move = previs['move']
+    camera_move = {'kind': (move or {}).get('kind'), 'speed': given.get('speed'),
+                   'from_framing': None, 'to_framing': None,
+                   'source': PREVIS_SOURCE if move else LAYOUT_SOURCE,
+                   'components': [dict(row) for row in (move or {}).get('components') or []],
+                   'primary': dict(move['primary']) if (move or {}).get('primary') else None}
+    if move and move.get('cuts'):
+        camera_move['cuts'] = [dict(row) for row in move['cuts']]
+    if move and move.get('deltas'):
+        camera_move['deltas'] = dict(move['deltas'])
+    if given.get('kind'):
+        # 人工标注优先：kind 换成人的，但推导出的分量照样带上（不丢次要分量），
+        # 也照样去比对、照样报冲突——覆盖的是结论，不是证据。
+        camera_move['kind'] = given['kind']
+        camera_move['source'] = MANUAL_SOURCE
     common = {'from_ms': start, 'to_ms': end, 'duration_ms': end - start, 'camera_move': camera_move,
               'notes': stored.get('notes') or '',
-              'from_description': _description(shot, start), 'to_description': _description(shot, end)}
+              'from_description': _description(shot, start), 'to_description': _description(shot, end),
+              'previs_problem': previs['problem']}
     missing = [label for label, row in (('起点帧', from_layout), ('终点帧', to_layout)) if row is None]
     if missing:
         return {'available': False, **common,
                 'reason': '、'.join(missing) + '没有框图（layout），推导不出运动；先为两端的帧写入框图'}
     aspect = _aspect(shot)
-    # 景别按「这一帧里最高的主体」判：谁占得多，观众看到的就是谁的景别。
+    # 景别按「这一帧里最高的主体」判：谁占得多，观众看到的就是谁的景别。预演那条路也要在这里
+    # 才拿到景别——机位轨迹不含 bbox，景别口径只认 framing_of 这一份。
     camera_move['from_framing'] = _framing(from_layout, aspect)
     camera_move['to_framing'] = _framing(to_layout, aspect)
     camera = _camera_deltas(from_layout, to_layout)
     moves = _subject_moves(from_layout, to_layout)
     change = _framing_change(camera_move['from_framing'], camera_move['to_framing'])
-    warnings = _consistency(camera_move, moves, change, camera)
+    warnings = _motion_warnings(shot, camera_move, previs, moves, change, camera)
     if not moves and (_subjects(from_layout) or _subjects(to_layout)):
         # 前后两帧都有主体却配不上对：多半是 asset_id 换了（换了卡或手写框图），
         # 这时方向与占比变化算不出来，要说清楚而不是静默给一份空清单。
@@ -218,8 +520,54 @@ def derive_segment(board, shot, from_ms, to_ms):
             'framing_change': change, 'warnings': warnings}
 
 
+def _previs_move(board, shot, start, end, scene):
+    """试着按预演量这一段的运镜：返回 ``{'move': …|None, 'problem': 为什么没有}``。
+
+    为什么默认自己去要快照：``read_segment_motion`` 这类只读工具没有工程数据根，拿不到
+    ``previs/<场次>/scene.state.json``；预演页开着时 ``getScene`` 是唯一现成的来源。取不到
+    不是错误——回落框图差量，并把原因写进 ``previs_problem``，让人知道这次为什么没走预演。
+    """
+    previs = shot.get('previs')
+    if not isinstance(previs, dict) or not previs.get('camera_id'):
+        return {'move': None, 'problem': ''}
+    snapshot = scene if scene is not None else _page_scene(board)
+    if snapshot is None:
+        return {'move': None,
+                'problem': '本镜绑定了预演机位，但既没有传入场景快照、也连不上预演页；'
+                           '本次运镜按框图差量推导（打开预演页或在测试里注入快照可改走预演）'}
+    try:
+        return {'move': camera_move_from_scene(shot, {'from_ms': start, 'to_ms': end}, snapshot),
+                'problem': ''}
+    except ValueError as error:
+        return {'move': None, 'problem': '按预演推导运镜失败：' + str(error)}
+
+
+def _page_scene(board):
+    """向预演页要一份只读场景快照；没装宿主／不可达就返回 None（调用方回落框图差量）。
+
+    为什么用 ``getScene`` 而不是 ``snapshot``：推导是只读路径，``snapshot`` 会顺手写
+    ``previs/<场次>/scene.state.json`` 并涨 revision——读一次运动不该改工程数据。
+    """
+    try:
+        from . import previs_host
+    except ImportError:      # 裁剪构建里没有预演这一层：回落框图差量
+        return None
+    host = previs_host.installed()
+    if host is None:
+        return None
+    try:
+        return previs_host.scene_from_page(str((board or {}).get('unit_id') or ''), host.get_scene())
+    except previs_host.PrevisHostError:
+        return None
+
+
 def validate_segment(segment, max_ms=DEFAULT_MAX_SEGMENT_MS):
-    """校验一段运动（人工标注行或推导结果）：只查数据是否成立，不判创作意图。"""
+    """校验一段运动（人工标注行或推导结果）：只查数据是否成立，不判创作意图。
+
+    落库的人工标注只存 ``kind`` 与 ``speed``（派生字段一律现算）；推导结果多带 ``source``/
+    ``components``/``primary`` 等字段，还可能带 ``cut`` 这种「预演里这一段跨了两个镜头」的
+    种类——那不是人写的标注，所以带 ``source`` 时不做字段白名单与种类检查，只校验时间轴。
+    """
     if not isinstance(segment, dict):
         raise ValueError('分段须为对象')
     if type(max_ms) is not int or max_ms < 1:
@@ -234,15 +582,18 @@ def validate_segment(segment, max_ms=DEFAULT_MAX_SEGMENT_MS):
     if move is not None:
         if not isinstance(move, dict):
             raise ValueError('camera_move须为对象，只放kind与speed')
-        extra = set(move) - {'kind', 'speed', 'from_framing', 'to_framing'}
+        derived = move.get('source') in CAMERA_MOVE_SOURCES
+        extra = set(move) - _MOVE_FIELDS - (_DERIVED_MOVE_FIELDS if derived else set())
         if extra:
-            raise ValueError('camera_move有不认识的字段：' + '、'.join(sorted(extra)) + '；只存kind与speed')
-        kind = move.get('kind')
-        if kind is not None and kind not in CAMERA_MOVES:
-            raise ValueError('运镜种类无效；允许：' + '、'.join(CAMERA_MOVES))
-        speed = move.get('speed')
-        if speed is not None and speed not in CAMERA_SPEEDS:
-            raise ValueError('运镜速度无效；允许：' + '、'.join(CAMERA_SPEEDS))
+            raise ValueError('camera_move有不认识的字段：' + '、'.join(sorted(extra))
+                             + '；只存kind与speed（推导出的分量由程序现算，不落库）')
+        if not derived:
+            kind = move.get('kind')
+            if kind is not None and kind not in CAMERA_MOVES:
+                raise ValueError('运镜种类无效；允许：' + '、'.join(CAMERA_MOVES))
+            speed = move.get('speed')
+            if speed is not None and speed not in CAMERA_SPEEDS:
+                raise ValueError('运镜速度无效；允许：' + '、'.join(CAMERA_SPEEDS))
     notes = segment.get('notes')
     if notes is not None and not isinstance(notes, str):
         raise ValueError('运镜备注须为文本')
@@ -317,6 +668,13 @@ def _camera_sentence(segment, kind):
     framed = _framing_tail(move.get('from_framing'), move.get('to_framing'))
     if not segment.get('available'):
         return _sentence('The camera keeps one continuous path between the two defined frames', framed)
+    if move.get('kind') == 'cut':
+        # 段内切过机位：首尾帧视频本来就只能是一个连续镜头，正文就照这个写——「这一段有两个
+        # 镜头」写进正文模型也做不到，矛盾留在 SEGMENT_CROSSES_CUT 警告里让人拆段。
+        return _sentence('The camera holds one continuous take between the two defined frames', framed)
+    components = [row for row in move.get('components') or [] if row.get('kind')]
+    if components:
+        return _sentence(_components_sentence(components, move), framed)
     term = _h3_term(segment, camera)
     if term is None:
         return _sentence('The camera holds a Static Shot unless the subject itself moves', framed)
@@ -330,6 +688,47 @@ def _camera_sentence(segment, kind):
     if speed:
         words.append(speed)
     return _sentence(' '.join(words), framed)
+
+
+def _components_sentence(components, move):
+    """有分量清单时的运镜句：主分量「动词短语＋幅度＋速度」，次要分量跟在 ``while`` 后面。
+
+    为什么次要分量也要写：组合运镜（右移＋变焦）只写主运镜，模型会把次要那个丢掉，出来的
+    镜头就和机位轨迹差一截。为什么不写数值：官方只有 small/medium/large 三档幅度，句子里
+    出现「0.6 米」「5 毫米」这类裸数字，模型只会去追字面而不是看画面。
+    """
+    head, rest = components[0], components[1:]
+    words = ['The camera ' + H3_MOTION_PHRASES.get(head['kind'], head['kind'])]
+    amplitude = _amplitude_words(head.get('amplitude'))
+    if amplitude:
+        words.append(amplitude)
+    speed = H3_SPEEDS.get(move.get('speed') or '')
+    if speed:
+        words.append(speed)
+    text = ' '.join(words)
+    clauses = [_motion_clause(row) for row in rest]
+    if clauses:
+        # 多个次要分量也只用一个 while：官方的示例正是「主句 + while 从句」。
+        text += ' while ' + _joined(clauses)
+    return text
+
+
+def _motion_clause(component):
+    """次要分量：动名词短语 + 幅度副词（小→slightly、大→strongly、中等不写）。"""
+    phrase = H3_MOTION_GERUNDS.get(component['kind'], component['kind'])
+    adverb = H3_AMPLITUDE_ADVERBS.get(component.get('amplitude') or '', '')
+    return f'{phrase} {adverb}' if adverb else phrase
+
+
+def _amplitude_words(amplitude):
+    """幅度修饰词：官方默认中等幅度、不写；小／大才写（与 _h3_amplitude 同一口径）。"""
+    return {'small': 'with small amplitude', 'large': 'with large amplitude'}.get(amplitude or '', '')
+
+
+def _joined(parts):
+    if len(parts) < 2:
+        return parts[0]
+    return ', '.join(parts[:-1]) + ' and ' + parts[-1]
 
 
 def _h3_term(segment, camera):
@@ -536,6 +935,55 @@ def _subject_moves(from_layout, to_layout):
     return rows
 
 
+def _motion_warnings(shot, camera_move, previs, moves, framing_change, camera):
+    """这一段该报哪些运动警告：切镜、预演取不到、人工标注与证据不一致。
+
+    为什么 ``source="previs"`` 不比对：``kind`` 就是机位轨迹量出来的那一个，再拿它和同一份
+    轨迹比一次，只会得到「推导和推导不一致」的噪音。只有人工标注才需要比对——那是唯一
+    可能和事实脱节的一份数据。
+    """
+    kind = camera_move.get('kind')
+    warnings = []
+    if camera_move.get('cuts'):
+        cuts = camera_move['cuts']
+        warnings.append({'code': 'SEGMENT_CROSSES_CUT',
+                         'message': '这一段里预演切过机位（'
+                                    + '、'.join(f'镜内{row["time_ms"]}ms→{row["camera_id"]}'
+                                                for row in cuts)
+                                    + '）：首尾帧视频只能是一个连续镜头，把这一段拆成两段分别生成，'
+                                      '或把切镜挪到段边界上',
+                         'shot_id': shot.get('id'), 'cuts': cuts})
+    if previs['problem']:
+        warnings.append({'code': 'PREVIS_UNAVAILABLE', 'message': previs['problem'],
+                         'shot_id': shot.get('id')})
+    if camera_move.get('source') != MANUAL_SOURCE or kind is None:
+        return warnings
+    if previs['move'] is not None:
+        return warnings + _previs_conflict(shot, kind, previs['move'])
+    return warnings + _consistency(camera_move, moves, framing_change, camera)
+
+
+def _previs_conflict(shot, kind, move):
+    """人工标的运镜与预演量出来的对不对得上（只报 warning，不改数据、不拦写入）。
+
+    比对按「族」而不是字面：人手写 push_in、机器量出 dolly_in 是同一件事的两种叫法；
+    但 push 与 zoom 是两件事（机身动 / 机身不动），zoom 单独一族。人工标的那一种只要在
+    预演的分量清单里出现过就不算冲突——组合运镜里次分量的种类也算数。
+    """
+    families = {_MOTION_FAMILIES.get(row.get('kind'), row.get('kind'))
+                for row in move.get('components') or []}
+    families.add(_MOTION_FAMILIES.get(move.get('kind'), move.get('kind')))
+    if _MOTION_FAMILIES.get(kind, kind) in families:
+        return []
+    measured = '、'.join(f'{row["kind"]} {row["value"]:g}{_UNIT_WORDS[row["unit"]]}'
+                        for row in move.get('components') or []) or str(move.get('kind'))
+    return [{'code': 'MOTION_KIND_CONFLICT', 'kind': kind,
+             'message': f'标注的运镜是{kind}（{CAMERA_MOVES.get(kind, "")}），但预演机位轨迹量出来是'
+                        + measured + f'（主运镜{move.get("kind")}）。要么改标注，要么改机位轨迹',
+             'evidence': {'source': PREVIS_SOURCE, 'components': move.get('components') or [],
+                          'deltas': move.get('deltas') or {}, 'shot_id': shot.get('id')}}]
+
+
 def _consistency(camera_move, moves, framing_change, camera):
     """标注的运镜和算出来的位移是否对得上；对不上只报 warning，不改数据也不拦写入。
 
@@ -553,9 +1001,9 @@ def _consistency(camera_move, moves, framing_change, camera):
     moved = camera['shift_m'] >= SHIFT_TOL_M
     directions = {row['direction'] for row in moves}
     problem = None
-    if kind == 'push_in' and not grew:
+    if kind in ('push_in', 'dolly_in', 'zoom_in') and not grew:
         problem = '焦距与主体画面占比都没有变大、景别也没有收紧'
-    elif kind == 'pull_out' and not shrank:
+    elif kind in ('pull_out', 'dolly_out', 'zoom_out') and not shrank:
         problem = '焦距与主体画面占比都没有变小、景别也没有松开'
     elif kind == 'pan_right' and not (camera['yaw_delta_deg'] >= YAW_TOL_DEG or directions == {'left'}):
         problem = '偏航角没有右转，画面里也没有主体向左滑过'
@@ -567,6 +1015,8 @@ def _consistency(camera_move, moves, framing_change, camera):
         problem = '俯仰角没有压低'
     elif kind == 'track' and not moved:
         problem = f'机位水平位移只有{camera["shift_m"]:g}米，看不出跟移'
+    elif kind in ('truck_left', 'truck_right') and not moved:
+        problem = f'机位水平位移只有{camera["shift_m"]:g}米，看不出横移'
     elif kind == 'static' and (moved or abs(camera['lens_delta_mm']) >= LENS_TOL_MM
                                or abs(camera['yaw_delta_deg']) >= YAW_TOL_DEG
                                or abs(camera['pitch_delta_deg']) >= PITCH_TOL_DEG):
