@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -404,6 +405,83 @@ class _SessionBase:
         return self.request("ping")
 
 
+# -- 启动命令：规范化与失败翻译 ----------------------------------------------
+
+# 用户填的命令常常是「脚本」而不是「可执行程序」：.py 双击能跑，Popen 直接执行却会报
+# 「不是有效的 Win32 应用程序」。这里按后缀在**执行时**换成真正的启动方式，
+# 配置里用户写的那份保持原样（界面显示的命令不能因为兼容处理被偷偷改掉）。
+PYTHON_SUFFIX = ".py"
+SHELL_SUFFIXES = (".cmd", ".bat")
+POWERSHELL_SUFFIX = ".ps1"
+
+# Windows 的错误码：只有这几种能给出可操作的改写建议，其它一律保留原始错误。
+WINERROR_FILE_NOT_FOUND = 2
+WINERROR_ACCESS_DENIED = 5
+WINERROR_BAD_EXE_FORMAT = 193
+
+
+def _unquote(text: str) -> str:
+    """去掉从资源管理器复制路径时带上的整串引号；只认成对包住全串的引号。"""
+    stripped = text.strip()
+    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in "\"'":
+        return stripped[1:-1].strip()
+    return stripped
+
+
+def _powershell() -> str | None:
+    """优先 pwsh（PowerShell 7），退回系统自带的 Windows PowerShell。"""
+    return shutil.which("pwsh") or shutil.which("powershell")
+
+
+def spawn_argv(server: McpServer) -> list[str]:
+    """算出真正要执行的 argv；只看后缀，不改 server 本身。
+
+    - ``.py``：用当前解释器跑（用户填脚本路径就能用）；
+    - ``.cmd`` / ``.bat``：批处理只有 cmd 认，走 ``%COMSPEC%``；
+    - ``.ps1``：用 pwsh / powershell，带 ``-NoProfile -File``；
+    - 其它（``.exe``、``npx``、``uvx`` 这类靠 PATH 解析的命令）：原样执行。
+    """
+    command = _unquote(server.command)
+    args = list(server.args)
+    suffix = Path(command).suffix.lower()
+    if suffix == PYTHON_SUFFIX:
+        return [sys.executable, command, *args]
+    if suffix in SHELL_SUFFIXES:
+        # %COMSPEC% 是系统自己登记的 cmd 路径；环境里没有才退回 cmd.exe。
+        return [os.environ.get("COMSPEC") or "cmd.exe", "/c", command, *args]
+    if suffix == POWERSHELL_SUFFIX:
+        shell = _powershell()
+        if shell is None:
+            raise McpError(
+                f"MCP 服务器 {server.name} 启动失败：找不到 pwsh 或 powershell，"
+                f"无法执行「{command}」；请先安装 PowerShell 或改用 .py/.cmd 脚本。")
+        return [shell, "-NoProfile", "-File", command, *args]
+    return [command, *args]
+
+
+def _spawn_error(server: McpServer, exc: OSError) -> McpError:
+    """把 Popen 的 OSError 翻成照着能改的一句话：服务器名 + 原因 + 该怎么改。
+
+    分类之外的情况保留原始错误码与文本：证据不能被一句「启动失败」吞掉。
+    """
+    name = server.name
+    command = _unquote(server.command)
+    code = getattr(exc, "winerror", None)
+    if isinstance(exc, FileNotFoundError) or code == WINERROR_FILE_NOT_FOUND:
+        return McpError(
+            f"MCP 服务器 {name} 启动失败：找不到命令「{command}」；"
+            "请给绝对路径，或确认它在 PATH 里（Windows 上要带扩展名）。")
+    if code == WINERROR_BAD_EXE_FORMAT:
+        return McpError(
+            f"MCP 服务器 {name} 启动失败：「{command}」不是可执行程序（WinError 193）；"
+            "请填 .py / .cmd 脚本路径，或写 python 脚本.py。")
+    if isinstance(exc, PermissionError) or code == WINERROR_ACCESS_DENIED:
+        return McpError(
+            f"MCP 服务器 {name} 启动失败：没有权限执行「{command}」；"
+            "请确认文件没被占用、有执行权限。")
+    return McpError(f"MCP 服务器 {name} 启动失败：{exc}")
+
+
 # -- 一条 stdio 会话 ---------------------------------------------------------
 
 
@@ -444,9 +522,11 @@ class McpSession(_SessionBase):
             return
         env = os.environ.copy()
         env.update(self.server.env)  # 配置里的 env 覆盖进程环境，和自己起子进程的习惯一致
+        # 只在这里规范化命令：load_servers() 返回的 server 一直是用户写的那份。
+        argv = spawn_argv(self.server)
         try:
             self._process = subprocess.Popen(
-                [self.server.command, *self.server.args],
+                argv,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 # 诊断信息直接丢掉：不读的 stderr 管道写满会把子进程卡死，而 stdout
@@ -461,13 +541,8 @@ class McpSession(_SessionBase):
                 # 桌面应用不该因为起后台服务器在屏幕上闪黑框。
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-        except FileNotFoundError as exc:
-            raise McpError(
-                f"MCP 服务器 {self.server.name} 启动失败：找不到命令 {self.server.command!r}；"
-                f"请在 {default_path()} 里改 command（Windows 上给绝对路径或带扩展名的可执行文件）"
-            ) from exc
         except OSError as exc:
-            raise McpError(f"MCP 服务器 {self.server.name} 启动失败：{exc}") from exc
+            raise _spawn_error(self.server, exc) from exc
         self._reader = threading.Thread(target=self._read_loop,
                                         name=f"mcp-reader-{self.server.name}", daemon=True)
         self._reader.start()
