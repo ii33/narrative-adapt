@@ -13,6 +13,16 @@
 `load_tools`（同一套「按业务组动态加载」机制）。技能只是「一段说明 + 一组想要的
 工具」，没有自己的可见性规则。
 
+两个可选字段把技能从「附加说明」扩到「改提示词 / 声明生成工作流」：
+
+- `replaces`：这条技能的 `instructions` 顶替 `prompt_defaults.DEFAULT_PROMPTS` 里的
+  哪一段。为空就是纯附加说明（`load_skill` 的既有语义）。替换只在解析时发生
+  （见 `prompt_registry`），`DEFAULT_PROMPTS` 的文本一个字符都不改：提示词快照
+  （tests/prompt_snapshot.json）继续只核对内置文本，用户改措辞不该触发升版。
+- `workflow`：这条技能声明的生成工作流（素描 / 风格 / 视频），形状见
+  `WORKFLOW_FIELDS`。内核只校验形状与 `kind` 白名单，`model`/`license` 这类取值
+  由用户与服务商约定，不在内核里维护一份会过期的名单。
+
 存储与 `mcp_client` 同风格：默认 `~/.narrative/skills.json`，`NARRATIVE_SKILLS_FILE`
 可覆盖；原子写（先写 .tmp 再 os.replace）；读不懂的旧文件先备份成 .bak 再覆盖，
 并且**在读这一步就报可读错误**，不把用户的技能当空表静默丢掉。
@@ -23,9 +33,12 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+
+from .prompt_defaults import DEFAULT_PROMPTS
 
 FILE_ENV = "NARRATIVE_SKILLS_FILE"
 CONFIG_DIR = ".narrative"
@@ -38,10 +51,22 @@ MAX_NAME_CHARS = 64
 MAX_SUMMARY_CHARS = 200
 MAX_INSTRUCTIONS_CHARS = 20000
 
+# `workflow.kind` 的白名单：这三个是当前真实存在的生成工作流（素描稿、风格帧、
+# 视频）。白名单写死是刻意的——`kind` 决定下游按哪种参数形状去读 `params`，
+# 放过一个未知值只会让它在使用时才炸。
+WORKFLOW_KINDS = ("sketch", "style", "video")
+
+# `workflow` 的已知字段。前两个必填（`kind` 决定走哪条流程、`model` 决定用哪个
+# 服务/模型），其余可选；不认识的键原样保留（宽松保存），但不再参与校验。
+WORKFLOW_FIELDS = ("kind", "model", "license", "workflow_file", "params", "expectations")
+
 # 技能工具名只在这里写一份：工具发现（tool_loading.tool_family）据此把它们归到
 # 'skill' 组，注册表与分组因此不会各写一份而漂移。
+# `list_prompt_keys` 也归这一组：它读的是「哪条技能替换了哪段系统提示词」，与技能
+# 是同一个话题；它只读，不写盘。
 SKILL_TOOL_NAMES = frozenset({
     "list_skills", "read_skill", "create_skill", "update_skill", "delete_skill", "load_skill",
+    "list_prompt_keys",
 })
 
 LOAD_TOOL_NAME = "load_skill"
@@ -55,8 +80,8 @@ LOAD_TOOL_NAME = "load_skill"
 # （tool_loading.STANDARD_SCOPES）都引用它，不各写一份字面量。
 SCOPE = "skill"
 
-# 五个管理工具 = 除 load_skill 之外的技能工具。load_skill 改变的是本次会话的工具
-# 曝光，属于一次任务对话，仍归 project。
+# 管理工具 = 除 load_skill 之外的技能工具（增删改查 + 只读的提示词位清单）。
+# load_skill 改变的是本次会话的工具曝光，属于一次任务对话，仍归 project。
 MANAGE_TOOL_NAMES = SKILL_TOOL_NAMES - {LOAD_TOOL_NAME}
 
 
@@ -81,9 +106,15 @@ class Skill:
     builtin: bool = False
     created_at: str = ""
     updated_at: str = ""
+    # 这条技能的正文顶替哪段内置提示词（DEFAULT_PROMPTS 的键）；None = 纯附加说明。
+    # 字段放在末尾且都带默认值：既有构造点全是关键字调用，加字段不改变它们的行为。
+    replaces: str | None = None
+    # 生成工作流声明（kind/model/license/workflow_file/params/expectations）；
+    # None = 这条技能不声明工作流。
+    workflow: dict | None = None
 
     def to_dict(self) -> dict:
-        """对外一律给 list：JSON、界面、模型看到的形状保持一致。"""
+        """对外一律给 list/dict：JSON、界面、模型看到的形状保持一致。"""
         return {
             "name": self.name,
             "summary": self.summary,
@@ -94,6 +125,9 @@ class Skill:
             "builtin": self.builtin,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            # deepcopy：workflow 里有嵌套对象，调用方改返回值不该改到内存里的技能。
+            "replaces": self.replaces,
+            "workflow": deepcopy(self.workflow) if isinstance(self.workflow, dict) else None,
         }
 
     @classmethod
@@ -122,6 +156,10 @@ class Skill:
             builtin=False,
             created_at=_stamp_text(row.get("created_at")),
             updated_at=_stamp_text(row.get("updated_at")),
+            # 手改文件也走同一套校验：未知的 replaces 键或未知的 workflow.kind
+            # 当场报错并列出可选值，而不是留到解析提示词时才发现对不上。
+            replaces=_clean_replaces(row.get("replaces")),
+            workflow=_clean_workflow(row.get("workflow")),
         )
 
 
@@ -338,6 +376,74 @@ def _clean_tools(value: object, families: list[str]) -> list[str]:
     return rows
 
 
+def _clean_replaces(value: object) -> str | None:
+    """`replaces`：内置提示词的键；空（None / 空串）表示这条技能只附加说明。
+
+    未知键当场拒绝并列出可选值：拼错一个键如果被静默保存，用户会以为提示词已经被
+    换掉了，而实际生效的仍是内置那段——这比报错难查得多。
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise SkillError("replaces 须为提示词条目名的文本，例如 'extraction'；"
+                         "留空表示这条技能只附加说明")
+    key = value.strip()
+    if not key:
+        return None
+    if key not in DEFAULT_PROMPTS:
+        raise SkillError(f"未知提示词条目：{key}；可选的提示词条目："
+                         + "、".join(DEFAULT_PROMPTS)
+                         + "。留空表示这条技能只附加说明，不替换任何内置提示词")
+    return key
+
+
+def _clean_workflow(value: object) -> dict | None:
+    """`workflow`：生成工作流声明。校验形状与 `kind` 白名单，其余键宽松保留。
+
+    `kind` 必须命中白名单：它决定下游按哪种参数形状去读 `params`。
+    `model` 必填但不校验取值——那是用户与服务商之间的事，内核维护一份模型名单
+    只会越来越过期。`license`/`workflow_file` 只校验是文本，`params`/`expectations`
+    只校验是对象；不认识的键原样留下（宽松保存），避免把用户的扩展信息抹掉。
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise SkillError('workflow 须为 JSON 对象，例如 {"kind": "sketch", "model": "..."}')
+    if not value:
+        # 空对象 = 清空工作流声明（update 时用）；新建时等价于不声明。
+        return None
+    kind = value.get("kind")
+    if not isinstance(kind, str) or not kind.strip():
+        raise SkillError("workflow.kind 不能为空；可选：" + "、".join(WORKFLOW_KINDS))
+    kind = kind.strip()
+    if kind not in WORKFLOW_KINDS:
+        raise SkillError(f"workflow.kind 未知：{kind}；可选："
+                         + "、".join(WORKFLOW_KINDS)
+                         + "（分别对应素描稿、风格帧与视频生成）")
+    model = value.get("model")
+    if not isinstance(model, str) or not model.strip():
+        raise SkillError("workflow.model 须为非空文本（用哪个服务/模型的标识）")
+    cleaned: dict = {"kind": kind, "model": model.strip()}
+    for field_name in ("license", "workflow_file"):
+        item = value.get(field_name)
+        if item is None or item == "":
+            continue
+        if not isinstance(item, str):
+            raise SkillError(f"workflow.{field_name} 须为文本")
+        cleaned[field_name] = item.strip()
+    for field_name in ("params", "expectations"):
+        item = value.get(field_name)
+        if item is None:
+            continue
+        if not isinstance(item, dict):
+            raise SkillError(f"workflow.{field_name} 须为 JSON 对象")
+        cleaned[field_name] = deepcopy(item)
+    # 不认识的键原样保留：宽松保存，但已知字段的形状已经校验过了。
+    cleaned.update({key: deepcopy(item) for key, item in value.items()
+                    if key not in WORKFLOW_FIELDS})
+    return cleaned
+
+
 # --------------------------------------------------------------- 存储
 def default_path() -> Path:
     override = os.environ.get(FILE_ENV)
@@ -437,7 +543,7 @@ def get_skill(name, path: str | Path | None = None) -> Skill | None:
 
 
 def create_skill(name, summary, instructions, families=None, tools=None,
-                 path: str | Path | None = None) -> Skill:
+                 replaces=None, workflow=None, path: str | Path | None = None) -> Skill:
     name = _clean_name(name)
     if name.casefold() in _BUILTIN_KEYS:
         raise SkillError(f"{name} 是内置技能名；内置技能随程序发布、只读，"
@@ -453,14 +559,21 @@ def create_skill(name, summary, instructions, families=None, tools=None,
                   summary=_clean_text(summary, "summary", MAX_SUMMARY_CHARS),
                   instructions=_clean_text(instructions, "instructions", MAX_INSTRUCTIONS_CHARS),
                   families=cleaned_families, tools=cleaned_tools,
-                  enabled=True, builtin=False, created_at=stamp, updated_at=stamp)
+                  enabled=True, builtin=False, created_at=stamp, updated_at=stamp,
+                  replaces=_clean_replaces(replaces),
+                  workflow=_clean_workflow(workflow))
     save_skills([*custom, skill], path)
     return skill
 
 
 def update_skill(name, *, summary=None, instructions=None, families=None, tools=None,
-                 enabled=None, path: str | Path | None = None) -> Skill:
-    """部分字段更新：只改传进来的字段；families/tools 传空数组表示清空，None 表示不动。"""
+                 enabled=None, replaces=None, workflow=None,
+                 path: str | Path | None = None) -> Skill:
+    """部分字段更新：只改传进来的字段；families/tools 传空数组表示清空，None 表示不动。
+
+    `replaces` 与 `workflow` 的「清空」写法不同：前者传空串，后者传空对象 `{}`——
+    两者都是「有值但为空」的显式表达，与「没传（None）表示不动」区分开。
+    """
     key = str(name or "").strip().casefold()
     if key in _BUILTIN_KEYS:
         raise SkillError(f"内置技能 {name} 只读，不能修改；需要不同做法请 create_skill 另存一条自定义技能")
@@ -482,6 +595,8 @@ def update_skill(name, *, summary=None, instructions=None, families=None, tools=
         families=current_families,
         tools=current_tools,
         enabled=current.enabled if enabled is None else enabled,
+        replaces=current.replaces if replaces is None else _clean_replaces(replaces),
+        workflow=current.workflow if workflow is None else _clean_workflow(workflow),
         updated_at=_now(),
     )
     custom[index] = updated

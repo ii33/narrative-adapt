@@ -7,6 +7,9 @@
   `configuration`：技能是「助手自己的作业说明」，协作者本来就该能建立、编辑、管理；
   密钥与会话模板写入仍留在 `configuration`，那条红线不动。写操作照样标
   `writes=True`，审计与「写操作」判定和别的业务写入一致。
+- `list_prompt_keys` 是只读的**提示词位清单**：有哪些内置提示词位、当前各自被哪条
+  技能替换（`replaces`）。它让模型先看清「能改哪一段」，再决定要不要写一条替换技能；
+  归同一个 `skill` scope——它读的就是技能与提示词位的对应关系。
 - `load_skill` 是**会话行为**：它把技能的 `families`/`tools` 交给
   `tool_loading.resolve_tool_names` + `load_tools` 打开，并把 `instructions` 当
   「本次任务要遵守的说明」返回。它改变的是本次会话的工具曝光，所以归 `project`。
@@ -56,10 +59,15 @@ def _list_skills(_ops, _args) -> dict:
             "builtin": skill.builtin,
             "families": list(skill.families),
             "tools": list(skill.tools),
+            # 覆盖与工作流声明一起列出来：模型要先知道哪条技能在改提示词、哪条声明了
+            # 生成工作流，才谈得上「用哪一条」。正文仍然只在 read_skill 里给。
+            "replaces": skill.replaces,
+            "workflow": skill.workflow,
             "updated_at": skill.updated_at,
         })
     return {"skills": rows, "count": len(rows),
-            "message": "停用的技能不会被load_skill加载；内置技能只读。要正文与最终工具清单用read_skill。"}
+            "message": "停用的技能不会被load_skill加载；内置技能只读。要正文与最终工具清单用read_skill；"
+                       "要改系统提示词先看list_prompt_keys有哪些提示词位。"}
 
 
 def _opens(skill) -> dict:
@@ -82,9 +90,11 @@ def _read_skill(_ops, args: dict) -> dict:
 
 def _create_skill(_ops, args: dict) -> dict:
     skill = skills.create_skill(args.get("name"), args.get("summary"), args.get("instructions"),
-                                args.get("families"), args.get("tools"))
+                                args.get("families"), args.get("tools"),
+                                replaces=args.get("replaces"), workflow=args.get("workflow"))
     return {"created": skill.to_dict(), "opens": _opens(skill),
-            "message": f"技能「{skill.name}」已保存；在本次任务里用load_skill加载它。"}
+            "message": f"技能「{skill.name}」已保存；在本次任务里用load_skill加载它。"
+                       + _replaces_note(skill)}
 
 
 def _update_skill(_ops, args: dict) -> dict:
@@ -95,9 +105,37 @@ def _update_skill(_ops, args: dict) -> dict:
         families=args.get("families"),
         tools=args.get("tools"),
         enabled=args.get("enabled"),
+        replaces=args.get("replaces"),
+        workflow=args.get("workflow"),
     )
     return {"updated": skill.to_dict(), "opens": _opens(skill),
-            "message": f"技能「{skill.name}」已更新；只改了传进来的字段。"}
+            "message": f"技能「{skill.name}」已更新；只改了传进来的字段。" + _replaces_note(skill)}
+
+
+def _replaces_note(skill) -> str:
+    """声明了 `replaces` 时补一句：这件事会改变系统提示词的拼接结果，值得说清。"""
+    if not skill.replaces:
+        return ""
+    return (f"它的正文现在替换提示词位「{skill.replaces}」：模板拼接与会话快照都按它现算，"
+            "同一提示词位有多条技能时按最近更新生效。")
+
+
+def _list_prompt_keys(_ops, _args) -> dict:
+    """只读：有哪些提示词位、当前各自被哪条技能替换。"""
+    from .prompt_registry import list_prompt_keys, skill_problem
+
+    rows = list_prompt_keys()
+    result = {
+        "keys": rows,
+        "count": len(rows),
+        "message": "这些是系统提示词的固定位：replaced_by 非空表示该段当前被这条技能替换，"
+                   "为空表示用的内置文本。要替换某段就用 create_skill/update_skill 的 replaces。",
+    }
+    problem = skill_problem()
+    if problem:
+        # 技能文件坏掉时列表仍给内置口径，但原因必须说出来，否则看起来像「没人覆盖」。
+        result["problem"] = problem
+    return result
 
 
 def _delete_skill(_ops, args: dict) -> dict:
@@ -206,10 +244,18 @@ def register(Tool, register_tool, ToolError):
         "读一条技能的完整正文，以及它当前能解析到的工具清单。只读；要真正打开工具用load_skill。",
         {"name": {"type": "string", "required": True, "description": "技能名字，不区分大小写"}},
         wrap(_read_skill), scope=SCOPE))
+    # 只读的提示词位清单：模型先看清「能改哪一段、现在被谁改着」，再决定要不要写
+    # 一条 replaces 技能。它不改任何东西，所以不标 writes。
+    register_tool(Tool(
+        "list_prompt_keys",
+        "列出系统提示词的固定位（key、说明、当前版本），以及每段当前被哪条技能替换。只读；"
+        "要替换某段就在create_skill/update_skill里填replaces。",
+        {}, wrap(_list_prompt_keys), scope=SCOPE))
     register_tool(Tool(
         "create_skill",
-        "新建一条技能：一段给助手遵守的作业说明，加上它要用到的业务组/工具。名字唯一（不区分大小写），"
-        "families/tools 必须是已知的名字；超长或未知会被拒绝并列出可选项。",
+        "新建一条技能：一段给助手遵守的作业说明，加上它要用到的业务组/工具；可选声明替换哪段"
+        "系统提示词（replaces）与生成工作流（workflow）。名字唯一（不区分大小写），"
+        "families/tools/replaces/workflow 必须是已知的键或形状；超长或未知会被拒绝并列出可选项。",
         {
             "name": {"type": "string", "required": True, "description": "人可读且唯一的名字，最多64字符"},
             "summary": {"type": "string", "required": True, "description": "一句话：这条技能什么时候用"},
@@ -219,6 +265,12 @@ def register(Tool, register_tool, ToolError):
                          "description": "要打开的业务组，例如['screenplay','writing']；可省略"},
             "tools": {"type": "array", "items": {"type": "string"},
                       "description": "额外点名的工具名，例如['read_source']；可省略"},
+            "replaces": {"type": "string",
+                         "description": "要替换的内置提示词位（用list_prompt_keys查），例如'extraction'；"
+                                        "省略表示这条技能只附加说明，不改提示词"},
+            "workflow": {"type": "object",
+                         "description": "生成工作流声明：kind为sketch/style/video之一，model必填；"
+                                        "可带license、workflow_file、params、expectations"},
         }, wrap(_create_skill), writes=True, scope=SCOPE))
     register_tool(Tool(
         "update_skill",
@@ -232,6 +284,10 @@ def register(Tool, register_tool, ToolError):
             "tools": {"type": "array", "items": {"type": "string"},
                       "description": "传空数组表示清空，省略表示不动"},
             "enabled": {"type": "boolean", "description": "false 时停用：load_skill 会拒绝加载"},
+            "replaces": {"type": "string",
+                         "description": "改替换的提示词位；传空串表示改回只附加说明，省略表示不动"},
+            "workflow": {"type": "object",
+                         "description": "改生成工作流声明；传空对象表示清空，省略表示不动"},
         }, wrap(_update_skill), writes=True, scope=SCOPE))
     register_tool(Tool(
         "delete_skill",

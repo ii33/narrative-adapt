@@ -20,6 +20,11 @@
 **创建即冻结**：`snapshot()` 把系统提示词全文与工具名单抄进会话元数据。会话进行中
 改模板不影响已建会话——这同时保证了「一次会话从头到尾 tools 数组不变」，模型侧的
 提示词缓存不会因为中途 `load_tools` 增长而整体失效。
+
+**拼接走 `prompt_registry`**：上面这些 key 是「提示词位」，不是硬编码的文本。用户
+技能可以声明 `replaces: "<key>"`，用它的正文顶替某一段；没被替换时逐字使用
+`prompt_defaults` 的原文。快照因此多带一份 `prompt_sources`（每段来自内置还是哪条
+技能、版本是多少），事后能解释「这场会话当初用的是哪一版提示词」。
 """
 
 from __future__ import annotations
@@ -71,14 +76,17 @@ TEMPLATE_META = {
 
 
 def compose_system_prompt(template_id: str) -> str:
-    """把既有提示词条目按模板顺序拼成系统提示词；不新增任何文案。"""
-    from .prompt_defaults import DEFAULT_PROMPTS
+    """把既有提示词条目按模板顺序拼成系统提示词；不新增任何文案。
+
+    走 `prompt_registry`：模板引用的是「提示词位」，用户技能可以用 `replaces` 顶替
+    其中任意一段。内置文本仍是 `prompt_defaults` 里那一份，没被替换时逐字不变。
+    """
+    from .prompt_registry import compose
 
     keys = TEMPLATE_PROMPT_KEYS.get(template_id)
     if not keys:
         raise ValueError(f"未知会话模板：{template_id}")
-    parts = [DEFAULT_PROMPTS[key]["text"].strip() for key in keys]
-    return "\n\n".join(part for part in parts if part)
+    return compose(keys)["text"]
 
 
 def template_tool_names(template_id: str) -> list[str]:
@@ -93,10 +101,33 @@ def template_tool_names(template_id: str) -> list[str]:
     return [name for name in TOOLS if name in wanted]
 
 
-def prompt_versions(template_id: str) -> dict[str, str]:
-    from .prompt_defaults import DEFAULT_PROMPTS
+def prompt_sources(keys) -> dict[str, dict]:
+    """每段提示词当前来自哪里：`{key: {source, name, version}}`。
 
-    return {key: DEFAULT_PROMPTS[key].get("version", "") for key in TEMPLATE_PROMPT_KEYS[template_id]}
+    `source` 是 `"builtin"` 或 `"skill"`；被技能替换时 `name` 是那条技能的名字、
+    `version` 是它的 `updated_at`。快照把它抄进会话元数据，事后才能解释「这场会话
+    当初用的那段提示词是内置的还是某条技能改过的」。
+    """
+    from .prompt_registry import sources
+
+    return sources(keys)
+
+
+def _version_labels(keys) -> dict[str, str]:
+    """版本标签：内置只给版本号，技能替换写成 `技能名@版本`——只看版本号看不出这段换人了。"""
+    from .prompt_registry import sources
+
+    return {
+        key: (f"{info['name']}@{info['version']}" if info["source"] == "skill" else info["version"])
+        for key, info in sources(keys).items()
+    }
+
+
+def prompt_versions(template_id: str) -> dict[str, str]:
+    keys = TEMPLATE_PROMPT_KEYS.get(template_id)
+    if not keys:
+        raise ValueError(f"未知会话模板：{template_id}")
+    return _version_labels(keys)
 
 
 def template(template_id: str) -> dict:
@@ -104,9 +135,12 @@ def template(template_id: str) -> dict:
     if template_id not in TEMPLATE_META:
         raise ValueError(f"未知会话模板：{template_id}")
     name, description = TEMPLATE_META[template_id]
+    keys = TEMPLATE_PROMPT_KEYS[template_id]
     return {"id": template_id, "name": name, "description": description,
             "builtin": True, "system_prompt": compose_system_prompt(template_id),
-            "tools": template_tool_names(template_id), "prompt_versions": prompt_versions(template_id)}
+            "tools": template_tool_names(template_id),
+            "prompt_versions": _version_labels(keys),
+            "prompt_sources": prompt_sources(keys)}
 
 
 def list_templates() -> list[dict]:
@@ -217,16 +251,16 @@ def delete_custom(scope: str, template_id: str, ops=None) -> bool:
 
 
 def system_prompt_for(definition: dict) -> str:
-    """两种形态：引用 prompt_defaults 的 key 列表（推荐）或自由文本。"""
+    """两种形态：引用 prompt_defaults 的 key 列表（推荐）或自由文本。
+
+    `prompt_keys` 形态走 `prompt_registry`：老模板的语义不变（还是按顺序拼那几段），
+    只是每一段现在可能被一条声明了 `replaces` 的技能顶替。
+    """
     keys = definition.get("prompt_keys")
     if keys:
-        from .prompt_defaults import DEFAULT_PROMPTS
+        from .prompt_registry import compose
 
-        missing = [key for key in keys if key not in DEFAULT_PROMPTS]
-        if missing:
-            raise ValueError("引用了不存在的提示词条目：" + "、".join(missing))
-        parts = [DEFAULT_PROMPTS[key]["text"].strip() for key in keys]
-        return "\n\n".join(part for part in parts if part)
+        return compose(keys)["text"]
     text = definition.get("system_prompt")
     if not isinstance(text, str) or not text.strip():
         raise ValueError("模板须给出prompt_keys或非空system_prompt")
@@ -267,8 +301,15 @@ def resolve(template_id: str, ops=None) -> dict:
         rows = load_custom(scope, ops)
         if template_id in rows:
             stored = rows[template_id]
-            return {**deepcopy(stored), "id": template_id, "builtin": False, "scope": scope,
-                    "system_prompt": stored.get("system_prompt") or system_prompt_for(stored)}
+            resolved = {**deepcopy(stored), "id": template_id, "builtin": False, "scope": scope,
+                        "system_prompt": stored.get("system_prompt") or system_prompt_for(stored)}
+            keys = stored.get("prompt_keys") or []
+            if keys:
+                # 自定义模板也按当前技能覆盖解析：快照冻结的是「此刻解析出来的全文」，
+                # 来源同样要一起冻进去，否则事后说不清那段文本是从哪来的。
+                resolved["prompt_versions"] = _version_labels(keys)
+                resolved["prompt_sources"] = prompt_sources(keys)
+            return resolved
     raise ValueError(f"未知会话模板：{template_id}")
 
 

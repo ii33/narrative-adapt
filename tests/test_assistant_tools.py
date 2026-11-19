@@ -141,9 +141,11 @@ def test_skill_management_is_visible_to_collaborators_but_configuration_is_not()
     for name in (LOAD_TOOL_NAME, *sorted(MANAGE_TOOL_NAMES)):
         assert name in allowed and name in catalog, name
         assert tool_api.TOOLS[name].scope in {"project", SCOPE}, name
-    # 五个管理工具都是 skill scope；写属性只落在 create/update/delete 上
+    # 管理工具都是 skill scope；写属性只落在 create/update/delete 上
+    # （list_prompt_keys 是只读的提示词位清单，也归这一组）
     assert {name for name in MANAGE_TOOL_NAMES} == {
-        "list_skills", "read_skill", "create_skill", "update_skill", "delete_skill"}
+        "list_skills", "read_skill", "list_prompt_keys",
+        "create_skill", "update_skill", "delete_skill"}
     assert {name for name in MANAGE_TOOL_NAMES if tool_api.TOOLS[name].writes} == {
         "create_skill", "update_skill", "delete_skill"}
     assert tool_api.TOOLS[LOAD_TOOL_NAME].writes is False

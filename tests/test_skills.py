@@ -58,8 +58,9 @@ def project_names():
 
 
 def make_skill(name="试写技能", summary="一句话摘要", instructions="先读数，再写。",
-               families=None, tools=None):
-    return skills.create_skill(name, summary, instructions, families, tools)
+               families=None, tools=None, replaces=None, workflow=None):
+    return skills.create_skill(name, summary, instructions, families, tools,
+                               replaces=replaces, workflow=workflow)
 
 
 def bound_loader(allowed, visible, *, refuse=None, frozen=False, calls=None):
@@ -299,7 +300,8 @@ def test_missing_skills_file_keeps_discovery_and_other_families_unchanged(skills
     # 技能组现在整组可见（管理工具归 skill scope）：没有技能文件时也一样，
     # 因为它们是代码注册的，不依赖用户配置。
     assert [row["name"] for row in list_available_tools(family="skill")["tools"]] == [
-        "list_skills", "read_skill", "create_skill", "update_skill", "delete_skill", "load_skill"]
+        "list_skills", "read_skill", "list_prompt_keys",
+        "create_skill", "update_skill", "delete_skill", "load_skill"]
     # 其它业务组没被这组带跑：读取类工具仍归自己那一组
     assert tool_family("read_source") == "sources" and tool_family("submit_scene_table") == "writing"
 
@@ -395,3 +397,109 @@ def test_load_skill_refuses_disabled_and_unknown_skills():
         call("load_skill", name="不存在")
     skills.update_skill("停用技能", enabled=True)
     assert call("read_skill", name="停用技能")["skill"]["enabled"] is True
+
+
+# --------------------------------------------- 替换提示词位与工作流声明
+
+
+def test_replaces_accepts_a_known_prompt_key():
+    from narrative.prompt_defaults import DEFAULT_PROMPTS
+
+    skill = make_skill("改写提取要求", replaces="extraction")
+    assert skill.replaces == "extraction"
+    assert skills.get_skill("改写提取要求").replaces == "extraction"
+    # 白名单就是内置提示词表：新增一段提示词不必改技能模块。
+    assert skill.replaces in DEFAULT_PROMPTS
+
+
+def test_unknown_replaces_key_is_rejected_with_options():
+    with pytest.raises(SkillError) as info:
+        make_skill("拼错键", replaces="extractionz")
+    message = str(info.value)
+    assert "未知提示词条目：extractionz" in message
+    # 报错是给用户看的：可选键要列出来，并说清「留空 = 只附加说明」。
+    assert "extraction" in message and "writing" in message
+    assert "只附加说明" in message
+
+
+def test_hand_edited_file_with_unknown_replaces_is_rejected(skills_file):
+    """手改文件走同一套校验：未知的 replaces 当场报错，不留到解析提示词时才对不上。"""
+    skills_file.write_text(json.dumps({"version": 1, "skills": [
+        {"name": "手改", "summary": "s", "instructions": "i", "replaces": "no_such"}]},
+        ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(SkillError, match="未知提示词条目：no_such"):
+        skills.load_custom_skills()
+
+
+def test_empty_replaces_means_instructions_only():
+    """replaces 为空就是纯附加说明（既有语义）；update 传空串表示改回纯说明。"""
+    assert make_skill("纯说明").replaces is None
+    assert skills.update_skill("纯说明", replaces="writing").replaces == "writing"
+    assert skills.update_skill("纯说明", replaces="").replaces is None
+    # 没传 replaces 时不动它（局部更新语义与 families/tools 一致）。
+    assert skills.update_skill("纯说明", replaces="scene_policy").replaces == "scene_policy"
+    assert skills.update_skill("纯说明", summary="只改摘要").replaces == "scene_policy"
+
+
+def test_workflow_shape_is_kept_and_kind_is_whitelisted():
+    workflow = {"kind": "sketch", "model": "local/sketch-v1", "license": "CC-BY-4.0",
+                "workflow_file": "workflows/sketch.json", "params": {"steps": 20},
+                "expectations": {"min_side": 768}, "note": "不认识的键宽松保留"}
+    skill = make_skill("素描工作流", workflow=workflow)
+    assert skill.workflow["kind"] == "sketch"
+    assert skill.workflow["params"] == {"steps": 20}
+    assert skill.workflow["note"] == "不认识的键宽松保留"
+    assert skills.get_skill("素描工作流").workflow["workflow_file"] == "workflows/sketch.json"
+
+    with pytest.raises(SkillError) as info:
+        make_skill("未知工作流", workflow={"kind": "sketchz", "model": "m"})
+    message = str(info.value)
+    assert "workflow.kind 未知：sketchz" in message
+    assert all(kind in message for kind in ("sketch", "style", "video"))
+
+
+def test_workflow_field_shapes_are_checked():
+    with pytest.raises(SkillError, match="workflow.model 须为非空文本"):
+        make_skill("缺模型", workflow={"kind": "style"})
+    with pytest.raises(SkillError, match="workflow.params 须为 JSON 对象"):
+        make_skill("坏参数", workflow={"kind": "video", "model": "m", "params": [1]})
+    with pytest.raises(SkillError, match="workflow.license 须为文本"):
+        make_skill("坏许可", workflow={"kind": "video", "model": "m", "license": 1})
+    with pytest.raises(SkillError, match="workflow 须为 JSON 对象"):
+        make_skill("坏形状", workflow=["sketch"])
+
+
+def test_update_skill_clears_workflow_with_an_empty_object():
+    make_skill("工作流", workflow={"kind": "video", "model": "m"})
+    assert skills.update_skill("工作流", summary="改摘要").workflow == {"kind": "video", "model": "m"}
+    assert skills.update_skill("工作流", workflow={}).workflow is None
+
+
+def test_list_skills_reports_replaces_and_workflow():
+    make_skill("替换写法", replaces="writing", workflow={"kind": "style", "model": "m"})
+    rows = {row["name"]: row for row in call("list_skills")["skills"]}
+    assert rows["替换写法"]["replaces"] == "writing"
+    assert rows["替换写法"]["workflow"] == {"kind": "style", "model": "m"}
+    # 内置技能两个字段都是空：它们不改提示词、也不声明工作流。
+    builtin = BUILTIN_SKILLS[0].name
+    assert rows[builtin]["replaces"] is None and rows[builtin]["workflow"] is None
+    read = call("read_skill", name="替换写法")["skill"]
+    assert read["replaces"] == "writing" and read["workflow"]["kind"] == "style"
+
+
+def test_list_prompt_keys_shows_who_replaces_each_prompt():
+    from narrative.prompt_defaults import DEFAULT_PROMPTS
+
+    listing = call("list_prompt_keys")
+    assert listing["count"] == len(DEFAULT_PROMPTS)
+    assert all(row["replaced_by"] is None for row in listing["keys"])
+    # 只读工具：不写盘、不标 writes。
+    assert tool_api.TOOLS["list_prompt_keys"].writes is False
+    assert tool_api.TOOLS["list_prompt_keys"].scope == SCOPE
+
+    call("create_skill", name="改写写作要求", summary="摘要", instructions="按我的顺序写。",
+         replaces="writing")
+    rows = {row["key"]: row for row in call("list_prompt_keys")["keys"]}
+    assert rows["writing"]["replaced_by"] == "改写写作要求"
+    assert rows["writing"]["source"] == "skill"
+    assert rows["system"]["replaced_by"] is None and rows["system"]["source"] == "builtin"

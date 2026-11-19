@@ -16,9 +16,11 @@ def _isolate_app_templates(tmp_path, monkeypatch):
     """本文件的每个用例都把应用级模板文件指到 tmp：绝不碰真实 ~/.narrative。
 
     xdist 下 14 个 worker 并行，若共用用户目录同一个文件，原子替换会互相打架，
-    还可能把测试写的模板留进用户真实配置里。
+    还可能把测试写的模板留进用户真实配置里。技能文件同理：模板拼接现在会读它
+    （`replaces` 可以顶替某段提示词），不隔离就会读到开发机上的真实技能。
     """
     monkeypatch.setenv("NARRATIVE_CHAT_TEMPLATES_FILE", str(tmp_path / "app-templates.json"))
+    monkeypatch.setenv("NARRATIVE_SKILLS_FILE", str(tmp_path / "skills.json"))
 
 
 @pytest.fixture
@@ -215,3 +217,64 @@ def test_chat_built_from_a_custom_template_freezes_its_prompt_and_tools(ops):
     # 改了自定义模板，已建会话仍不变（冻结语义对自定义模板同样成立）。
     save(ops, scope="app", **{**CUSTOM, "tools": ["read_source"]})
     assert store(ops).template(chat["id"]) == frozen
+
+
+# ------------------------------------------------- 阶段 3：提示词位与来源
+
+
+def test_builtin_template_prompt_still_joins_the_default_entries():
+    """拼接语义没变：还是那几段内置条目按顺序用空行连起来，一字不差。"""
+    expected = "\n\n".join(DEFAULT_PROMPTS[key]["text"].strip()
+                           for key in chat_templates.TEMPLATE_PROMPT_KEYS["extract"])
+    assert chat_templates.compose_system_prompt("extract") == expected
+
+
+def test_snapshot_carries_prompt_sources_and_freezes_them(ops):
+    """快照多带一份 prompt_sources：每段来自内置还是哪条技能、版本多少。"""
+    from narrative import skills
+
+    skills.create_skill("我的写法", "按我的顺序写", "先写冲突，再写解决。", replaces="writing")
+    frozen = chat_templates.snapshot("screenplay", ops)
+    assert frozen["prompt_sources"]["writing"]["source"] == "skill"
+    assert frozen["prompt_sources"]["writing"]["name"] == "我的写法"
+    assert frozen["prompt_sources"]["writing"]["version"]  # 技能的 updated_at
+    assert frozen["prompt_sources"]["system"] == {
+        "source": "builtin", "name": None, "version": DEFAULT_PROMPTS["system"]["version"]}
+    # 全文跟着换：被替换的段是技能正文，其余段仍是内置原文。
+    assert "先写冲突，再写解决。" in frozen["system_prompt"]
+    assert DEFAULT_PROMPTS["writing"]["text"].strip() not in frozen["system_prompt"]
+    assert DEFAULT_PROMPTS["scene_policy"]["text"].strip() in frozen["system_prompt"]
+
+    # 冻结的是全文与来源：之后删掉技能，已建会话一个字都不变。
+    skills.delete_skill("我的写法", confirm=True)
+    chat = store(ops).create("冻结来源", template=frozen)
+    saved = store(ops).template(chat["id"])
+    assert saved["prompt_sources"]["writing"]["name"] == "我的写法"
+    assert "先写冲突，再写解决。" in saved["system_prompt"]
+    # 新快照回落内置。
+    assert chat_templates.snapshot("screenplay", ops)["prompt_sources"]["writing"]["source"] == "builtin"
+
+
+def test_custom_template_prompt_sources_come_from_the_registry(ops):
+    """自定义模板（prompt_keys 形态）也按技能覆盖解析，语义仍是「按顺序拼这几段」。"""
+    from narrative import skills
+
+    skills.create_skill("我的写法", "按我的顺序写", "先写冲突，再写解决。", replaces="writing")
+    save(ops, scope="app", **CUSTOM)
+    resolved = chat_templates.resolve("screenplay-fast", ops)
+    assert resolved["prompt_sources"]["writing"]["name"] == "我的写法"
+    assert resolved["prompt_sources"]["system"]["source"] == "builtin"
+    assert resolved["prompt_versions"]["writing"].startswith("我的写法@")
+    assert resolved["system_prompt"] == (DEFAULT_PROMPTS["system"]["text"].strip()
+                                        + "\n\n" + "先写冲突，再写解决。")
+    frozen = chat_templates.snapshot("screenplay-fast", ops)
+    assert frozen["prompt_sources"]["writing"]["source"] == "skill"
+
+
+def test_free_text_custom_template_has_no_prompt_sources(ops):
+    """自由文本形态没有提示词位可言：没有 prompt_keys 就不编一份来源出来。"""
+    save(ops, scope="app", **{**CUSTOM, "id": "free-text", "prompt_keys": None,
+                              "system_prompt": "你是快写助手。"})
+    resolved = chat_templates.resolve("free-text", ops)
+    assert resolved["system_prompt"] == "你是快写助手。"
+    assert "prompt_sources" not in resolved
