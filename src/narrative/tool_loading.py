@@ -113,7 +113,8 @@ def tool_family(name: str) -> str:
         return 'storyboard'
     if name in {'compile_screenplay', 'export_screenplay'}:
         return 'output'
-    if name in {'list_assets', 'get_asset', 'save_asset', 'delete_asset', 'asset_moments'}:
+    if name in {'list_assets', 'get_asset', 'save_asset', 'delete_asset', 'asset_moments',
+                'write_asset_draft', 'run_asset_generation_task'}:
         return 'assets'
     if name in {'load_project_style', 'save_project_style', 'load_prompt_settings', 'save_prompt_override',
                 'load_creative_agreement', 'save_creative_agreement', 'load_compile_settings', 'save_compile_settings',

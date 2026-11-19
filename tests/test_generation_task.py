@@ -432,4 +432,5 @@ def test_generation_tools_are_registered():
     assert set(tool_api.TOOLS['run_generation_task'].params) == {
         'unit_id', 'revision', 'kind', 'shot_id', 'offset_ms', 'prompt', 'layout', 'moment', 'constraints'}
     assert tool_api.TOOLS['run_generation_task'].params['kind']['enum'] == ['sketch', 'style', 'video']
-    assert generation_task.KINDS == ('sketch', 'style', 'video')
+    # 资产的两类走自己的工具（run_asset_generation_task），与分镜的 kind 同一份总表。
+    assert generation_task.KINDS == ('sketch', 'style', 'video', 'asset_design', 'asset_sketch')

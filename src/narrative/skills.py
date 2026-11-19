@@ -51,10 +51,10 @@ MAX_NAME_CHARS = 64
 MAX_SUMMARY_CHARS = 200
 MAX_INSTRUCTIONS_CHARS = 20000
 
-# `workflow.kind` 的白名单：这三个是当前真实存在的生成工作流（素描稿、风格帧、
-# 视频）。白名单写死是刻意的——`kind` 决定下游按哪种参数形状去读 `params`，
-# 放过一个未知值只会让它在使用时才炸。
-WORKFLOW_KINDS = ("sketch", "style", "video")
+# `workflow.kind` 的白名单：这五个是当前真实存在的生成工作流（素描稿、风格帧、
+# 视频、资产设定图、资产素描图）。白名单写死是刻意的——`kind` 决定下游按哪种参数
+# 形状去读 `params`，放过一个未知值只会让它在使用时才炸。
+WORKFLOW_KINDS = ("sketch", "style", "video", "asset_design", "asset_sketch")
 
 # `workflow` 的已知字段。前两个必填（`kind` 决定走哪条流程、`model` 决定用哪个
 # 服务/模型），其余可选；不认识的键原样保留（宽松保存），但不再参与校验。
@@ -372,6 +372,81 @@ kind=video、模型 MiniMax-H3、许可 MiniMax 商用条款待确认。本轮�
 - 报模型不在可选名单：workflow.model 写错了；按错误里列出的模型改，不要改内核名单。
 - 提交成功但任务失败：回执里已有 task_id，按它查状态后如实汇报，不要重投一次当作已完成。
 - 视频这一轮不读 ComfyUI 工作流文件：warnings 会说明 workflow_file 未生效，别声称用了它。""",
+    ),
+    Skill(
+        name="资产设定图（Krea 2）",
+        summary="按资产文字稿生成风格化设定图（人物/道具/地点，一次一个视角）",
+        families=[],
+        tools=[],
+        builtin=True,
+        workflow={
+            "kind": "asset_design",
+            "model": "krea-2",
+            "license": "Krea 2（年营收门槛，商用待确认）",
+            "expectations": {"uses_draft": True, "views_per_call": 1, "reference_images_max": 10},
+        },
+        instructions="""# 资产设定图（Krea 2）
+
+kind=asset_design、模型 krea-2、许可 Krea 2（年营收门槛，商用待确认）。它把资产的文字稿
+画成一张风格化设定图：外观、服装、材质、比例与标志性细节照文字稿，调性照项目风格。
+模型与分镜的风格帧是同一批（krea-2），不另起一套——同一部片子的资产与关键帧该像一家人。
+
+## 怎么跑
+- 先 write_asset_draft 写文字稿：只写图要用到的段落（appearance/costume/prop/location/
+  proportion/marks），每条考据附原文引用。文字稿是这张图的验收标准。
+- 再 run_asset_generation_task(kind='asset_design')；一次一个视角，view=front/side/back/none，
+  需要多视角就分开再出一次，不要把多个视角挤进一帧。
+- prompt 只补本次要求（姿态、光线、背景处理），不重述文字稿里已经写清的形体。
+- 没有文字稿也允许出图：回执会带 DRAFT_MISSING，说明这一版没有一致性依据可核。
+
+## 参考图怎么排
+- 参考图只作外观依据：资产卡上导入的图片在前，最多 10 张（expectations.reference_images_max）。
+  设定图本身不再当参考图喂回去——那会让每一版都在上一版上叠加，越画越偏离文字稿。
+- 参考图里的文字、标签、参考板排版都不进成图；设定图是单张资产，不是情绪板拼贴。
+
+## 失败怎么办
+- 报「没有可用于asset_design生成的技能」：这条内置技能被停用了；说清现状，不要换别的模型猜着跑。
+- 回执带 WORKFLOW_FILE_ABSENT：这条内置技能没有随程序发布工作流文件，本轮走 provider 默认流程——
+  已知状态，不是静默成功。
+- 服务失败（ComfyUI 连不上、超时、产物不可读）：原样转述；失败不写 designs，旧图与文字稿都保留。
+- 不要用几何绘制或本地贴图顶替生成结果：设定图必须来自模型。""",
+    ),
+    Skill(
+        name="资产素描图（FLUX 3 Klein）",
+        summary="以资产设定图为依据生成工作用线稿，供分镜生图当跨镜参考",
+        families=[],
+        tools=[],
+        builtin=True,
+        workflow={
+            "kind": "asset_sketch",
+            "model": "flux3-image-klein",
+            "license": "FLUX Kommunity License（商用条款待确认）",
+            "workflow_file": "workflows/storyboard_flux_klein.json",
+            "expectations": {"source_design_required": True, "reference_images_max": 10},
+        },
+        instructions="""# 资产素描图（FLUX 3 Klein）
+
+kind=asset_sketch、模型 flux3-image-klein、许可 FLUX Kommunity License（商用条款待确认）。
+它以一张设定图为输入生成工作用线稿：分镜生图时拿它当跨镜参考，要的是形体、比例、朝向与
+标志性细节稳定，不是好看。模型与分镜的素描稿同一批（flux3-image-klein），工作流文件也是
+随程序发布的那份。
+
+## 怎么跑
+- 必须先有设定图：没有就报错，不生成。缺设定图时先跑 asset_design，不要用别的东西顶替形体依据。
+- 默认取 view=front 那张（最近一张）；要按另一张画就用 design_path 指定，别指望「看着差不多」。
+- run_asset_generation_task(kind='asset_sketch')；素描画法取自工程的素描风格设置，文字稿与项目
+  风格一并进入提示词。
+- 未绑定文字稿也能出图：回执带 DRAFT_MISSING——线稿有了形体依据，但没有文字依据可核。
+
+## 产物怎么记
+- 每条素描记录都写明依据哪张设定图（design_path）与依据哪版文字稿（draft_revision）：
+  设定图一改，旧线稿就该重画，这条关系是唯一能看出该重画哪张的依据。
+- 生成成功才追加进 sketches；失败不写，旧图保留。
+
+## 失败怎么办
+- 报「还没有设定图」：先出设定图；不要改用 asset_design 顶替线稿。
+- 报服务失败：原样转述并保留旧图，不重试、不拿几何图或滤镜冒充线稿。
+- 回执 warnings 里说明哪条声明本轮没生效，别声称已经用上了。""",
     ),
 )
 

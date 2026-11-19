@@ -30,17 +30,41 @@ from PIL import Image, ImageDraw
 from .segment_motion import segment_at, segment_prompt
 from .storyboard_layout import layout_at, normalize_layout
 
-KINDS = ('sketch', 'style', 'video')
+KINDS = ('sketch', 'style', 'video', 'asset_design', 'asset_sketch')
+# 镜头级任务：分镜那条链路只认这三种；资产两级产物流水线走资产工具，
+# 不能拿「镜头不属于本场」去回一个资产请求，那是误导。
+SHOT_KINDS = ('sketch', 'style', 'video')
+# 分镜的三种生成要镜头与时刻；资产的两类不要镜头，输入是资产卡上的文字稿与设定图。
+# 分开列一份，是为了让「要镜头」与「要资产卡」两条校验各自说自己的话，而不是靠在
+# 同一个函数里到处 if。
+ASSET_KINDS = ('asset_design', 'asset_sketch')
 # 绑定目标由 kind 决定，调用方不能改：生成类命令是即时动作，不接受「换个目标再写」。
-BIND_TO = {'sketch': 'keyframe_sketch', 'style': 'keyframe_style', 'video': 'shot_generations'}
+BIND_TO = {'sketch': 'keyframe_sketch', 'style': 'keyframe_style', 'video': 'shot_generations',
+           'asset_design': 'asset_designs', 'asset_sketch': 'asset_sketches'}
 RECEIPT_FIELDS = {'sketch': ['sketch_path', 'sketch_source', 'sketch_basis_hash'],
                   'style': ['style_path'],
-                  'video': ['generations']}
+                  'video': ['generations'],
+                  'asset_design': ['designs'],
+                  'asset_sketch': ['sketches']}
 CONSTRAINT_FIELDS = ('aspect', 'resolution', 'duration_ms', 'first_frame', 'last_frame', 'source_image')
+# 资产没有镜头时长：图像 provider 只认输入图画布，所以可覆盖的约束只剩画幅。
+ASSET_CONSTRAINT_FIELDS = ('aspect',)
 DEFAULT_ASPECT = '16:9'
+# 资产的默认画幅：人物与道具要看清比例与轮廓，地点要看清空间关系，所以不是同一张比例。
+ASSET_ASPECTS = {'appearance': '2:3', 'item': '1:1', 'location': '16:9', 'material': '1:1'}
+# 设定图的默认视角：人物与道具要正面看比例，场景没有「正面」这回事。
+ASSET_DEFAULT_VIEWS = {'appearance': 'front', 'item': 'front', 'location': 'none', 'material': 'none'}
+DESIGN_VIEWS = ('front', 'side', 'back', 'none')
 # 构图参考图的尺寸沿用 storyboard_art 的画布：两处给模型的输入形状一致。
 GUIDE_SIZE = (960, 540)
+# 资产设定图的空白画布：图像工作流需要一张输入图，给空白画布而不是伪造构图
+# （与既有 `generate_asset_sketch` 同一口径：没有构图可保，就不假装有）。
+ASSET_CANVAS = {'2:3': (1024, 1536), '1:1': (1024, 1024), '16:9': (1536, 864)}
 _SHADES = {'person': 150, 'prop': 168, 'location': 190, 'material': 176}
+# 文字稿段落在提示词里的中文标签：给模型的说明要能直接对上写稿时填的键。
+_DRAFT_LABELS = {'appearance': '外观', 'costume': '服装', 'prop': '道具形制',
+                 'location': '场景要素', 'proportion': '比例', 'marks': '标志性细节'}
+
 
 
 class TaskInputError(ValueError):
@@ -198,6 +222,124 @@ def _expect(kind, expect):
     return result
 
 
+def _asset_draft(value):
+    """文字稿进任务包的部分：段落与修订号。
+
+    考据（``sources``）与版本记录（``style_ref``）留在资产卡上：提示词要的是「画成什么
+    样」，引文与版本是给人核对依据的，塞进提示词只会让模型去引用原文。
+    """
+    if not isinstance(value, dict):
+        return None
+    sections = {key: text.strip() for key, text in (value.get('sections') or {}).items()
+                if isinstance(text, str) and text.strip()}
+    if not sections:
+        return None
+    revision = value.get('revision')
+    return {'sections': sections, 'revision': revision if type(revision) is int else 0}
+
+
+def _asset_design(card, design_path):
+    """素描图依据的设定图：指定了就按指定的，否则优先正面，再否则取最近一张。
+
+    为什么不是「第一张」：设定图会越出越多（正面/侧面/背面/氛围），而跨镜一致最需要的
+    是正面那张的形体；按列表首项取，等于让第一次生成的视角意外决定之后所有线稿。
+    """
+    designs = [row for row in card.get('designs') or []
+               if isinstance(row, dict) and row.get('path')]
+    if not designs:
+        return None
+    if design_path is not None:
+        from pathlib import Path
+
+        wanted = Path(str(design_path))
+        chosen = next((row for row in designs if Path(row['path']) == wanted), None)
+        if chosen is None:
+            raise TaskInputError('指定的设定图不属于这张资产：' + str(design_path))
+        return chosen
+    return next((row for row in reversed(designs) if row.get('view') == 'front'), designs[-1])
+
+
+def _asset_view(kind, category, view, design):
+    """这次出的图是什么视角：显式给的优先；素描图沿用所依据设定图的视角。"""
+    if view is not None:
+        if not isinstance(view, str) or view not in DESIGN_VIEWS:
+            raise TaskInputError('view须为' + '、'.join(DESIGN_VIEWS) + '或省略')
+        return view
+    if kind == 'asset_sketch' and design is not None:
+        return design.get('view') if design.get('view') in DESIGN_VIEWS else 'none'
+    return ASSET_DEFAULT_VIEWS[category]
+
+
+def _asset_constraints(kind, category, design, constraints):
+    """资产出图只约束画幅：图像 provider 只认输入图的尺寸，分辨率/时长没有通道。
+
+    为什么只留 ``aspect`` 一项：两个 provider 都是按输入图画布出图的，写进来的分辨率会被
+    默默忽略——列一项根本用不上的约束，比不列更糟。素描图的 ``source_image`` 是所依据的
+    设定图：它是这次生成的输入，不是 provider 自己的事，所以和分镜的 ``source_image``
+    一样留在任务包里（此时真正的画幅由输入图决定，``aspect`` 只是给人看的一致约定）。
+    """
+    result = {'aspect': ASSET_ASPECTS[category], 'source_image': None}
+    if kind == 'asset_sketch':
+        result['source_image'] = str(design['path'])
+    if constraints is None:
+        return result
+    if not isinstance(constraints, dict):
+        raise TaskInputError('constraints须为对象')
+    extra = set(constraints) - set(ASSET_CONSTRAINT_FIELDS)
+    if extra:
+        raise TaskInputError('资产出图的constraints有不认识的字段：'
+                             + '、'.join(sorted(extra)) + '；允许：' + '、'.join(ASSET_CONSTRAINT_FIELDS))
+    for key, value in constraints.items():
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise TaskInputError(f'constraints的{key}须为非空文本')
+        if key == 'aspect' and value.strip() not in ASSET_CANVAS:
+            raise TaskInputError('aspect须为' + '、'.join(ASSET_CANVAS) + f'，实际是{value.strip()}')
+        result[key] = value.strip()
+    return result
+
+
+def _asset_task(kind, *, asset, asset_id=None, style=None, prompt='', constraints=None,
+                expect=None, view=None, design_path=None, sketch_style=''):
+    """资产类任务包：输入是资产卡上的文字稿、项目风格与（素描图才有的）设定图。
+
+    不设强制闸门：没有文字稿也照样出设定图——软件不拦，缺什么在回执里说清楚（
+    ``DRAFT_MISSING``）。只有素描图必须以一张设定图为依据，缺了就在这里报错，不去
+    调服务浪费一次生成。
+    """
+    if not isinstance(asset, dict):
+        raise TaskInputError('资产任务需要资产卡数据（asset）')
+    card_id = asset.get('id')
+    if not isinstance(card_id, str) or not card_id.strip():
+        raise TaskInputError('资产卡缺少资产编号')
+    if asset_id is not None and asset_id != card_id:
+        raise TaskInputError('asset_id与资产卡不一致：' + str(asset_id))
+    category = asset.get('category')
+    if category not in ASSET_ASPECTS:
+        raise TaskInputError('资产类别须为' + '、'.join(ASSET_ASPECTS) + '，无法确定画幅')
+    if not isinstance(sketch_style, str):
+        raise TaskInputError('素描画法须为文本')
+    draft = _asset_draft(asset.get('draft'))
+    design = None
+    if kind == 'asset_sketch':
+        design = _asset_design(asset, design_path)
+        if design is None:
+            raise TaskInputError('这张资产还没有设定图：asset_sketch必须以一张设定图为依据，'
+                                 '请先生成设定图（或用design_path指定已有的那张）')
+    task = {'kind': kind, 'asset_id': card_id, 'title': str(asset.get('title') or ''),
+            'category': category, 'draft': draft, 'design': design,
+            'view': _asset_view(kind, category, view, design),
+            'style': _style(style),
+            'constraints': _asset_constraints(kind, category, design, constraints),
+            'expect': _expect(kind, expect), 'prompt': prompt}
+    if kind == 'asset_sketch':
+        # 与 video 的 motion 同一处理：只有这条流程有的输入才出现在任务包里，
+        # 免得读包的人以为设定图那种单张静态图也要一段「素描画法」。
+        task['sketch_style'] = sketch_style
+    return task
+
+
 def _motion_prompt(motion, prompt, *, duration_ms=None, pictures=2):
     """视频提示词：官方对齐句＋四段推导在前，人工补充在后并声明优先。
 
@@ -215,18 +357,29 @@ def _motion_prompt(motion, prompt, *, duration_ms=None, pictures=2):
     return machine + '\n人工补充（与上面的程序推导冲突时以这里为准）：' + prompt.strip()
 
 
-def build_task(kind, *, shot_id, offset_ms, board, layout=None, moment=None, assets=None,
-               style=None, constraints=None, expect=None, prompt=''):
-    """组装任务包；只读 board，不联网、不落盘。
+def build_task(kind, *, shot_id=None, offset_ms=None, board=None, layout=None, moment=None, assets=None,
+               style=None, constraints=None, expect=None, prompt='', asset=None, asset_id=None,
+               view=None, design_path=None, sketch_style=''):
+    """组装任务包；只读传入的数据，不联网、不落盘。
 
     ``prompt`` 是本次的补充要求（可为空）。任务包里没有正文字段：正文、创作约定与
     资产说明由调用方通过 ``style``/``assets`` 带进来，这里不猜。
+
+    分镜的三种生成要镜头（``shot_id``/``offset_ms``/``board``）；资产的两类要 ``asset``
+    卡（文字稿与设定图都在卡上，见 `_asset_task`）——两条路的校验各说各的，不在一个
+    函数里互相迁就。
 
     只有 video 带 ``motion``：视频是「首帧→尾帧」的一段过渡，运动是它的输入之一；
     草图与风格帧是静态图，带上运镜只会让模型把运动画进这一帧里。
     """
     if kind not in KINDS:
         raise TaskInputError('生成类型须为' + '、'.join(KINDS))
+    if not isinstance(prompt, str):
+        raise TaskInputError('本次补充要求须为文本')
+    if kind in ASSET_KINDS:
+        return _asset_task(kind, asset=asset, asset_id=asset_id, style=style, prompt=prompt,
+                           constraints=constraints, expect=expect, view=view,
+                           design_path=design_path, sketch_style=sketch_style)
     if not isinstance(board, dict) or not isinstance(board.get('shots'), list):
         raise TaskInputError('任务包需要该场的分镜数据')
     shot = next((row for row in board['shots'] if row.get('id') == shot_id), None)
@@ -235,8 +388,6 @@ def build_task(kind, *, shot_id, offset_ms, board, layout=None, moment=None, ass
     offset = _offset(offset_ms)
     if offset not in _frame_offsets(shot):
         raise TaskInputError('该时刻还没有关键帧；先用 set_keyframe 建帧或 add_timeline_keyframe 建立计划')
-    if not isinstance(prompt, str):
-        raise TaskInputError('本次补充要求须为文本')
     box = normalize_layout(layout, shot_id=shot['id'], offset_ms=offset) if layout is not None else layout_at(shot, offset)
     task = {'kind': kind, 'shot_id': shot['id'], 'offset_ms': offset, 'layout': box,
             'moment': _moment(shot, offset, moment), 'assets': _assets(assets, shot, board),
@@ -253,15 +404,16 @@ def build_task(kind, *, shot_id, offset_ms, board, layout=None, moment=None, ass
 
 
 def assets_from_cards(cards):
-    """把资产卡摊成任务包的 assets：两个图字段合成一条图片序列，按顺序去重。
+    """把资产卡摊成任务包的 assets：几张图合成一条图片序列，按顺序去重。
 
-    调用方（Operations）拿的是 `_storyboard_sketch_basis` 里的资产卡；形状转换留在
-    本模块，界面以后要单独组任务包时也能照用。
+    设定图与素描图也算资产图：它们本来就是「这张资产长什么样」的依据，分镜出图时最该
+    拿到的就是这几张。调用方（Operations）拿的是 `_storyboard_sketch_basis` 里的资产卡；
+    形状转换留在本模块，界面以后要单独组任务包时也能照用。
     """
     rows = []
     for card in cards or []:
         images = []
-        for field in ('images', 'reference_images'):
+        for field in ('images', 'reference_images', 'designs', 'sketches'):
             for image in card.get(field) or []:
                 path = str(image.get('path') or '')
                 if path and path not in images:
@@ -270,8 +422,49 @@ def assets_from_cards(cards):
     return rows
 
 
+def _asset_prompt(task):
+    """资产出图的说明：文字稿逐段在前，风格与画幅在后，最后才是本次补充要求。
+
+    为什么文字稿逐段摆出来而不是揉成一段：出图的人（和复核的人）要能一眼看出「这一版
+    画的是哪一段」，也才说得清某张设定图漏了哪条标志性细节。
+    """
+    draft = task.get('draft')
+    design = task.get('design')
+    lines = ['资产：' + '／'.join(filter(None, [task.get('category', ''), task.get('title', '')]))]
+    if draft:
+        lines.append(f'文字稿（第{draft["revision"]}版）：')
+        lines.extend(_DRAFT_LABELS.get(key, key) + '：' + text for key, text in draft['sections'].items())
+    else:
+        lines.append('文字稿：无。这次没有文字依据，跨镜一致性没有依据可核；'
+                     '先写文字稿再出图，图与图之间才有可比的标准。')
+    if design:
+        lines.append('设定图依据（' + str(design.get('view') or 'none') + '视角；生成时文字稿第'
+                     + str(design.get('draft_revision') or 0) + '版）：本图只按这张设定图定形体')
+    if task['style']['text']:
+        lines.append('项目风格与创作约定：' + task['style']['text'])
+    output = {key: value for key, value in task['constraints'].items()
+              if value is not None and key != 'source_image'}
+    if output:
+        lines.append('输出约束：' + json.dumps(output, ensure_ascii=False))
+    if task['kind'] == 'asset_design':
+        lines.append('画这张资产的设定图：单一视角、中性背景、无文字标注，不加入任何情节点；'
+                     '形体、比例与标志性细节以文字稿为准。需要别的视角就按 view 再出一张，'
+                     '不要把多个视角挤进同一帧。')
+    else:
+        if task.get('sketch_style'):
+            lines.append('素描画法：' + task['sketch_style'])
+        lines.append('按设定图画工作用线稿：比例、轮廓、朝向与标志性细节都与设定图一致；'
+                     '线条为主、留白、不画成插图，不画文字或界面元素。')
+    lines.append('参考图只作外观依据，不把参考图里的文字、标签或排版画进成图。')
+    if task['prompt']:
+        lines.append('本次补充要求：' + task['prompt'])
+    return '\n'.join(lines)
+
+
 def task_prompt(task):
     """把任务包摊成一段说明：只陈述包里已有的东西，不另外补剧情。"""
+    if task.get('kind') in ASSET_KINDS:
+        return _asset_prompt(task)
     lines = []
     moment = task['moment']
     if moment.get('name') or moment.get('description'):
@@ -315,7 +508,8 @@ def select_skill(kind, skills=None):
     * 用户技能内部取**最近更新**的一条——他改完一条就期望生效（与 `prompt_registry`
       的 `replaces` 同一口径）。
     * 用户一条都没有（或都停用了）时用内置生成技能（`skills.BUILTIN_GENERATION_SKILLS`，
-      文档里的三条：FLUX 3 Klein 素描、Krea 2 风格化、MiniMax H3 首尾帧）。开箱就能跑，
+      文档里的三条：FLUX 3 Klein 素描、Krea 2 风格化、MiniMax H3 首尾帧，加上资产的两条：
+      资产设定图、资产素描图）。开箱就能跑，
       而不是让人先猜该建什么技能。内置是「默认」不是「最高优先」：只要用户声明了同 kind
       的启用技能，一律以用户的为准，不拿内置去比时间戳（内置没有时间戳，比出来只会是
       用户的、但那样规则就变成「依赖时间戳顺序」这种说不清的东西了）。
@@ -367,18 +561,21 @@ def _workflow_override(kind, workflow, warnings, *, builtin=False):
                          'params': deepcopy(params)})
     workflow_file = workflow.get('workflow_file')
     if not workflow_file:
-        # 内置生成技能里有一条（Krea 2 风格化）还没有随程序发布的工作流文件。缺声明本身
-        # 不是错误——很多用户技能也走 provider 默认流程——但**内置**这一条缺了要说出来：
-        # 否则用户看到「内置技能跑通了」，会以为它用的是文档里那个工作流。
-        # 只对 sketch/style 报：视频走 HTTP 服务，本来就不读工作流文件（见下面那条分支）。
-        if builtin and kind in ('sketch', 'style'):
+        # 内置生成技能里有两条（Krea 2 风格化、资产设定图）还没有随程序发布的工作流文件。
+        # 缺声明本身不是错误——很多用户技能也走 provider 默认流程——但**内置**这一条缺了
+        # 要说出来：否则用户看到「内置技能跑通了」，会以为它用的是文档里那个工作流。
+        # 只对读工作流文件的 kind 报：视频走 HTTP 服务，本来就不读（见下面那条分支）。
+        if builtin and kind in ('sketch', 'style', 'asset_design', 'asset_sketch'):
             warnings.append({'code': 'WORKFLOW_FILE_ABSENT',
                              'message': '这条内置生成技能没有随程序发布工作流文件，本轮用 provider 的默认工作流；'
                                         '想指定文件请在技能里写 workflow.workflow_file',
                              'kind': kind})
         yield
         return
-    variable = {'sketch': 'NARRATIVE_COMFY_SKETCH_WORKFLOW', 'style': 'NARRATIVE_COMFY_WORKFLOW'}.get(kind)
+    # 资产两类与分镜共用同一批 provider：设定图走风格工作流、素描图走素描工作流，
+    # 所以环境变量按「用哪个 provider」映射，而不是按业务名各起一套。
+    variable = {'sketch': 'NARRATIVE_COMFY_SKETCH_WORKFLOW', 'asset_sketch': 'NARRATIVE_COMFY_SKETCH_WORKFLOW',
+                'style': 'NARRATIVE_COMFY_WORKFLOW', 'asset_design': 'NARRATIVE_COMFY_WORKFLOW'}.get(kind)
     if variable is None:
         warnings.append({'code': 'WORKFLOW_FILE_UNUSED',
                          'message': '本阶段视频生成走 MiniMax H3 HTTP 服务，不读 ComfyUI 工作流文件；'
@@ -504,6 +701,13 @@ def execute(task, skill, *, work_dir=None, credentials=None):
     folder.mkdir(parents=True, exist_ok=True)
     started = _stamp()
     warnings = []
+    if kind in ASSET_KINDS and not task.get('draft'):
+        # 软件不拦（没有文字稿也能出图），但一致性确实没有依据：说出来，让人自己决定
+        # 是先补文字稿，还是接受这一版只是「先看看」的探索稿。
+        warnings.append({'code': 'DRAFT_MISSING',
+                         'message': '这张资产还没有文字稿：图照常生成，但跨镜一致性没有文字依据可核；'
+                                    '建议先写文字稿再出图',
+                         'asset_id': task.get('asset_id')})
     output = folder / f'{kind}.png'
     references = tuple(task['style']['references'])
     builtin = bool(getattr(skill, 'builtin', False))
@@ -519,6 +723,24 @@ def execute(task, skill, *, work_dir=None, credentials=None):
             source = task['constraints'].get('source_image')
             receipt = _provider_call(
                 lambda: render_style_image(Path(source), task_prompt(task), output, reference_images=references), kind)
+        elif kind == 'asset_design':
+            # 设定图没有构图可保：与既有资产素描同一个办法——给一张空白画布当输入，
+            # 画幅按类别给，绝不拿几何图形冒充「设计稿」。
+            from .storyboard_style_provider import render_style_image
+            canvas = folder / 'asset-canvas.png'
+            size = ASSET_CANVAS.get(task['constraints'].get('aspect'), (1024, 1024))
+            Image.new('RGB', size, 'white').save(canvas)
+            receipt = _provider_call(
+                lambda: render_style_image(canvas, task_prompt(task), output, reference_images=references), kind)
+        elif kind == 'asset_sketch':
+            # 素描图的输入就是设定图本身：provider 走图像编辑路线，形体由它定，
+            # 文字稿与素描画法只决定「画成线稿的哪一面、多简」。
+            from .storyboard_style_provider import render_sketch_image
+            source = task['constraints'].get('source_image')
+            if not source:
+                raise TaskInputError('asset_sketch需要一张设定图作为输入')
+            receipt = _provider_call(
+                lambda: render_sketch_image(Path(source), task_prompt(task), output, reference_images=references), kind)
         else:
             receipt = _submit_video(task, workflow, credentials, folder)
     if kind != 'video':

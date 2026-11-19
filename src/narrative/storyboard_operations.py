@@ -1048,8 +1048,9 @@ class StoryboardOperationsMixin(StoryboardPrevisMixin, StoryboardAssetsMixin, St
 
         from . import generation_task
 
-        if kind not in generation_task.KINDS:
-            raise ValueError('生成类型须为' + '、'.join(generation_task.KINDS))
+        if kind not in generation_task.SHOT_KINDS:
+            raise ValueError('镜头生成类型须为' + '、'.join(generation_task.SHOT_KINDS)
+                             + '；资产设定图/素描图请用 write_asset_draft 与 run_asset_generation_task')
         board = self.read_storyboard(unit_id)
         if type(revision) is not int or revision != board['revision']:
             raise ContentConflictError('分镜已修改，请刷新后重试')

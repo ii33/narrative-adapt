@@ -197,9 +197,9 @@ def test_builtin_skills_are_read_only():
 def test_builtin_skills_reference_real_tools_and_families():
     known_families = skills.known_families()
     known_tools = skills.known_tools()
-    # 内置 = 三条作业说明 + 三条生成工作流（内置生成技能随程序发布，开箱就能跑）。
-    assert len(BUILTIN_SKILLS) == 6
-    assert len(BUILTIN_GENERATION_SKILLS) == 3
+    # 内置 = 三条作业说明 + 五条生成工作流（内置生成技能随程序发布，开箱就能跑）。
+    assert len(BUILTIN_SKILLS) == 8
+    assert len(BUILTIN_GENERATION_SKILLS) == 5
     for skill in BUILTIN_SKILLS:
         assert skill.builtin and skill.enabled
         assert set(skill.families) <= known_families, skill.name
@@ -209,9 +209,9 @@ def test_builtin_skills_reference_real_tools_and_families():
 
 
 def test_builtin_generation_skills_declare_the_documented_workflows():
-    """三条内置生成技能的 `workflow` 形状与 docs/SKILLS.md 的表一致。"""
+    """五条内置生成技能的 `workflow` 形状与 docs/SKILLS.md 的表一致。"""
     by_kind = {skill.workflow["kind"]: skill for skill in BUILTIN_GENERATION_SKILLS}
-    assert set(by_kind) == {"sketch", "style", "video"}
+    assert set(by_kind) == {"sketch", "style", "video", "asset_design", "asset_sketch"}
     assert set(by_kind) <= set(WORKFLOW_KINDS)
     for skill in BUILTIN_GENERATION_SKILLS:
         workflow = skill.workflow

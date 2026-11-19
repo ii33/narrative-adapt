@@ -183,6 +183,106 @@ def location_set_row(previous, room, blocks, cameras):
             'updated_at': datetime.now(UTC).isoformat(timespec='seconds')}
 
 
+# ---------------------------------------------------------------- 资产产物流水线
+# 资产先写文字稿、再出设定图、最后出工作用素描图。三步各自能单独重跑，软件不设强制闸门：
+# 没有文字稿也允许出设定图（回执里说清「一致性没有文字依据」），有文字稿也不强制出图。
+# 只有素描图例外——它必须依据一张设定图，否则「跨镜一致」根本没有对象可比。
+#
+# 文字稿的段落按「图要用到的信息」分，不按资料卡的栏目分：每一段都能直接变成画面要求。
+DRAFT_SECTIONS = ('appearance', 'costume', 'prop', 'location', 'proportion', 'marks')
+# 单段封顶：文字稿是给图和模型看的要点，写成长篇资料卡只会把关键识别特征埋掉。
+MAX_DRAFT_SECTION_CHARS = 2000
+# 考据引文的批次上限与 `source_location.locate_text` 的口径一致（一千条、合计二十万字）：
+# 同一句原文在两处都该被同样地接受或拒绝，不该因为写的是文字稿就换一套标准。
+MAX_DRAFT_SOURCES = 1000
+MAX_DRAFT_SOURCE_CHARS = 200000
+# 各类别允许写哪些段，按类别收窄：人物不该写地点、道具不该写服装——写进去的段落图用不上，
+# 却会让「文字稿已就绪」变成假信号。材料只留外观与标志性细节（它本来就不出形象图）。
+DRAFT_SECTIONS_BY_CATEGORY = {
+    'appearance': ('appearance', 'costume', 'proportion', 'marks'),
+    'item': ('prop', 'appearance', 'proportion', 'marks'),
+    'location': ('location', 'appearance', 'marks'),
+    'material': ('appearance', 'marks'),
+}
+# 设定图的类型与视角：一个类别出哪种图由类别决定，多视角靠分开出多张而不是挤进一帧。
+DESIGN_KINDS = ('figure', 'prop', 'location', 'moodboard')
+DESIGN_VIEWS = ('front', 'side', 'back', 'none')
+DESIGN_KIND_BY_CATEGORY = {'appearance': 'figure', 'item': 'prop', 'location': 'location'}
+
+
+def _draft_sections(category, sections):
+    """校验并规范化文字稿的段落：键在白名单内、类别匹配、值非空且不过长。"""
+    allowed = DRAFT_SECTIONS_BY_CATEGORY.get(category)
+    if allowed is None:
+        raise ValueError('未知资产类别，无法确定文字稿允许的段落')
+    if not isinstance(sections, dict) or not sections:
+        raise ValueError('sections须为非空对象，至少写一段：' + '、'.join(allowed))
+    unknown = sorted(set(sections) - set(DRAFT_SECTIONS))
+    if unknown:
+        raise ValueError('文字稿有不认识的段落：' + '、'.join(unknown)
+                         + '；允许：' + '、'.join(DRAFT_SECTIONS))
+    for key, text in sections.items():
+        if key not in allowed:
+            raise ValueError(f'{category}资产不写{key}段；这一类允许：' + '、'.join(allowed))
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError(f'文字稿的{key}段须为非空文本')
+        if len(text.strip()) > MAX_DRAFT_SECTION_CHARS:
+            raise ValueError(f'文字稿的{key}段超过{MAX_DRAFT_SECTION_CHARS}字：'
+                             '文字稿是给图看的要点，不是资料卡')
+    # 按白名单顺序输出，与传入顺序无关：同一份文字稿因此总是同一份 JSON。
+    return {key: sections[key].strip() for key in DRAFT_SECTIONS if key in sections}
+
+
+def _draft_sources(sources):
+    """校验考据：每条必须是一句非空原文引用，可选自己的说明。
+
+    引文不做定位核对：这里记的是「写稿人引了哪句」，逐字定位与校正仍归
+    `locate_source`（它有原文、改得动范围，而资产文字稿只有引文本身）。
+    """
+    if sources is None:
+        return []
+    if not isinstance(sources, list):
+        raise ValueError('sources须为[{quote, note}]数组；没有考据就显式传[]')
+    if len(sources) > MAX_DRAFT_SOURCES:
+        raise ValueError(f'考据最多{MAX_DRAFT_SOURCES}条')
+    result, total = [], 0
+    for index, row in enumerate(sources):
+        label = f'sources第{index + 1}条'
+        if not isinstance(row, dict):
+            raise ValueError(f'{label}须为对象')
+        extra = set(row) - {'quote', 'note'}
+        if extra:
+            raise ValueError(f'{label}有不认识的字段：' + '、'.join(sorted(extra)) + '；允许：quote、note')
+        quote = row.get('quote')
+        if not isinstance(quote, str) or not quote.strip():
+            raise ValueError(f'{label}的quote须为非空原文引用')
+        quote = quote.strip()
+        total += len(quote)
+        if total > MAX_DRAFT_SOURCE_CHARS:
+            raise ValueError(f'本批引文总长度不能超过{MAX_DRAFT_SOURCE_CHARS}字符')
+        item = {'quote': quote}
+        note = row.get('note')
+        if note is not None:
+            if not isinstance(note, str) or not note.strip():
+                raise ValueError(f'{label}的note须为非空文本或省略')
+            item['note'] = note.strip()
+        result.append(item)
+    return result
+
+
+def draft_row(previous, category, sections, sources, style_ref):
+    """把一次文字稿写入规范成落库形状：``revision`` 与 ``updated_at`` 由程序给。
+
+    整份替换而不是打补丁：文字稿是「这个人物/道具/地点长什么样」的一整套描述，一半新一半
+    旧比没有更难判断；写的人手里本来就有整份（与布景同一口径）。
+    """
+    prior = previous if isinstance(previous, dict) else {}
+    return {'sections': _draft_sections(category, sections),
+            'sources': _draft_sources(sources),
+            'style_ref': dict(style_ref or {}),
+            'revision': int(prior.get('revision') or 0) + 1,
+            'updated_at': datetime.now(UTC).isoformat(timespec='seconds')}
+
 
 class _AttachedAssetDb:
     """A narrow SQL interface: only fixed asset statements reach the attached DB."""
@@ -291,6 +391,17 @@ class AssetOperationsMixin:
         for field in ("images", "reference_images"):
             result[field] = [image | {"path": str(root / image["file"])}
                              for image in card.get(field, [])]
+        # 设定图与素描图跟参考图同一套存法：库里存相对 file，读出来补绝对 path，工程整体
+        # 搬走后记录仍然指得到文件。列表只在卡里真的有这类产物时才补：老卡因此与改动前
+        # 逐字节相同，不会让已生成草图的「出图依据」凭空变成「已变化」。
+        for field in ("designs", "sketches"):
+            rows = card.get(field)
+            if isinstance(rows, list):
+                result[field] = [row | {"path": str(root / row["file"])}
+                                 for row in rows if row.get("file")]
+        for row in result.get("sketches") or []:
+            if row.get("design_path"):
+                row["design_path"] = str(root / row["design_path"])
         return result
 
     def get_asset(self, asset_id: str) -> dict:
@@ -609,6 +720,158 @@ class AssetOperationsMixin:
             updated = self.update_asset(card['id'], expected_revision=card['revision'],
                                         image_changes=[{'op': 'add', 'path': str(output), 'caption': '生成素描'}])
         return {'asset': updated, 'generated': {'provider': receipt, 'prompt': text}}
+
+    def _asset_style_basis(self):
+        """写稿与出图共用的「风格约定」口径：一次读取，文本＋版本号。
+
+        取的是工程默认（资产不挂在某一部剧本上，所以不吃剧本级覆盖）。为什么两个版本号
+        来自同一个计数：项目风格正文存在创作约定的 ``other`` 字段里，`save_project_style`
+        涨的就是创作约定的修订。这里分开记下两项，是因为文字稿与设定图依赖的是两个不同的
+        问题（「照哪版措辞写的」「照哪版约定画的」）；哪天两者拆成不同计数，旧稿的
+        ``style_ref`` 仍然读得懂，不需要迁移。
+        """
+        from .project_style import read_defaults, render_agreement
+
+        with self._store.connect() as db:
+            defaults = read_defaults(db)
+        return {'text': render_agreement(defaults['fields']),
+                'revision': defaults['revision'],
+                'style_ref': {'project_style_version': defaults['revision'],
+                              'agreement_version': defaults['revision']}}
+
+    @content_write
+    def write_asset_draft(self, asset_id: str, sections, sources=None) -> dict:
+        """写一张资产的文字稿（整份替换），``draft.revision`` 由程序 +1。
+
+        为什么先写文字稿：外观、服装、材质、比例、标志性细节这些「这张图必须画成什么样」
+        的判断，只有在文字里才说得清、改得动、核得起来；直接出图就等于把这些判断交给一次
+        随机采样，下一张图与上一张对不上时也无从追责。
+
+        为什么写稿时记下风格与约定版本：文字稿是「依项目风格与创作约定＋原文考据」写的，
+        出图时那两条可能已经被改过；不记下来，日后就看不出这稿是照哪一版写的。
+        """
+        if not isinstance(asset_id, str) or not asset_id.strip():
+            raise ContentGuardError('请提供资产编号')
+        style_ref = self._asset_style_basis()['style_ref']
+        with self._asset_db(write=True) as db:
+            row = db.execute("SELECT data FROM assets WHERE id=?", (asset_id.strip(),)).fetchone()
+            if row is None:
+                raise ContentGuardError('资产不存在')
+            card = json.loads(row[0])
+            card['draft'] = draft_row(card.get('draft'), card.get('category'), sections, sources, style_ref)
+            revision = db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0] + 1
+            db.execute("INSERT INTO assets VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                       (card['id'], json.dumps(card, ensure_ascii=False)))
+            db.execute("UPDATE meta SET value=? WHERE key='revision'", (revision,))
+            db.execute("INSERT INTO audit(revision,action,asset_id,summary) VALUES(?,?,?,?)",
+                       (revision, 'asset_draft', card['id'], card.get('title') or card['id']))
+        return {'asset_id': card['id'], 'title': card.get('title', ''), 'category': card.get('category'),
+                'draft': card['draft'], 'draft_revision': card['draft']['revision'],
+                'style_ref': card['draft']['style_ref'], 'asset_revision': revision}
+
+    def run_asset_generation_task(self, asset_id, kind='asset_design', prompt='', view=None,
+                                  design_path=None, constraints=None) -> dict:
+        """资产流水线上的一次真实出图：设定图或素描图，成功后写回资产卡。
+
+        每步都能单独重跑，没有强制闸门：没有文字稿也允许出设定图（回执带
+        ``DRAFT_MISSING``），有文字稿也不强制必须出图。只有素描图例外——它必须以一张设定图
+        为依据，缺了就在调服务之前报错：工作用线稿的全部意义就是「照着已定的形体再画一次」，
+        没有形体依据时生成出来的东西没法当参考。
+
+        为什么产物追加而不是覆盖：设定图本来就要多张（正面/侧面/背面、氛围图），素描图则要
+        留「依据哪张设定图出的」这层关系；覆盖会让回溯断掉。因为只追加、不改旧记录，这里也
+        不需要乐观并发参数。
+        """
+        from . import generation_task
+
+        # 回执摘要沿用分镜那条口径（同一批 provider、同一份字段名单）：这里不复刻一份。
+        from .storyboard_operations import _provider_summary
+
+        if kind not in generation_task.ASSET_KINDS:
+            raise ContentGuardError('资产出图类型须为' + '、'.join(generation_task.ASSET_KINDS))
+        if not isinstance(prompt, str):
+            raise ContentGuardError('本次补充要求须为文本')
+        if view is not None and view not in DESIGN_VIEWS:
+            raise ContentGuardError('view须为' + '、'.join(DESIGN_VIEWS) + '或省略')
+        card = self.get_asset(asset_id)
+        if card.get('category') not in DESIGN_KIND_BY_CATEGORY:
+            raise ContentGuardError('材质资产不生成设定图或素描图')
+        style = self._asset_style_basis()
+        skill = generation_task.select_skill(kind)
+        references = [str(image['path']) for field in ('images', 'reference_images')
+                      for image in card.get(field) or [] if image.get('path')]
+        sketch_style = ''
+        if kind == 'asset_sketch':
+            from .storyboard_sketch_style import current_sketch_style, sketch_render_instructions
+
+            sketch_style = sketch_render_instructions(current_sketch_style(self), False)
+        task = generation_task.build_task(kind, asset=card, style={'text': style['text'], 'references': references},
+                                          prompt=prompt, view=view, design_path=design_path,
+                                          sketch_style=sketch_style, constraints=constraints)
+        prompt_text = generation_task.task_prompt(task)
+        with tempfile.TemporaryDirectory(prefix=f'asset-{kind}-') as folder:
+            receipt = generation_task.execute(task, skill, work_dir=Path(folder))
+            written = self._record_asset_artifact(card['id'], kind, task, receipt, style['revision'], prompt_text)
+        return {'asset_id': card['id'], 'kind': kind, 'title': card.get('title', ''),
+                'draft_revision': (task.get('draft') or {}).get('revision', 0),
+                'asset_revision': written['asset_revision'], 'record': written['record'],
+                'skill': receipt['skill'], 'warnings': receipt['warnings'],
+                'provider': _provider_summary(receipt['provider_receipt']),
+                'started_at': receipt['started_at'], 'finished_at': receipt['finished_at'],
+                'task': task}
+
+    def _record_asset_artifact(self, asset_id, kind, task, receipt, style_version, prompt_text):
+        """把一次成功的出图追加进 designs/sketches；失败就不写（回执都没拿到，这里不会进）。"""
+        source = receipt.get('output_path')
+        if not source or not Path(source).is_file():
+            # 执行器已经验证过图片可读；走到这里说明产物在回收临时目录时丢了，不写空记录。
+            raise ContentGuardError('生成产物不可读，未写入资产卡')
+        provider = receipt.get('provider_receipt') if isinstance(receipt.get('provider_receipt'), dict) else {}
+        field, prefix = {'asset_design': ('designs', 'asset-design-'),
+                         'asset_sketch': ('sketches', 'asset-sketch-')}[kind]
+        # 产物类型由资产类别决定（人物 figure、道具 prop、地点 location），不进任务包：
+        # 它描述的是「这条记录是什么图」，不是「这次要生成什么」。
+        record = {'kind': DESIGN_KIND_BY_CATEGORY[task['category']], 'view': task['view'],
+                  'prompt': prompt_text,
+                  'provider': str(provider.get('provider') or ''), 'job_id': str(provider.get('job_id') or ''),
+                  'draft_revision': int((task.get('draft') or {}).get('revision') or 0),
+                  'style_version': int(style_version),
+                  'created_at': datetime.now(UTC).isoformat(timespec='seconds')}
+        if kind == 'asset_sketch':
+            # 记下依据的是哪一张设定图：素描图的价值全在这条关系上（改了设定图，旧线稿
+            # 就该重画），存相对 file 是为了工程搬走后还指得到。
+            design = task.get('design') or {}
+            record['design_path'] = str(design.get('file') or '')
+        root = self._asset_root()
+        suffix = Path(source).suffix.lower() or '.png'
+        with ExitStack() as rollback:
+            with self._asset_db(write=True) as db:
+                row = db.execute("SELECT data FROM assets WHERE id=?", (asset_id,)).fetchone()
+                if row is None:
+                    raise ContentGuardError('资产不存在')
+                stored = json.loads(row[0])
+                rows = stored.get(field) if isinstance(stored.get(field), list) else []
+                artifact_id = allocate_id(db, "assets", prefix)
+                target = root / asset_id / (artifact_id + suffix)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with target.open('xb') as output:
+                    rollback.callback(target.unlink, missing_ok=True)
+                    on_rollback(self._store.path, lambda path=target: path.unlink(missing_ok=True))
+                    with Path(source).open('rb') as original:
+                        shutil.copyfileobj(original, output)
+                stored[field] = [*rows, {'file': target.relative_to(root).as_posix(), **record}]
+                revision = db.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0] + 1
+                db.execute("INSERT INTO assets VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
+                           (asset_id, json.dumps(stored, ensure_ascii=False)))
+                db.execute("UPDATE meta SET value=? WHERE key='revision'", (revision,))
+                db.execute("INSERT INTO audit(revision,action,asset_id,summary) VALUES(?,?,?,?)",
+                           (revision, kind, asset_id, stored.get('title') or asset_id))
+            rollback.pop_all()
+        # 返回给调用方的记录与读视图同一形状：路径一律绝对，库里存的是相对 file。
+        shown = {'path': str(target), **record}
+        if shown.get('design_path'):
+            shown['design_path'] = str(root / shown['design_path'])
+        return {'record': shown, 'asset_revision': revision}
 
     def list_assets(self, category: str, moment="", node_id="", domain="adaptation") -> dict:
         if category not in CATEGORIES:

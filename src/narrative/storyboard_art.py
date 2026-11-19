@@ -496,7 +496,10 @@ class StoryboardArtMixin:
             # revision 与 used_by 是给人看的派生信息（谁在用这张卡）：别处多一处绑定就会变，
             # 留着等于让别的场次把本帧的出图判成失效。
             card = {key: value for key, value in card.items() if key not in ('revision', 'used_by')}
-            for field in ('images', 'reference_images'):
+            # 设定图与素描图也算资产图：它们是「这张资产长什么样」的定稿依据，分镜出图该拿到的
+            # 正是这几张；只收 images/reference_images 会让刚出的设定图进不了跨镜参考，也让
+            # 「设定图换了、旧草图依据已变」这件事判不出来。
+            for field in ('images', 'reference_images', 'designs', 'sketches'):
                 for image in card.get(field, []):
                     path = Path(image['path'])
                     if not path.is_file():

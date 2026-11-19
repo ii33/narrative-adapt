@@ -190,6 +190,19 @@ def register(Tool, register_tool, validate):
         "shot_id": text | {"required": True}, "offset_ms": integer | {"required": True},
         "prompt": text, "layout": {"type": ["object", "null"], "description": "省略用该帧已存框图"},
         "moment": obj, "constraints": obj | {"description": "可选覆盖aspect/resolution/duration_ms/first_frame/last_frame"}}, writes=True)
+
+    draft_source = {"type": "object", "required": True, "description": "原文考据：quote给逐字原文引用，可选note写自己的说明",
+                    "properties": {"quote": text, "note": text}, "additionalProperties": False}
+    add("write_asset_draft", "写（整份替换）一张资产的文字稿：先有文字稿再出设定图，跨镜一致性才有依据。sections只写图要用到的段落——人物appearance/costume/proportion/marks、道具prop/appearance/proportion/marks、地点location/appearance/marks，值须非空且不超过2000字；类别不允许的段落会被拒绝（人物不该写location）。sources是原文考据，每条quote须为非空原文引用、note可选。draft.revision由程序+1，并记下写稿时的项目风格与创作约定版本（style_ref）", {
+        "asset_id": text | {"required": True}, "sections": obj | {"required": True},
+        "sources": {"type": "array", "items": draft_source}}, writes=True)
+    add("run_asset_generation_task", "按技能声明执行一次资产出图并写回资产卡：kind=asset_design（设定图，输入是文字稿段落＋项目风格＋资产参考图＋画幅，一次一个视角，需要多视角就按view再出一张）|asset_sketch（工作用线稿，必须以一张设定图为输入，优先view=front，可用design_path指定，缺设定图直接报错）。技能按「已启用且workflow.kind匹配、最近更新」选取，没有就回落到内置（回执标builtin）。成功后追加进designs/sketches（路径、prompt、依据的draft_revision、style_version、provider），失败不写任何产物、旧图保留；缺文字稿仍允许出图但回执带DRAFT_MISSING", {
+        "asset_id": text | {"required": True},
+        "kind": {"type": "string", "enum": ["asset_design", "asset_sketch"], "required": True},
+        "prompt": text | {"description": "本次补充要求，可为空"},
+        "view": {"type": "string", "enum": ["front", "side", "back", "none"], "description": "省略按类别给默认：人物/道具front、地点none"},
+        "design_path": text | {"description": "asset_sketch依据的设定图路径；省略优先front，没有就用最近一张"},
+        "constraints": obj | {"description": "可选覆盖画幅aspect（2:3/1:1/16:9），省略按资产类别给"}}, writes=True)
     add("export_storyboard_script", "独立导出本场文字或图文分镜稿；指定新文件，不覆盖现有稿件。", {
         "unit_id": text | {"required": True}, "format": {"type": "string", "enum": ["text", "html", "pdf"], "required": True},
         "path": text | {"required": True}, "illustrated": {"type": "boolean"}, "annotated": {"type": "boolean"}}, writes=True)
