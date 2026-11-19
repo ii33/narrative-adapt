@@ -318,6 +318,68 @@ def changed_basis_keys(recorded, current):
     return [key for key in sorted(set(recorded) | set(current)) if recorded.get(key) != current.get(key)]
 
 
+def shot_light_scene(ops, shot, unit_id, scene=None):
+    """这一镜的预演场景：调用方给了 ``scene`` 就用，否则按 ``shot.previs`` 去取。
+
+    取不到就返回 ``None``——预演是加分项：没开预演页、工程文件不在、机位被删、这一镜
+    根本没绑定，都只是「这次没有光线描述」，绝不能变成出图失败。所以这里把取值路上的
+    一切都折成 ``None``，让调用方（提示词拼装）照旧出图。
+
+    取值顺序：页面``peek``（只读，一个字节都不写）→ ``previs_tools._capture_scene``
+    （页面不可达时回落 ``.director``，顺带核对场景编号）。页面优先是因为人工在预演页
+    上拖过灯位之后 ``.director`` 还是旧文件，照文件说光会与画面不一致；先用 peek 是因为
+    出图是**读**操作，不该顺手把预演快照的 revision 写涨——那会让分镜稿误以为布景变了。
+    """
+    if scene is not None:
+        return scene
+    previs = shot.get('previs') if isinstance(shot.get('previs'), dict) else None
+    if not previs or not previs.get('camera_id'):
+        return None  # 没绑定：没有「这一镜是哪台机器拍的」这件事，也就没有光位可言
+    from . import previs_host
+
+    host = previs_host.installed()
+    if host is not None:
+        try:
+            return host.peek(unit_id)['scene']
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            pass  # 页面刚换掉/还没就绪：落回下面那条统一取值路
+    capture = getattr(ops, '_capture_scene', None)
+    if not callable(capture):
+        return None  # 单独用 StoryboardArtMixin（没有预演那一层）时，当作没有预演
+    try:
+        return capture(unit_id, previs)[0]
+    except (ValueError, RuntimeError, OSError):
+        return None  # 页面不可达 + 文件读不出：这一帧就是没有光位依据，不报错
+
+
+def shot_light_line(ops, board, shot, offset_ms, detail):
+    """这一帧的光线描述；取不到场景或场景里没灯时返回空字符串（不编光）。
+
+    时刻按 ``shot.previs.time_offset_ms`` 换算（镜内第 N 毫秒 = 预演 time_offset_ms+N），
+    与投影、运镜用的是同一条映射——不然同一场里「框图的机位」和「提示词的光」会指向
+    两个不同的瞬间。
+    """
+    from .lighting import light_description
+    from .previs_scene import camera_at
+
+    scene = shot_light_scene(ops, shot, board['unit_id'])
+    if not isinstance(scene, dict):
+        return ''
+    previs = shot.get('previs') if isinstance(shot.get('previs'), dict) else {}
+    time_ms = (previs.get('time_offset_ms') or 0) + offset_ms
+    try:
+        camera = camera_at(scene, time_ms / 1000.0, previs.get('camera_id') or None)
+    except (ValueError, KeyError, TypeError):
+        return ''  # 机位缺失/位置与注视点重合：说不出「相对机位的方位」，就不说
+    subjects = [{'position': row['position'], 'height': row.get('height')}
+                for row in scene.get('entities') or []
+                if isinstance(row, dict) and row.get('kind') == 'actor']
+    try:
+        return light_description(scene, camera, subjects, detail=detail)
+    except (ValueError, KeyError, TypeError):
+        return ''
+
+
 class StoryboardArtMixin:
     if TYPE_CHECKING:
         # Implemented by the composited storyboard and screenplay Operations.
@@ -366,9 +428,14 @@ class StoryboardArtMixin:
         cues = [{key: sound[key] for key in ('id', 'kind', 'label') if key in sound}
                 for sound in preview_audio(board, shot, offset_ms)]
         camera = camera_view(board, shot, offset_ms, objects)
+        # 有预演就把这一帧的光写成一句话（放「画法」之后），没有预演时原样不动：
+        # 同一场多镜因此共享同一盏主光的方向与硬度，逐帧出图不至于拼成几场戏。
+        from .lighting import merge_into_prompt
         text = (
-            sketch_render_instructions(basis['sketch_style'], simple_color)
-            + '以构图参考确认主体位置和景别，具体人物、物件和动作以正文与调度依据为准。'
+            merge_into_prompt(
+                sketch_render_instructions(basis['sketch_style'], simple_color)
+                + '以构图参考确认主体位置和景别，具体人物、物件和动作以正文与调度依据为准。',
+                shot_light_line(self, board, shot, offset_ms, 'sketch'))
             + '\n镜头稿与视觉元素：' + json.dumps({key: basis[key] for key in ('description', 'shot_language', 'visual_elements', 'sound_intents', 'sound_notes')}, ensure_ascii=False)
             + '\n本镜描述：' + shot['title'] + '\n本镜正文：' + json.dumps(basis['blocks'], ensure_ascii=False)
             + '\n创作约定：' + json.dumps(basis['creative_agreement'], ensure_ascii=False)
@@ -475,9 +542,16 @@ class StoryboardArtMixin:
                 )
             )
         style = context["project_style"]["text"]
-        prompt = (
-            f"镜头：{shot['title']}\n本镜正文：{' '.join(paragraphs)}\n项目风格：{style or '项目尚未指定'}\n"
-            "以每张原草图为图像参考，保留宽高比、主体位置、动作轮廓、景别和主光方向。"
+        # 风格帧版带上色温、光比与暗部占比（素描版只说方向）：这一段是「把草图画成最终
+        # 画面」时最容易各画各的地方。取该镜首个关键帧的时刻——一个包对应一镜，光位按
+        # 这一镜开场那个瞬间说，与草图那几帧用的是同一条映射与同一个场景。
+        from .lighting import merge_into_prompt
+        light_line = shot_light_line(self, board, shot, frames[0][2]['offset_ms'], 'style')
+        head = (
+            f"镜头：{shot['title']}\n本镜正文：{' '.join(paragraphs)}\n项目风格：{style or '项目尚未指定'}"
+        )
+        prompt = merge_into_prompt(head, light_line) + (
+            "\n以每张原草图为图像参考，保留宽高比、主体位置、动作轮廓、景别和主光方向。"
             "按项目风格逐帧出图。按清单中的关键帧编号与时间点回绑风格图。"
         )
         manifest = {

@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 # 常量与 previs_scene 同源：画幅解析与默认焦距不另写一份，否则两条路会慢慢对不上。
-from .previs_scene import DEFAULT_ASPECT, DEFAULT_FOCAL_MM, DEFAULT_HEIGHT_M
+from .previs_scene import DEFAULT_ASPECT, DEFAULT_FOCAL_MM, DEFAULT_HEIGHT_M, SKIP_ASSET_PREFIXES
 from .previs_scene import _aspect_ratio as _scene_aspect_ratio
 
 PROTOCOL_VERSION = 1
@@ -388,9 +388,13 @@ def scene_from_page(unit_id: str, data: object) -> dict:
     aspect = str(data.get('aspect') or DEFAULT_ASPECT)
     cameras: list[dict] = []
     entities: list[dict] = []
+    lights: list[dict] = []
     for index, row in enumerate(_rows(data.get('entities'), f'场景{scene_id}的实体')):
         parsed = _entity_row(row, index, scene_id)
         if parsed is None:
+            continue
+        if 'kind' not in parsed:
+            lights.append(parsed)          # 灯：有位置没有 kind，单独收（见 _light_row）
             continue
         (cameras if parsed['kind'] == 'camera' else entities).append(parsed)
     cuts, cut_warnings = _cut_rows(data.get('cuts'), {row['id'] for row in cameras}, scene_id)
@@ -398,7 +402,7 @@ def scene_from_page(unit_id: str, data: object) -> dict:
              'duration_s': _duration(data.get('duration_ms'), scene_id),
              'fps': _fps(data.get('fps'), scene_id), 'aspect': aspect,
              'aspect_ratio': _scene_aspect_ratio(aspect), 'cameras': cameras,
-             'entities': entities, 'cuts': cuts, 'cut_warnings': cut_warnings,
+             'entities': entities, 'lights': lights, 'cuts': cuts, 'cut_warnings': cut_warnings,
              # 页面自己的模型修订号（getScene 给）：人工在页面上拖动会让它跳一格。
              'page_revision': _page_revision(data.get('revision'), scene_id),
              'room': _room(data.get('room')),
@@ -822,7 +826,12 @@ def _rows(value, label: str) -> list:
 
 
 def _entity_row(row, index: int, scene_id: str) -> dict | None:
-    """页面实体行 → ``load_scene`` 的行；不参与投影的 kind（分组、占位）返回 None。"""
+    """页面实体行 → ``load_scene`` 的行；不参与投影的 kind（分组、占位、灯、隐藏）返回 None。
+
+    灯与隐藏实体必须在这里挡掉：页面 ``getScene`` 的灯是普通 ``prop``，且此前这里丢掉了
+    ``asset``，导致灯会被当成盒子投进框图；``visible:false`` 的实体同理。
+    灯本身不丢信息——收进 ``_light_row``，交给 ``scene['lights']``（与 ``load_scene`` 同口径）。
+    """
     label = f'预演页场景{scene_id}的实体第{index + 1}项'
     if not isinstance(row, dict):
         raise PrevisHostError(f'{label}须为对象')
@@ -838,12 +847,36 @@ def _entity_row(row, index: int, scene_id: str) -> dict | None:
     rotation = _vector(row.get('rotation'), f'{label}的rotation')
     if kind == 'camera':
         return _camera_row(row, identifier, name, position, rotation, label)
+    asset = str(row.get('asset') or '')
+    if row.get('visible') is False:
+        return None  # 隐藏实体不产生可见画面
+    if asset.startswith(SKIP_ASSET_PREFIXES):
+        return _light_row(row, identifier, name, asset)
     height = _number(row.get('height'), f'{label}的height', DEFAULT_HEIGHT_M)
-    return {'id': identifier, 'name': name, 'kind': kind, 'position': position,
-            'rotation': rotation,
+    return {'id': identifier, 'name': name, 'kind': kind, 'asset': asset,
+            'position': position, 'rotation': rotation,
             'scale': _vector(row.get('scale'), f'{label}的scale', (1.0, 1.0, 1.0)),
             'height': height if height > 0 else DEFAULT_HEIGHT_M,
             'path': _points(row.get('path'), f'{label}的轨迹')}
+
+
+def _light_row(row: dict, identifier: str, name: str, asset: str) -> dict | None:
+    """灯实体 → ``scene['lights']`` 的行。
+
+    页面 ``getScene`` 只给位置（没有强度/色温/聚光角），所以这里只收拿得到的字段，
+    其余留 None：``lighting.py`` 遇到缺参数时只说方向与影子，不猜硬软与光比。
+    """
+    try:
+        position = _vector(row.get('position'), f'灯{name}的position')
+    except PrevisHostError:
+        return None
+    light = row.get('light') if isinstance(row.get('light'), dict) else {}
+    def number(key):
+        value = light.get(key)
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    return {'id': identifier, 'name': name, 'asset': asset, 'position': position,
+            'intensity': number('intensity'), 'temperature': number('temperature'),
+            'angle': number('angle'), 'range': number('range'), 'color': row.get('color')}
 
 
 def _camera_row(row: dict, identifier: str, name: str, position: tuple, rotation: tuple,

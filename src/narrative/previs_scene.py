@@ -50,6 +50,7 @@ NEAR_PLANE_M = 0.025
 SHOULDER_WIDTH_M = 0.45
 DEFAULT_HEIGHT_M = 1.75
 # 灯光没有可见几何（只有一次投射），按盒体投影只会变成挡住画面的假盒子。
+# 这类实体因此不进 entities，而是被收进 lights（见 _light）：生图提示词要用它。
 SKIP_ASSET_PREFIXES = ('light-',)
 # actor/prop 落到框图的对象分类上：框图只认 person/prop/location/material。
 LAYOUT_KINDS = {'actor': 'person', 'prop': 'prop'}
@@ -98,16 +99,27 @@ def load_scene(path, scene_id=None):
         raise ValueError(f'场景{identity["name"]}的帧率须为 1..120 的整数，实际是 {fps!r}')
     aspect = state.get('aspect') or DEFAULT_ASPECT
     ratio = _aspect_ratio(aspect)
-    cameras, entities = [], []
+    cameras, entities, lights = [], [], []
     for index, row in enumerate(_rows(state.get('entities'), f'场景{identity["name"]}的实体')):
         parsed = _entity(row, index, identity['name'])
         if parsed is None:
             continue
-        (cameras if parsed['kind'] == 'camera' else entities).append(parsed)
+        if parsed['kind'] == 'camera':
+            cameras.append(parsed)
+        elif parsed['kind'] == 'light':
+            lights.append(parsed)
+        else:
+            entities.append(parsed)
     cuts = _cuts(state.get('cuts'), {row['id'] for row in cameras}, identity['name'])
     return {'path': str(file), 'scene_id': identity['id'], 'name': identity['name'],
             'duration_s': duration, 'fps': fps, 'aspect': str(aspect), 'aspect_ratio': ratio,
-            'cameras': cameras, 'entities': entities, 'cuts': cuts, 'scenes': scenes}
+            'cameras': cameras, 'entities': entities, 'cuts': cuts, 'scenes': scenes,
+            # 灯不进 entities：它没有可见几何，框图投影照旧不收它；但生图提示词需要
+            # 「光从哪来」，所以单独给一份（见 lighting.lights_from_scene）。
+            'lights': lights,
+            # 全局光照（环境亮度/曝光/太阳方向）是**另一份**数据：它是整场的底色，
+            # 不是哪一盏灯。原样交给 lighting，由它决定要不要说「均匀环境光」。
+            'lighting': state.get('lighting') if isinstance(state.get('lighting'), dict) else None}
 
 
 def _scene_state(data, file, scene_id):
@@ -159,8 +171,12 @@ def _entity(row, index, scene_name):
         raise ValueError(f'{label}缺少 id（实体编号是块图的 anchor，不能为空）')
     asset = row.get('asset')
     name = str(row.get('name') or identifier)
-    if kind != 'camera' and (row.get('visible') is False or str(asset or '').startswith(SKIP_ASSET_PREFIXES)):
-        return None  # 隐藏实体与灯光不产生可见画面
+    if kind != 'camera' and row.get('visible') is False:
+        return None  # 隐藏实体不产生可见画面
+    if kind != 'camera' and str(asset or '').startswith(SKIP_ASSET_PREFIXES):
+        # 灯光不产生可见几何（见 SKIP_ASSET_PREFIXES），但它是生图提示词的输入：单独收回
+        # lights，不进 entities，所以投影与框图的行为一点没变。
+        return _light(row, identifier, name, asset)
     position = _vector(row.get('position'), f'{label}的position')
     rotation = _vector(row.get('rotation'), f'{label}的rotation')
     if kind == 'camera':
@@ -183,6 +199,56 @@ def _entity(row, index, scene_name):
             'rotation': rotation, 'scale': _vector(row.get('scale'), f'{label}的scale', (1.0, 1.0, 1.0)),
             'height': height if height > 0 else DEFAULT_HEIGHT_M,
             'path': _points(row.get('path'), f'{label}的轨迹')}
+
+
+def _light(row, identifier, name, asset):
+    """灯光实体 → 一盏灯的扁平视图（见 ``lighting`` 的判定）。
+
+    为什么宽松解析：灯光只喂生图提示词，不参与投影与框图。以前这类实体被整条跳过，
+    所以任何一种写法都不该让工程读不出来——缺字段就留 ``None``（灯光的强弱、色温、
+    聚光角未知），绝不因为一盏灯的参数写歪而让整场预演读挂。
+
+    字段对应 DirectorDesk 的 ``LightConfig``（``.runtime/vendor/director-desk/src/
+    lighting/model.ts``）：``intensity`` 可为关键帧（``{keys:[{time,value}]}``，取首个
+    关键帧作为这一场的代表值）、``angle`` 只对聚光灯有意义、``range`` 是衰减距离（米）。
+    """
+    config = row.get('light') if isinstance(row.get('light'), dict) else {}
+    return {'id': identifier, 'name': name, 'kind': 'light', 'asset': str(asset),
+            'position': _loose_vector(row.get('position')),
+            'rotation': _loose_vector(row.get('rotation')),
+            'color': str(row.get('color') or ''),
+            'intensity': _loose_number(config.get('intensity')),
+            'temperature': _loose_number(config.get('temperature')),
+            'angle': _loose_number(config.get('angle')),
+            'range': _loose_number(config.get('range')),
+            'penumbra': _loose_number(config.get('penumbra')),
+            'width': _loose_number(config.get('width')),
+            'height': _loose_number(config.get('height'))}
+
+
+def _loose_number(value):
+    """灯光参数里的数值：关键帧取首个关键点的值，其它非法值当未知（``None``）。"""
+    if isinstance(value, dict):
+        keys = value.get('keys')
+        if isinstance(keys, list) and keys and isinstance(keys[0], dict):
+            value = keys[0].get('value')
+        else:
+            return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def _loose_vector(value):
+    """灯光的位置/朝向：三数数组，否则退回原点（灯光缺位置时按「未知方位」处理）。"""
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        return (0.0, 0.0, 0.0)
+    rows = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item):
+            return (0.0, 0.0, 0.0)
+        rows.append(float(item))
+    return tuple(rows)
 
 
 def _cuts(value, camera_ids, scene_name):

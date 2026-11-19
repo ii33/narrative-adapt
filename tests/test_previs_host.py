@@ -770,3 +770,28 @@ def _write_director(ops, unit):
 # 想启用真页面自检，应当新建 tests/test_previs_host_ui.py（超出本次允许改的文件范围），
 # 在那里 create QWebEnginePage → PrevisHost(QtWebEngineCaller(page)) → hello/getScene/
 # applyBatch；本次交付里由 记录在报告的「手动自检」一节说明实际跑通的结论。
+
+
+def test_page_snapshot_keeps_lights_out_of_boxes():
+    """页面快照里的灯与隐藏实体不能混进 entities：否则灯会被当盒子投进框图。
+
+    页面 getScene 的灯是普通 ``prop``（只在 asset 上能认出来）；这条守住「与 load_scene
+    同口径」——灯进 scene['lights']，隐藏实体丢弃，可见盒子保留。
+    """
+    scene_payload = {
+        'sceneId': 'scene-1', 'name': '测试场', 'duration_ms': 4000, 'fps': 24, 'aspect': '16:9',
+        'entities': [
+            {'id': 'box-1', 'kind': 'prop', 'name': '桌子', 'asset': 'table',
+             'position': [0, 0, 0], 'rotation': [0, 0, 0], 'scale': [1, 0.8, 0.6], 'height': 1},
+            {'id': 'light-1', 'kind': 'prop', 'name': '主光', 'asset': 'light-spot',
+             'position': [1, 2, 1], 'rotation': [0, 0, 0], 'color': '#ffd9a0'},
+            {'id': 'ghost', 'kind': 'prop', 'name': '隐藏道具', 'asset': 'crate', 'visible': False,
+             'position': [2, 0, 2], 'rotation': [0, 0, 0]},
+        ], 'cuts': []}
+
+    def caller(method, payload):
+        return {'ok': True, 'ready': True, 'protocol': 1} if method == 'hello' else scene_payload
+
+    scene = PrevisHost(caller).snapshot('unit-1', state_dir=None)
+    assert [row['id'] for row in scene['entities']] == ['box-1']
+    assert [row['id'] for row in scene['lights']] == ['light-1']
