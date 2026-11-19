@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "generated_at": "2026-11-19T10:59:04Z",
+  "generated_at": "2026-11-19T12:45:13Z",
   "upstream_version": "0.5.5+revision.1",
   "upstream_short_version": "0.5.5.1",
-  "summary": "narrative-adapt 预演接口层补丁：v1 宿主接口（src/host/*、startup/main/scene-workspace/storage 接入）+ v2 可读性层（src/readability.ts 及 engine/main 改造）；改因见 PATCHES.md 与 docs/PREVIS_HOST_API.md。package.json 的 pnpm.onlyBuiltDependencies 是让 esbuild 能就地构建所需，不是行尾噪音。",
+  "summary": "narrative-adapt 预演接口层补丁（v1 宿主接口 + v2 可读性层）。为什么要改：见 vendored 仓库里的 PATCHES.md 与 docs/PREVIS_HOST_API.md。本目录由 scripts/previs_patch.py snapshot 生成，不要手改。",
   "source": {
     "repo": ".runtime/vendor/director-desk",
     "detected_by": "--files（手工指定）"
@@ -42,14 +42,14 @@
     {
       "path": "src/main.ts",
       "origin": "modified",
-      "bytes": 31670,
-      "sha256": "8cf1fae84bc5aab6652869cb7bf2551b77d1f82470c0b9641b5ed339ddb6ccec"
+      "bytes": 32202,
+      "sha256": "332eec1ad5f51123f671ca614a83cfdc2474efd04efc6a8108e6632900cd51a0"
     },
     {
       "path": "src/readability.ts",
       "origin": "added",
-      "bytes": 27593,
-      "sha256": "288c7e6f78d5b9fe9c487a05bdca85a51006b1acc6faf2c88de52c1ab920b698"
+      "bytes": 29485,
+      "sha256": "b4cddf53282a15e3a54144365d8369fc65bcd7acfbce4e265ccfb5ca6dbd7ff9"
     },
     {
       "path": "src/scenes/scene-workspace.ts",

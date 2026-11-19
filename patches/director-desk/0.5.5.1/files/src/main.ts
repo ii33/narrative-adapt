@@ -257,6 +257,10 @@ function updateTimeUI() {
     }
 }
 const labelNodes = new Map<string, HTMLButtonElement>();
+// 标签字号下限与"让位"透明度：与 readability.ts 的 LABEL_PX.min / LABEL_FADED_OPACITY
+// 保持一致，屏幕上的 DOM 标签和抓帧 PNG 里的 sprite 标签才是同一个观感。
+const LABEL_MIN_PX = 13;
+const LABEL_FADED_OPACITY = '.62';
 const frameFields = new Map(['object-snap-status','shot-name','shot-lens','shot-warning'].map(id => [id,$('#'+id)]));
 function frameText(id: string, value: string) { const node=frameFields.get(id)!; if(node.textContent!==value)node.textContent=value; }
 engine.onFrame = () => {
@@ -287,9 +291,12 @@ engine.onFrame = () => {
         if(node.className!==className)node.className=className;
         if(node.style.left!==l.x+'px')node.style.left=l.x+'px';
         if(node.style.top!==l.y+'px')node.style.top=l.y+'px';
-        // 可读性：字号随距离缩放（engine 已经压过下限），挤不开的标签半透明让位。
-        if(node.style.fontSize!==l.size+'px')node.style.fontSize=l.size+'px';
-        const opacity = l.faint ? '.42' : '1';
+        // 可读性：字号随距离缩放；engine 的下限是 9px，这里夹到 13px——9px 的中文在
+        // 桌面缩放下只剩一团墨，是"预演页标签读不清"的主因之一。
+        const size = Math.max(LABEL_MIN_PX, l.size);
+        if(node.style.fontSize!==size+'px')node.style.fontSize=size+'px';
+        // 挤不开的标签半透明让位；.42 等于"标了也认不出"，留 .62 还能读出名字。
+        const opacity = l.faint ? LABEL_FADED_OPACITY : '1';
         if(node.style.opacity!==opacity)node.style.opacity=opacity;
         if(node.hidden===l.visible)node.hidden=!l.visible;
         if (node.dataset.name !== l.name || node.dataset.color !== l.color) {

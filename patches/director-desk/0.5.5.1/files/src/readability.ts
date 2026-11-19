@@ -34,9 +34,30 @@ export const KIND_COLORS = { surface: '#cfc9bd', furniture: '#9db2bb', person: '
 const OUTLINE_COLOR = '#2f6f86';
 const GRID_COLOR = '#4f7d8c';
 const MARKER_COLOR = '#f2a93b';
-/** 字号：REFERENCE 米处 BASE 像素，随距离缩小，压到 MIN 像素就不再缩（再小只剩噪点）。 */
-const LABEL_PX = { base: 21, reference: 4, min: 13, max: 36 };
+/**
+ * 标签外观：与 DOM 标签（`src/narrative/previs_theme.py` 的 `label_css()`）一字不差。
+ * 为什么必须一致：布景视角看到的是 DOM 标签，抓帧 PNG 里是这张 canvas 贴图；
+ * 两处各写一套，导出图就和屏幕上看到的不一样了。改这里记得同步 previs_theme.py。
+ */
+const LABEL_STYLE = {
+    background: 'rgba(12,14,18,.86)',
+    foreground: '#f2f4f6',
+    border: 'rgba(242,244,246,.28)',
+    fontWeight: 600,
+    /** 贴图里文字占整条标签高度的比例。DOM：13px 字 / 21px 高 ≈ .62。 */
+    textRatio: 40 / 64,
+    /** CSS 圆角 4px 与 CSS 字号 13px 的比例，贴图按字号换算。 */
+    radiusRatio: 4 / 13,
+} as const;
+/**
+ * 字号（像素，指文字本身而不是整条标签）：与 engine.getProjectedLabels 同一条公式
+ * ——REFERENCE 米处 BASE 像素，随距离缩小。下限 13px 与 DOM 侧一致（DOM 那边由
+ * main.ts 夹到 13~15px）：再小就不是"看不清"，是不存在。
+ */
+const LABEL_PX = { base: 14, reference: 4, min: 13, max: 15 };
 const LABEL_FADE = { start: 15, end: 32 };
+/** 挤不开时让位的透明度：太淡等于没标，用户还是要读得出名字。 */
+const LABEL_FADED_OPACITY = .62;
 const MAX_LABELS = 64;
 
 interface Rect { minX: number; maxX: number; minZ: number; maxZ: number; height: number }
@@ -88,29 +109,35 @@ function edgeBox(parent: T.Object3D, from: readonly [number, number], to: readon
 /** 标签贴图：Canvas 画中文名，2 倍像素——抓帧是 960/1080 级别，1 倍会糊。 */
 function labelTexture(text: string, accent: string) {
     const canvas = document.createElement('canvas');
-    const height = 64, font = '600 44px "Noto Sans CJK SC","Source Han Sans SC","Microsoft YaHei",system-ui,sans-serif';
+    // 贴图按"高度 = 1 条标签"来画，字号与内边距全部按 textRatio 从高度换算：
+    // 这样调一个数字，DOM 与 sprite 的观感一起变，不会各走各的。
+    const height = 64;
+    const fontSize = Math.round(height * LABEL_STYLE.textRatio);
+    const font = `${LABEL_STYLE.fontWeight} ${fontSize}px "Noto Sans CJK SC","Source Han Sans SC","Microsoft YaHei",system-ui,sans-serif`;
     const measure = canvas.getContext('2d')!;
     measure.font = font;
-    const width = clamp(Math.ceil(measure.measureText(text).width) + 46, 96, 560);
+    const width = clamp(Math.ceil(measure.measureText(text).width) + Math.round(fontSize * 1.05), 96, 560);
     canvas.width = width * 2; canvas.height = height * 2;
     const paint = canvas.getContext('2d')!;
     paint.scale(2, 2);
-    paint.fillStyle = 'rgba(14,22,26,.82)';
+    paint.fillStyle = LABEL_STYLE.background;
     paint.beginPath();
-    paint.roundRect(1, 1, width - 2, height - 2, 12);
+    paint.roundRect(1, 1, width - 2, height - 2, Math.round(fontSize * LABEL_STYLE.radiusRatio));
     paint.fill();
-    paint.strokeStyle = 'rgba(226,238,240,.34)';
+    paint.strokeStyle = LABEL_STYLE.border;
     paint.lineWidth = 2;
     paint.stroke();
     // 左侧色条用实体自己的颜色：名字之外再给一条"这是谁"的线索。
+    const barWidth = Math.round(height * .125), barTop = Math.round(height * .22);
     paint.fillStyle = accent;
     paint.beginPath();
-    paint.roundRect(10, 14, 8, height - 28, 4);
+    paint.roundRect(Math.round(height * .155), barTop, barWidth, height - barTop * 2, Math.round(barWidth / 2));
     paint.fill();
-    paint.fillStyle = '#f2f6f7';
+    const textLeft = Math.round(height * .4375);
+    paint.fillStyle = LABEL_STYLE.foreground;
     paint.font = font;
     paint.textBaseline = 'middle';
-    paint.fillText(text, 28, height / 2 + 1, width - 40);
+    paint.fillText(text, textLeft, height / 2, width - textLeft - Math.round(height * .15));
     const texture = new T.CanvasTexture(canvas);
     texture.colorSpace = T.SRGBColorSpace;
     texture.minFilter = T.LinearFilter;
@@ -439,7 +466,9 @@ export class Readability {
             if (projected.z < -1 || projected.z > 1) continue;
             const screenX = (projected.x * .5 + .5) * width, screenY = (-projected.y * .5 + .5) * height;
             if (screenX < -width * .3 || screenX > width * 1.3 || screenY < -height * .3 || screenY > height * 1.3) continue;
-            const px = clamp(LABEL_PX.base * LABEL_PX.reference / distance, LABEL_PX.min, LABEL_PX.max);
+            // LABEL_PX 给的是"文字像素"，而 px 是整条标签的屏幕高度，要按 textRatio 反算回来：
+            // DOM 标签那边同样是 13~15px 的字，两边才谈得上"字号比例一致"。
+            const px = clamp(LABEL_PX.base * LABEL_PX.reference / distance, LABEL_PX.min, LABEL_PX.max) / LABEL_STYLE.textRatio;
             rows.push({ node, screenX, screenY, distance, px, worldPerPixel: 2 * tanHalf * distance / height });
         }
         // 尺寸标题优先保住，其次近处的人／物。
@@ -460,7 +489,7 @@ export class Readability {
             if (faded) offset = 0;
             const node = row.node;
             const fade = row.distance > LABEL_FADE.start ? 1 - (row.distance - LABEL_FADE.start) / (LABEL_FADE.end - LABEL_FADE.start) : 1;
-            node.material.opacity = faded ? .3 : clamp(fade, .18, 1);
+            node.material.opacity = faded ? LABEL_FADED_OPACITY : clamp(fade, .18, 1);
             const scaleY = row.px * row.worldPerPixel;
             node.sprite.scale.set(scaleY * node.aspect, scaleY, 1);
             node.sprite.position.copy(node.anchor).addScaledVector(up, offset * row.worldPerPixel);
